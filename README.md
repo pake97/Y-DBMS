@@ -48,17 +48,103 @@ mvn test -Dtest=CausalProceduresTest    # single integration test class
 
 ---
 
-## Deploy to Neo4j
+## Local dev workflow
 
-```bash
-cp target/causal4j-plugin-1.0-SNAPSHOT.jar $NEO4J_HOME/plugins/
+This is the day-to-day loop when working on the plugin.
 
-# neo4j.conf — allow procedures (adjust for your security policy):
+### One-time setup
+
+Make sure `neo4j.conf` allows the plugin procedures:
+```
 dbms.security.procedures.unrestricted=causal.*
-dbms.security.procedures.allowlist=causal.*
 ```
 
-Restart Neo4j. Verify the plugin loaded:
+If your Neo4j password is not the default `neo4j`, set it once:
+```bash
+export NEO4J_PASSWORD=yourpassword
+```
+
+### Step 1 — Build, deploy, restart
+
+```bash
+mvn package -pl plugin -P deploy -DskipTests
+```
+
+This single command:
+1. Compiles the code and produces the fat JAR
+2. Stops any running Neo4j process
+3. Copies the JAR into `neo4j-community-2025.05.0/plugins/`
+4. Starts Neo4j in daemon mode
+
+The Neo4j home path and password are configured in **one place**: the `<properties>` block of the root `pom.xml`.
+
+### Step 2 — Seed the COVID-19 DAG
+
+```bash
+./dev/seed.sh
+```
+
+Waits until Neo4j is ready, then loads 25 variables and 76 causal edges from
+`dev/seed-dag.cypher`. Safe to re-run — it clears existing data first.
+
+### Step 3 — Compile the graph and query it
+
+In Neo4j Browser (`http://localhost:7474`) or `cypher-shell`:
+
+```cypher
+// Compile the in-memory snapshot
+CALL causal.compile() YIELD variableCount, compiledAt
+RETURN variableCount, compiledAt;
+// → 25 variables
+
+// What are the ancestors of reported cases?
+CALL causal.ancestors(['reported_cases']) YIELD variableId RETURN variableId;
+
+// Is there a directed path from interventions to reported cases?
+RETURN causal.hasDirectedPath('interventions', 'reported_cases') AS isCause;
+
+// What directly causes exposure to SARS-CoV-2?
+CALL causal.parents(['exposure_sarscov2']) YIELD variableId RETURN variableId;
+```
+
+### Variable ids in the seeded DAG
+
+| id | Name |
+|---|---|
+| `interventions` | Interventions |
+| `covid19_burden` | COVID-19 burden |
+| `healthcare_utilization` | Health care utilization |
+| `searches_corona` | Searches corona |
+| `gender` | Gender |
+| `age` | Age |
+| `foreign_citizens` | Foreign citizens |
+| `socioeconomic_status` | Socio-economic status |
+| `turnout` | Turnout |
+| `rightwing_votes` | Right-wing populist party votes |
+| `trust_society` | Trust in society |
+| `population_density` | Population density |
+| `nursing_homes` | Nursing homes |
+| `mobility` | Mobility |
+| `temperature` | Temperature |
+| `humidity` | Humidity |
+| `wind` | Wind |
+| `rainfall` | Rainfall |
+| `tracing_capacity` | Tracing capacity |
+| `exposure_sarscov2` | Exposure to SARS-COV-2 *(latent)* |
+| `herd_immunity` | Herd immunity *(latent)* |
+| `access_tests` | Access to tests |
+| `susceptibility` | Susceptibility *(latent)* |
+| `onset_covid19` | Onset of COVID-19 *(latent)* |
+| `reported_cases` | Reported new cases COVID-19 |
+
+### Deploy to a real Neo4j server
+
+```bash
+cp plugin/target/causal4j-plugin-1.0-SNAPSHOT.jar $NEO4J_HOME/plugins/
+# restart Neo4j manually
+```
+
+Verify the plugin loaded:
 
 ```cypher
 SHOW PROCEDURES YIELD name WHERE name STARTS WITH 'causal' RETURN name;
