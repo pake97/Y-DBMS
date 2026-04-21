@@ -1,0 +1,205 @@
+package com.example.causal.procedures;
+
+import com.example.causal.runtime.RuntimeRegistry;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.io.TempDir;
+import org.neo4j.graphdb.*;
+import org.neo4j.harness.Neo4j;
+import org.neo4j.harness.Neo4jBuilders;
+
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Integration tests for {@link CausalProcedures} and {@link CausalFunctions}.
+ *
+ * <p>Uses the Neo4j test harness to spin up an embedded database with the
+ * procedures and functions registered. Tests call procedures through the
+ * standard {@link Transaction#execute} API, exercising the full path from
+ * Cypher → procedure → runtime → compiled graph.
+ *
+ * <h2>Sample DAG</h2>
+ * <pre>
+ *   A ──► B ──► C
+ *   │           ▲
+ *   └───────────┘
+ * </pre>
+ * So: parents(C) = {A, B}, ancestors(C) = {A, B}, hasDirectedPath(A, C) = true.
+ */
+class CausalProceduresTest {
+
+    @TempDir
+    Path tempDir;
+
+    private Neo4j neo4j;
+    private GraphDatabaseService db;
+
+    @BeforeEach
+    void setUp() {
+        neo4j = Neo4jBuilders.newInProcessBuilder(tempDir)
+                .withProcedure(CausalProcedures.class)
+                .withFunction(CausalFunctions.class)
+                .build();
+        db = neo4j.defaultDatabaseService();
+        seedDag();
+    }
+
+    @AfterEach
+    void tearDown() {
+        neo4j.close();
+        RuntimeRegistry.setInstance(null); // prevent snapshot from leaking between tests
+    }
+
+    // =========================================================================
+    // Tests
+    // =========================================================================
+
+    @Test
+    void compileShouldReturnVariableCount() {
+        try (Transaction tx = db.beginTx()) {
+            Result result = tx.execute("CALL causal.compile() YIELD variableCount RETURN variableCount");
+            assertEquals(3L, result.next().get("variableCount"));
+        }
+    }
+
+    @Test
+    void compileShouldListAllVariableIds() {
+        try (Transaction tx = db.beginTx()) {
+            Result result = tx.execute("CALL causal.compile() YIELD variables RETURN variables");
+            @SuppressWarnings("unchecked")
+            List<String> vars = (List<String>) result.next().get("variables");
+            assertEquals(3, vars.size());
+            assertTrue(vars.containsAll(List.of("A", "B", "C")));
+        }
+    }
+
+    @Test
+    void parentsOfC() {
+        compile();
+        List<String> parents = collectVariableIds("CALL causal.parents(['C']) YIELD variableId RETURN variableId ORDER BY variableId");
+        assertEquals(List.of("A", "B"), parents);
+    }
+
+    @Test
+    void childrenOfA() {
+        compile();
+        List<String> children = collectVariableIds("CALL causal.children(['A']) YIELD variableId RETURN variableId ORDER BY variableId");
+        assertEquals(List.of("B", "C"), children);
+    }
+
+    @Test
+    void ancestorsOfC() {
+        compile();
+        List<String> ancestors = collectVariableIds("CALL causal.ancestors(['C']) YIELD variableId RETURN variableId ORDER BY variableId");
+        assertEquals(List.of("A", "B"), ancestors);
+    }
+
+    @Test
+    void descendantsOfA() {
+        compile();
+        List<String> descendants = collectVariableIds("CALL causal.descendants(['A']) YIELD variableId RETURN variableId ORDER BY variableId");
+        assertEquals(List.of("B", "C"), descendants);
+    }
+
+    @Test
+    void hasDirectedPathFromAtoC() {
+        compile();
+        try (Transaction tx = db.beginTx()) {
+            Result result = tx.execute("RETURN causal.hasDirectedPath('A', 'C') AS connected");
+            assertEquals(Boolean.TRUE, result.next().get("connected"));
+        }
+    }
+
+    @Test
+    void noDirectedPathFromCtoA() {
+        compile();
+        try (Transaction tx = db.beginTx()) {
+            Result result = tx.execute("RETURN causal.hasDirectedPath('C', 'A') AS connected");
+            assertEquals(Boolean.FALSE, result.next().get("connected"));
+        }
+    }
+
+    @Test
+    void invalidateClearsSnapshot() {
+        compile();
+        try (Transaction tx = db.beginTx()) {
+            Result r = tx.execute("CALL causal.invalidate()");
+            while (r.hasNext()) r.next();
+            tx.commit();
+        }
+        try (Transaction tx = db.beginTx()) {
+            Result result = tx.execute("CALL causal.inspectSnapshot() YIELD variableCount RETURN variableCount");
+            assertEquals(0L, result.next().get("variableCount"));
+        }
+    }
+
+    @Test
+    void dsepReturnsResult() {
+        compile();
+        // The result is unimplemented, but the procedure must not throw
+        try (Transaction tx = db.beginTx()) {
+            Result result = tx.execute("CALL causal.dsep(['A'], ['C'], ['B']) YIELD separated RETURN separated");
+            assertNotNull(result.next().get("separated"));
+        }
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    private void compile() {
+        try (Transaction tx = db.beginTx()) {
+            // Consume all rows to ensure the procedure body fully executes before closing
+            Result r = tx.execute("CALL causal.compile()");
+            while (r.hasNext()) r.next();
+            tx.commit();
+        }
+    }
+
+    private List<String> collectVariableIds(String cypher) {
+        List<String> result = new ArrayList<>();
+        try (Transaction tx = db.beginTx()) {
+            Result r = tx.execute(cypher);
+            while (r.hasNext()) result.add((String) r.next().get("variableId"));
+        }
+        return result;
+    }
+
+    /**
+     * Seed the sample DAG:  A → B → C,  A → C
+     *
+     * Node properties: id, name, observed=true, latent=false
+     * Relationship properties: active=true
+     */
+    private void seedDag() {
+        try (Transaction tx = db.beginTx()) {
+            Node a = createVariable(tx, "A");
+            Node b = createVariable(tx, "B");
+            Node c = createVariable(tx, "C");
+
+            createCauses(a, b);
+            createCauses(b, c);
+            createCauses(a, c);
+
+            tx.commit();
+        }
+    }
+
+    private Node createVariable(Transaction tx, String id) {
+        Node n = tx.createNode(Label.label("Variable"));
+        n.setProperty("id",       id);
+        n.setProperty("name",     id);
+        n.setProperty("observed", true);
+        n.setProperty("latent",   false);
+        return n;
+    }
+
+    private void createCauses(Node from, Node to) {
+        Relationship r = from.createRelationshipTo(to, RelationshipType.withName("CAUSES"));
+        r.setProperty("active", true);
+    }
+}
