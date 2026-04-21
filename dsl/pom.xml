@@ -12,15 +12,33 @@
 
     <artifactId>causal4j-dsl</artifactId>
 
+    <properties>
+        <antlr4.version>4.13.2</antlr4.version>
+        <!-- DSL uses Java 21 for pattern matching in switch; plugin stays on 17 for Neo4j -->
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
+        <exec.mainClass>com.example.causal.dsl.CausalDSLRepl</exec.mainClass>
+    </properties>
+
     <dependencies>
-        <!--
-            Backend API — only com.example.causal.api.* should be imported from here.
-            Maven resolves this from the reactor (no `mvn install` needed in plugin/).
-        -->
         <dependency>
             <groupId>com.example.causal</groupId>
             <artifactId>causal4j-plugin</artifactId>
             <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.antlr</groupId>
+            <artifactId>antlr4-runtime</artifactId>
+            <version>${antlr4.version}</version>
+        </dependency>
+
+        <!-- Bolt driver for Neo4jQueryExecutor — speaks to a running Neo4j server. -->
+        <dependency>
+            <groupId>org.neo4j.driver</groupId>
+            <artifactId>neo4j-java-driver</artifactId>
+            <version>5.28.1</version>
         </dependency>
 
         <dependency>
@@ -29,4 +47,31 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.antlr</groupId>
+                <artifactId>antlr4-maven-plugin</artifactId>
+                <version>${antlr4.version}</version>
+                <executions>
+                    <execution>
+                        <goals><goal>antlr4</goal></goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <visitor>true</visitor>
+                    <listener>false</listener>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <configuration>
+                    <mainClass>${exec.mainClass}</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

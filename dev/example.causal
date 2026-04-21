@@ -1,0 +1,37 @@
+// UserRetentionModel from the design doc — end-to-end workflow.
+
+DEFINE CAUSAL VARIABLE Treatment   FOR UNIT User TYPE binary      ROLE treatment
+DEFINE CAUSAL VARIABLE Retention30  FOR UNIT User TYPE binary      ROLE outcome
+DEFINE CAUSAL VARIABLE Age          FOR UNIT User TYPE continuous  ROLE covariate
+DEFINE CAUSAL VARIABLE PriorUsage   FOR UNIT User TYPE continuous  ROLE covariate
+DEFINE CAUSAL VARIABLE Engagement   FOR UNIT User TYPE continuous  ROLE mediator
+
+DEFINE CAUSAL DAG UserRetentionModel {
+  Age        -> Treatment
+  Age        -> Retention30
+  PriorUsage -> Treatment
+  PriorUsage -> Retention30
+  Treatment  -> Engagement
+  Treatment  -> Retention30
+  Engagement -> Retention30
+}
+
+SHOW DAG
+
+// ─── Structural queries ───
+CAUSES OF Retention30
+EFFECTS OF Treatment
+ANCESTORS OF Retention30
+DESCENDANTS OF Age
+MEDIATORS BETWEEN Treatment AND Retention30
+CONFOUNDERS OF Treatment AND Retention30
+BACKDOOR PATHS BETWEEN Treatment AND Retention30
+
+// ─── Identification ───
+IDENTIFY EFFECT OF Treatment ON Retention30 RETURN ADJUSTMENT SETS
+
+// ─── Estimation ───
+ESTIMATE EFFECT OF Treatment ON Retention30 ADJUST FOR [Age, PriorUsage] USING aipw
+
+// Error check: conditioning on a mediator should be rejected
+ESTIMATE EFFECT OF Treatment ON Retention30 ADJUST FOR [Engagement]
