@@ -62,4 +62,62 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+            Deploy profile: build the fat JAR, stop Neo4j, copy it, restart.
+            Usage (from repo root):
+                mvn package -pl plugin -P deploy -DskipTests
+        -->
+        <profile>
+            <id>deploy</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <executions>
+                            <execution>
+                                <id>deploy-to-local-neo4j</id>
+                                <!--
+                                    Binds to 'verify' so the shade JAR is fully
+                                    written before we copy it.
+                                -->
+                                <phase>verify</phase>
+                                <goals><goal>run</goal></goals>
+                                <configuration>
+                                    <target>
+                                        <echo message="Stopping Neo4j..."/>
+                                        <exec executable="${neo4j.home}/bin/neo4j"
+                                              failonerror="false">
+                                            <arg value="stop"/>
+                                        </exec>
+                                        <!-- fallback kill in case it was running in console mode -->
+                                        <exec executable="pkill"
+                                              failonerror="false">
+                                            <arg value="-f"/>
+                                            <arg value="neo4j"/>
+                                        </exec>
+                                        <sleep seconds="2"/>
+
+                                        <echo message="Copying JAR to ${neo4j.home}/plugins/..."/>
+                                        <copy file="${project.build.directory}/${project.build.finalName}.jar"
+                                              todir="${neo4j.home}/plugins/"
+                                              overwrite="true"/>
+
+                                        <echo message="Starting Neo4j..."/>
+                                        <exec executable="${neo4j.home}/bin/neo4j">
+                                            <arg value="start"/>
+                                        </exec>
+
+                                        <echo message="Neo4j restarted. Run ./dev/seed.sh to load the DAG."/>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
