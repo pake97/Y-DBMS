@@ -8,11 +8,14 @@ import java.util.Set;
  * Path-based structural queries over a {@link CompiledCausalGraph}:
  * mediators, colliders, confounders, and backdoor-path variables.
  *
- * <h2>Student A implementation surface</h2>
+ * <h2>Student A implementation surface (Tier 1)</h2>
  * Each method below is stubbed with a TODO and the expected semantics.
  * The DSL depends on these via {@link com.example.causal.api.CausalGraphRuntime};
  * implementing them unblocks {@code MEDIATORS / COLLIDERS / CONFOUNDERS /
- * BACKDOOR PATHS} in the DSL.
+ * BACKDOOR PATHS} in the DSL. These methods can be written today against
+ * the existing DFS-based {@link ReachabilityIndex} — no bitset work required.
+ * See {@link com.example.causal.runtime.compile.CompiledCausalGraph} for the
+ * full tiered plan.
  *
  * <h2>Implementation notes</h2>
  * <ul>
@@ -47,8 +50,8 @@ public final class PathAnalyzer {
      * does not contain {@code to}.
      */
     public Set<String> mediators(String from, String to) {
-        // TODO(student): implement as described above
-        throw new UnsupportedOperationException("TODO(student): PathAnalyzer.mediators");
+        // TODO(student, tier 1): implement as described above
+        throw new UnsupportedOperationException("TODO(student, tier 1): PathAnalyzer.mediators");
     }
 
     /**
@@ -62,8 +65,8 @@ public final class PathAnalyzer {
      * {@code z}, inspect {@code graph.parentsOf(z)}.
      */
     public Set<String> colliders(String x, String y) {
-        // TODO(student): implement as described above
-        throw new UnsupportedOperationException("TODO(student): PathAnalyzer.colliders");
+        // TODO(student, tier 1): implement as described above
+        throw new UnsupportedOperationException("TODO(student, tier 1): PathAnalyzer.colliders");
     }
 
     /**
@@ -73,8 +76,8 @@ public final class PathAnalyzer {
      * <p>Suggested approach: one line using {@link ReachabilityIndex#ancestors}.
      */
     public Set<String> confounders(String x, String y) {
-        // TODO(student): implement using ReachabilityIndex.ancestors intersection
-        throw new UnsupportedOperationException("TODO(student): PathAnalyzer.confounders");
+        // TODO(student, tier 1): implement using ReachabilityIndex.ancestors intersection
+        throw new UnsupportedOperationException("TODO(student, tier 1): PathAnalyzer.confounders");
     }
 
     /**
@@ -91,7 +94,7 @@ public final class PathAnalyzer {
      * {@code outcome} via the same BFS.
      */
     public Set<String> backdoorVariables(String treatment, String outcome) {
-        // TODO(student): implement as described above
-        throw new UnsupportedOperationException("TODO(student): PathAnalyzer.backdoorVariables");
+        // TODO(student, tier 1): implement as described above
+        throw new UnsupportedOperationException("TODO(student, tier 1): PathAnalyzer.backdoorVariables");
     }
 }

@@ -31,7 +31,9 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
 
     private volatile CompiledCausalGraph snapshot;
 
-    // TODO(student): add a cached ReachabilityIndex field once bitsets are pre-computed
+    // TODO(student, tier 2): cache a ReachabilityIndex here once bitsets are
+    // pre-computed in CompiledCausalGraph. Tier 1 work can ignore this — the
+    // current per-query allocation is cheap against today's DFS implementation.
     // private volatile ReachabilityIndex reachabilityIndex;
 
     public DefaultCausalGraphRuntime() {}
@@ -44,7 +46,8 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     public synchronized GraphSnapshot compile(GraphCompileOptions options) {
         snapshot = GraphLoader.load(options);
         snapshot.logStructure();  // prints adjacency lists + topo order — check the log to verify your structures
-        // TODO(student): rebuild ReachabilityIndex here after switching to bitsets
+        // TODO(student, tier 2): rebuild the cached ReachabilityIndex here once
+        // CompiledCausalGraph owns the ancestor/descendant bitsets.
         return snapshot;
     }
 
@@ -114,38 +117,40 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     }
 
     // -------------------------------------------------------------------------
-    // Causal identification — TODO for Student A
+    // Causal identification — Tier 1 for Student A
     // -------------------------------------------------------------------------
 
     @Override
     public DSeparationResult isDSeparated(Set<VariableRef> x, Set<VariableRef> y, Set<VariableRef> z) {
         requireSnapshot();
-        // TODO(student): implement d-separation via Bayes Ball algorithm.
-        // Key steps:
-        //   1. Build the moral graph of An(X ∪ Y ∪ Z).
-        //   2. Remove all nodes not in An(X ∪ Y ∪ Z).
-        //   3. Check reachability in the resulting graph.
-        // Alternatively, implement the Bayes Ball algorithm directly on the DAG:
-        //   - send balls from X, track which reach Y given conditioning set Z.
+        // TODO(student, tier 1): implement d-separation.
+        // Two options — pick one:
+        //   (a) Bayes Ball on the DAG directly. Send balls from X, track which
+        //       reach Y under conditioning set Z. No moral graph needed; works
+        //       with today's forward/reverse adjacency.
+        //   (b) Moral-graph reachability: build the moral graph of An(X ∪ Y ∪ Z),
+        //       remove nodes outside that ancestor set, check reachability.
+        // Recommendation: (a). Fewer moving parts and no spouse_set needed.
         return DSeparationResult.unimplemented();
     }
 
     @Override
     public AdjustmentCandidateResult candidateAdjustmentSet(VariableRef treatment, VariableRef outcome) {
         requireSnapshot();
-        // TODO(student): implement backdoor criterion.
-        // A set Z satisfies the backdoor criterion relative to (treatment, outcome) if:
+        // TODO(student, tier 1): implement the backdoor criterion.
+        // A set Z satisfies it relative to (treatment, outcome) when:
         //   1. No node in Z is a descendant of treatment.
         //   2. Z blocks every backdoor path from treatment to outcome
         //      (paths that start with an arrow into treatment).
-        // Start by computing De(treatment) and checking blocking via d-separation.
+        // Depends on (1) — use isDSeparated to check blocking on the graph with
+        // outgoing edges from treatment removed.
         return AdjustmentCandidateResult.unimplemented();
     }
 
     // -------------------------------------------------------------------------
     // Path-based structural queries — delegate to PathAnalyzer
-    // TODO(student): implement PathAnalyzer.{mediators,colliders,confounders,
-    // backdoorVariables}; no changes needed below once those are implemented.
+    // TODO(student, tier 1): implement PathAnalyzer.{mediators,colliders,
+    // confounders,backdoorVariables}; no changes needed below once those land.
     // -------------------------------------------------------------------------
 
     @Override

@@ -1,84 +1,185 @@
-# Causal4j — Neo4j Causal Graph Plugin
+# Causal4j
 
-A Neo4j procedure/function plugin that compiles a causal DAG stored in Neo4j
-into an optimised in-memory representation and exposes structural graph queries
-(parents, ancestors, d-separation, adjustment sets) as Cypher-callable procedures.
+A Neo4j-backed toolkit for causal inference. Two Maven modules:
 
-This project is the **backend runtime** for a future causal-analysis DSL.
-The DSL lives in a separate project and depends only on the `CausalGraphRuntime`
-interface defined here.
+| Module | What it is |
+|---|---|
+| [`plugin/`](plugin/) | Neo4j procedures/functions. Compiles a causal DAG stored in Neo4j into an in-memory representation and exposes structural queries (`causal.ancestors`, `causal.adjustmentCandidate`, …) as Cypher-callable procedures. |
+| [`dsl/`](dsl/) | A small causal-inference DSL (`DEFINE CAUSAL DAG`, `IDENTIFY EFFECT OF`, …) that either runs in-process against an in-memory model or translates to Cypher calls against the plugin. Full language reference: **[`dsl/README.md`](dsl/README.md)**. |
 
----
-
-## What this project is
-
-| Layer | Package | Owner |
-|---|---|---|
-| API contract | `com.example.causal.api` | Frozen — both sides depend on it |
-| Runtime / data structures | `com.example.causal.runtime` | **Student A** |
-| Neo4j procedures/functions | `com.example.causal.procedures` | Mostly done — thin wrappers |
-| DTOs | `com.example.causal.dto` | Done |
-| Tests | `src/test/...` | Both |
+The DSL depends only on the plugin's `com.example.causal.api.*` package. Everything under `runtime.*` / `procedures.*` is a plugin implementation detail.
 
 ---
 
-## Neo4j graph schema
+## Repository layout
 
 ```
-(:Variable {id: String, name: String, observed: Boolean, latent: Boolean})
-  -[:CAUSES {active: Boolean}]->
-(:Variable {...})
+plugin/
+  src/main/java/com/example/causal/
+    api/              ← stable API surface (both modules depend on this)
+    runtime/          ← graph data structures, algorithms, compiled DAG
+      model/          ← Variable record
+      compile/        ← GraphLoader, CompiledCausalGraph
+      algorithms/     ← TopologicalSorter, ReachabilityIndex, PathAnalyzer
+    procedures/       ← thin @Procedure / @UserFunction wrappers
+    dto/              ← Cypher row-mapping classes
+    lifecycle/        ← transaction listener + extension factory
+                        (auto-invalidates/updates the snapshot on writes)
+  src/test/java/...   ← unit + embedded-Neo4j integration tests
+
+dsl/
+  src/main/antlr4/... ← CausalDSL.g4 grammar
+  src/main/java/com/example/causal/dsl/
+    ast/              ← sealed Statement hierarchy
+    parser/           ← AstBuilder (ANTLR visitor) + ParseException
+    model/            ← in-memory CausalModel + ModelRegistry
+    exec/             ← QueryExecutor interface
+                        InMemoryQueryExecutor (self-contained)
+                        Neo4jQueryExecutor    (Bolt driver)
+                        CypherTranslator      (AST → Cypher+params)
+    CausalDSL.java    ← programmatic entry point
+    CausalDSLRepl     ← interactive REPL (executes statements)
+    CypherDryRunRepl  ← prints the Cypher a statement WOULD emit (no execution)
+
+dev/
+  seed-dag.cypher     ← COVID-19 DAG (25 vars, 76 edges)
+  seed.sh             ← loads seed-dag.cypher into local Neo4j
+  example.causal      ← end-to-end DSL walkthrough
 ```
 
-Only `CAUSES` relationships with `active = true` are included in the compiled graph.
-Property defaults: `name` → `id`, `observed` → `true`, `latent` → `false`, `active` → `true`.
+---
+
+## Requirements
+
+- **Java 17** for the plugin (Neo4j 2025.x requirement).
+- **Java 21** for the DSL module (uses pattern matching in `switch`).
+  The Maven build handles both automatically — install a JDK that has 21
+  and it will compile both.
+- **Maven 3.9+**.
+- **Neo4j 2025.05.0** if you want to run the plugin against a real server
+  (optional for DSL in-memory use).
+
+Version pins live in the root [`pom.xml`](pom.xml) (`neo4j.version`,
+`neo4j.home`, `neo4j.password`) — change them in one place.
 
 ---
 
 ## Build
 
 ```bash
-mvn clean package          # compile + test + produce fat JAR
-mvn test                   # run all tests (unit + integration)
-mvn test -Dtest=TopologicalSorterTest   # single unit test class
-mvn test -Dtest=CausalProceduresTest    # single integration test class
-```
+# from repo root — builds both modules
+mvn clean package            # compile + test + produce fat JAR
+mvn test                     # all tests
 
-> **Java 17** is required (same requirement as Neo4j 2025.x).
+# single module
+mvn test -pl plugin
+mvn test -pl dsl
+
+# single test class
+mvn test -pl plugin -Dtest=TopologicalSorterTest     # pure Java, fast
+mvn test -pl plugin -Dtest=CausalProceduresTest      # embedded Neo4j, ~2 min
+mvn test -pl dsl    -Dtest=CausalDSLTest
+```
 
 ---
 
-## Local dev workflow
+## Using the DSL
 
-This is the day-to-day loop when working on the plugin.
+For the full language specification see **[`dsl/README.md`](dsl/README.md)**.
+Quick start:
+
+### Programmatic (in-memory — no Neo4j needed)
+
+```java
+import com.example.causal.dsl.CausalDSL;
+
+var dsl = new CausalDSL();
+dsl.executeScript("""
+    DEFINE CAUSAL DAG Retention {
+        Age        -> Treatment
+        Age        -> Retention30
+        Treatment  -> Retention30
+    }
+    IDENTIFY EFFECT OF Treatment ON Retention30 RETURN ADJUSTMENT SETS
+""").forEach(System.out::println);
+```
+
+### Programmatic (against a running Neo4j server)
+
+```java
+try (Driver driver = GraphDatabase.driver("bolt://localhost:7687",
+         AuthTokens.basic("neo4j", "neo4j"))) {
+    var registry = new ModelRegistry();
+    var dsl = new CausalDSL(new Neo4jQueryExecutor(driver, registry), registry);
+    dsl.executeScript(Files.readString(Path.of("dev/example.causal")));
+}
+```
+
+### Interactive REPL
+
+```bash
+# executes each statement (blank line submits, Ctrl-D exits)
+mvn exec:java -pl dsl -Dexec.mainClass=com.example.causal.dsl.CausalDSLRepl
+
+# or run a script
+mvn exec:java -pl dsl -Dexec.mainClass=com.example.causal.dsl.CausalDSLRepl \
+    -Dexec.args="dev/example.causal"
+```
+
+### Dry-run REPL (shows generated Cypher, does not execute)
+
+Useful when debugging the translation layer or previewing what a script will
+send to Neo4j.
+
+```bash
+mvn exec:java -pl dsl -Dexec.mainClass=com.example.causal.dsl.CypherDryRunRepl \
+    -Dexec.args="dev/example.causal"
+```
+
+Sample output:
+
+```
+────────────────────────────────────────────────────────────────────────
+ AST: CausesOfStmt
+      CausesOfStmt[var=Retention30]
+────────────────────────────────────────────────────────────────────────
+
+ [1/1] READ (yield: variableId)
+   Cypher:
+     CALL causal.parents($vars) YIELD variableId RETURN variableId
+   Params: vars = [Retention30]
+```
+
+---
+
+## Plugin: local dev workflow
+
+Day-to-day loop when working on the Neo4j procedures.
 
 ### One-time setup
 
-Make sure `neo4j.conf` allows the plugin procedures:
+Allow the plugin procedures in `neo4j.conf`:
+
 ```
 dbms.security.procedures.unrestricted=causal.*
 ```
 
-If your Neo4j password is not the default `neo4j`, set it once:
+If your Neo4j password is not the default, set it once:
+
 ```bash
 export NEO4J_PASSWORD=yourpassword
 ```
 
-### Step 1 — Build, deploy, restart
+### Build, deploy, restart
 
 ```bash
 mvn package -pl plugin -P deploy -DskipTests
 ```
 
-This single command:
-1. Compiles the code and produces the fat JAR
-2. Stops any running Neo4j process
-3. Copies the JAR into `neo4j-community-2025.05.0/plugins/`
-4. Starts Neo4j in daemon mode
+This single command compiles the plugin, stops any running Neo4j, copies the
+JAR into the `plugins/` directory, and restarts Neo4j in daemon mode.
 
-The Neo4j home path and password are configured in **one place**: the `<properties>` block of the root `pom.xml`.
-
-### Step 2 — Seed the COVID-19 DAG
+### Seed the COVID-19 DAG
 
 ```bash
 ./dev/seed.sh
@@ -87,64 +188,34 @@ The Neo4j home path and password are configured in **one place**: the `<properti
 Waits until Neo4j is ready, then loads 25 variables and 76 causal edges from
 `dev/seed-dag.cypher`. Safe to re-run — it clears existing data first.
 
-### Step 3 — Compile the graph and query it
-
-In Neo4j Browser (`http://localhost:7474`) or `cypher-shell`:
+### Query from Neo4j Browser or cypher-shell
 
 ```cypher
 // Compile the in-memory snapshot
-CALL causal.compile() YIELD variableCount, compiledAt
-RETURN variableCount, compiledAt;
-// → 25 variables
+CALL causal.compile() YIELD size RETURN size;
 
-// What are the ancestors of reported cases?
-CALL causal.ancestors(['reported_cases']) YIELD variableId RETURN variableId;
-
-// Is there a directed path from interventions to reported cases?
+// Structural queries
+CALL causal.ancestors(['reported_cases'])  YIELD variableId RETURN variableId;
+CALL causal.parents(['exposure_sarscov2']) YIELD variableId RETURN variableId;
 RETURN causal.hasDirectedPath('interventions', 'reported_cases') AS isCause;
 
-// What directly causes exposure to SARS-CoV-2?
-CALL causal.parents(['exposure_sarscov2']) YIELD variableId RETURN variableId;
+// Adjustment set candidate (backdoor)
+CALL causal.adjustmentCandidate('interventions', 'reported_cases')
+    YIELD exists, sets, explanation
+RETURN exists, sets;
+
+// Path queries (new — used by the DSL)
+CALL causal.mediators('interventions', 'reported_cases')        YIELD variableId RETURN variableId;
+CALL causal.confounders('interventions', 'reported_cases')      YIELD variableId RETURN variableId;
+CALL causal.backdoorVariables('interventions', 'reported_cases') YIELD variableId RETURN variableId;
 ```
 
-### Variable ids in the seeded DAG
-
-| id | Name |
-|---|---|
-| `interventions` | Interventions |
-| `covid19_burden` | COVID-19 burden |
-| `healthcare_utilization` | Health care utilization |
-| `searches_corona` | Searches corona |
-| `gender` | Gender |
-| `age` | Age |
-| `foreign_citizens` | Foreign citizens |
-| `socioeconomic_status` | Socio-economic status |
-| `turnout` | Turnout |
-| `rightwing_votes` | Right-wing populist party votes |
-| `trust_society` | Trust in society |
-| `population_density` | Population density |
-| `nursing_homes` | Nursing homes |
-| `mobility` | Mobility |
-| `temperature` | Temperature |
-| `humidity` | Humidity |
-| `wind` | Wind |
-| `rainfall` | Rainfall |
-| `tracing_capacity` | Tracing capacity |
-| `exposure_sarscov2` | Exposure to SARS-COV-2 *(latent)* |
-| `herd_immunity` | Herd immunity *(latent)* |
-| `access_tests` | Access to tests |
-| `susceptibility` | Susceptibility *(latent)* |
-| `onset_covid19` | Onset of COVID-19 *(latent)* |
-| `reported_cases` | Reported new cases COVID-19 |
-
-### Deploy to a real Neo4j server
+### Deploy to a different Neo4j server
 
 ```bash
 cp plugin/target/causal4j-plugin-1.0-SNAPSHOT.jar $NEO4J_HOME/plugins/
-# restart Neo4j manually
+# restart Neo4j, then verify:
 ```
-
-Verify the plugin loaded:
 
 ```cypher
 SHOW PROCEDURES YIELD name WHERE name STARTS WITH 'causal' RETURN name;
@@ -152,123 +223,121 @@ SHOW PROCEDURES YIELD name WHERE name STARTS WITH 'causal' RETURN name;
 
 ---
 
-## Sample Cypher session
+## Neo4j graph schema
 
-```cypher
-// 1. Compile the in-memory snapshot from Neo4j data
-CALL causal.compile() YIELD variableCount, compiledAt
-RETURN variableCount, compiledAt;
-
-// 2. Structural queries
-CALL causal.parents(['Y']) YIELD variableId RETURN variableId;
-CALL causal.ancestors(['Y']) YIELD variableId RETURN variableId;
-CALL causal.descendants(['X']) YIELD variableId RETURN variableId;
-CALL causal.children(['X']) YIELD variableId RETURN variableId;
-
-// 3. Reachability (scalar function — usable in expressions)
-RETURN causal.hasDirectedPath('X', 'Y') AS isCause;
-
-// 4. D-separation (stub — implement in DefaultCausalGraphRuntime)
-CALL causal.dsep(['X'], ['Y'], ['Z']) YIELD separated, explanation RETURN separated;
-
-// 5. Adjustment sets (stub — implement in DefaultCausalGraphRuntime)
-CALL causal.adjustmentCandidate('treatment', 'outcome')
-  YIELD adjustmentSetExists, candidateSets, explanation
-RETURN adjustmentSetExists, candidateSets;
-
-// 6. Inspect snapshot without recompiling
-CALL causal.inspectSnapshot() YIELD variableCount, compiledAt RETURN variableCount;
-
-// 7. Invalidate (call after mutating the graph)
-CALL causal.invalidate();
 ```
+(:Variable {id, name, observed, latent}) -[:CAUSES {active}]-> (:Variable)
+```
+
+Only `:CAUSES` relationships with `active = true` are loaded into the compiled
+snapshot. Property defaults when absent: `name` → `id`, `observed` → `true`,
+`latent` → `false`, `active` → `true`. The `id` property is the canonical
+key used by `VariableRef`.
 
 ---
 
-## IntelliJ IDEA setup
+## Architecture
 
-1. **File → Open** → select the `Causal4j` directory (it is already a Maven project).
-2. IntelliJ will auto-import the `pom.xml`. Accept "Load Maven Project" if prompted.
-3. Set **Project SDK** to Java 17 (`File → Project Structure → SDK`).
-4. Run tests: right-click `src/test/java` → **Run All Tests**, or use the gutter icons.
+### Plugin side
 
-**Run/Debug a procedure locally:**
-The `CausalProceduresTest` integration test uses an embedded Neo4j harness,
-so you can set breakpoints inside `CausalProcedures`, `DefaultCausalGraphRuntime`,
-or any runtime class and run the test in debug mode — no external Neo4j needed.
+- **Procedures are thin.** `CausalProcedures` / `CausalFunctions` do no graph
+  logic — they resolve variable ids, call the runtime, and map to DTOs.
+- **`RuntimeRegistry`** holds the process-scoped `CausalGraphRuntime`
+  singleton. Neo4j instantiates procedure classes per-call, so the runtime has
+  to live outside them.
+- **DTOs** (`com.example.causal.dto`) must be plain classes with
+  `public final` fields, not records — Neo4j's reflection-based row mapping
+  does not support records.
+- **`@Context Transaction tx`** is injected by Neo4j per-call. Pass it to
+  `GraphCompileOptions` when implementing `causal.compile()`; other procedures
+  read the cached snapshot.
+- **Transaction listener** (`com.example.causal.lifecycle`) — `CausalGraphExtensionFactory`
+  is loaded via `META-INF/services/org.neo4j.kernel.extension.ExtensionFactory`
+  on database startup and registers a `CausalGraphChangeListener` that observes
+  every transaction. Its `beforeCommit` builds a `ChangeBatch`; its `afterCommit`
+  applies that batch to `RuntimeRegistry`. Today it falls back to a full
+  `invalidate()`; Student A's Tier 1 work turns it into incremental maintenance
+  of the snapshot's adjacency, topo layer, and reachability bitsets.
 
----
+### DSL side
 
-## Student A: where to start
-
-You own everything under `com.example.causal.runtime`. Start here:
-
-### Phase 1 — Get the tests green (already done for you)
-The current implementation uses `HashMap`/`LinkedHashSet` and BFS. It is correct
-but not optimised. All 15 tests pass out of the box.
-
-### Phase 2 — Dense integer layout (`CompiledCausalGraph`)
-Replace the `Map<String, ...>` adjacency structures with:
-```java
-Map<String, Integer>  nameToIndex;   // O(1) variable lookup
-Variable[]            indexToVar;
-int[][]               forwardAdj;    // children of node i
-int[][]               reverseAdj;    // parents of node i
-int[]                 topoOrder;     // variable indices, sources first
-```
-See the TODO comments in `CompiledCausalGraph.java`.
-
-### Phase 3 — Bitset ancestor/descendant cache (`ReachabilityIndex`)
-Pre-compute `long[][] ancestorBits` in reverse topological order:
-```
-for each node i in reverse-topo order:
-    ancestorBits[i] = union of (ancestorBits[p] | setBit(p)) for each parent p of i
-```
-Then `ancestors(i)` is O(n/64) instead of O(V+E). See TODO in `ReachabilityIndex.java`.
-
-### Phase 4 — D-separation (`DefaultCausalGraphRuntime.isDSeparated`)
-Implement the Bayes Ball algorithm or the moral-graph criterion.
-The method signature and stub are in `DefaultCausalGraphRuntime`.
-
-### Phase 5 — Adjustment sets (`DefaultCausalGraphRuntime.candidateAdjustmentSet`)
-Implement the backdoor criterion. Requires d-separation (Phase 4).
+- **Parser → AST → Executor.** ANTLR4 builds a parse tree; `AstBuilder`
+  (a visitor) converts it to a sealed `Statement` hierarchy. An
+  `InMemoryQueryExecutor` evaluates against a pure-Java `CausalModel`; a
+  `Neo4jQueryExecutor` translates via `CypherTranslator` and runs through the
+  Bolt driver. Same AST, pluggable backend.
+- **DSL-only metadata** (unit, role, `OBSERVED AS` binding) is held in the
+  DSL's `ModelRegistry` — the plugin's schema does not carry it.
+- **`CypherDryRunRepl`** exists specifically so you can inspect what the
+  translator emits without running it.
 
 ---
 
-## DSL integration contract
+## Structural logging
 
-The external DSL/planner project should:
+Every `CALL causal.compile()` dumps the full adjacency lists + topological
+order via `CompiledCausalGraph.logStructure()`. In the embedded test harness
+this goes to stdout; on a real server it goes to `logs/neo4j.log`. Add a
+section to `logStructure()` whenever you introduce a new cached structure.
 
-1. **Depend only on `com.example.causal.api.*`** — never on `runtime.*` or `procedures.*`.
-2. **Obtain a `CausalGraphRuntime`** instance via whatever injection mechanism
-   your planner uses (e.g. a factory, a constructor parameter, or a service loader).
-   Do not reference `RuntimeRegistry` from the DSL.
-3. **Call `compile(options)` once** per session (or after graph mutations).
-4. **Issue structural queries** using the interface methods:
+---
+
+## Testing notes
+
+When calling procedures in test code via `tx.execute()`, **consume the result
+before closing** — lazy result streams can silently skip execution:
 
 ```java
-CausalGraphRuntime rt = ...; // injected
-
-Optional<VariableRef> x  = rt.resolveVariable("X");
-Set<VariableRef>   anc   = rt.ancestors(Set.of(x.get()));
-DSeparationResult  dsep  = rt.isDSeparated(setX, setY, setZ);
-boolean            path  = rt.hasDirectedPath(x.get(), y.get());
-AdjustmentCandidateResult adj = rt.candidateAdjustmentSet(treatment, outcome);
+Result r = tx.execute("CALL causal.compile()");
+while (r.hasNext()) r.next();   // force execution
+tx.commit();
 ```
-
-The types `VariableRef`, `GraphSnapshot`, `DSeparationResult`, and
-`AdjustmentCandidateResult` are all in `com.example.causal.api` and are stable.
 
 ---
 
-## Known TODOs
+## Open work
+
+Structured as tiers: **Tier 1 is required** for the plugin to answer every
+DSL query end-to-end; Tier 2 is performance; Tier 3 is ergonomics / optional
+caches.
+
+### Tier 1 — required for feature completeness
 
 | Location | Description |
 |---|---|
-| `CompiledCausalGraph` | Replace Map-based adjacency with dense `int[][]` layout |
-| `ReachabilityIndex` | Implement bitset ancestor/descendant pre-computation |
-| `DefaultCausalGraphRuntime.isDSeparated` | Implement Bayes Ball algorithm |
-| `DefaultCausalGraphRuntime.candidateAdjustmentSet` | Implement backdoor criterion |
-| `CausalFunctions.topoOrder` | Wire up `CompiledCausalGraph.topoIndex()` through the API |
-| `CausalGraphRuntime` | Consider adding `topoIndex(VariableRef)` to the interface |
-| `pom.xml` | Pin `maven-compiler-plugin` version to silence the Maven warning |
+| `plugin/runtime/algorithms/PathAnalyzer` | Implement `mediators`, `colliders`, `confounders`, `backdoorVariables`. Unblocks `MEDIATORS / COLLIDERS / CONFOUNDERS / BACKDOOR` in the DSL. Can be written today against the existing DFS-based `ReachabilityIndex` — no bitset work required. |
+| `plugin/runtime/DefaultCausalGraphRuntime.isDSeparated` | Bayes Ball on the DAG directly. Unblocks `causal.dsep`. |
+| `plugin/runtime/DefaultCausalGraphRuntime.candidateAdjustmentSet` | Backdoor criterion (depends on d-separation). Unblocks `causal.adjustmentCandidate` and the DSL's `IDENTIFY EFFECT OF`. |
+| `plugin/lifecycle/CausalGraphChangeListener` | Extend `beforeCommit` + `afterCommit` so creating/deleting `:Variable` nodes or `:CAUSES` edges incrementally updates the compiled snapshot (dense adjacency, topo layer, ancestor/descendant bitsets) instead of the current fallback — a full `invalidate()`. Also: reject topology-breaking writes (e.g. cycle-creating edges) in `beforeCommit`. See TODOs in that file for the concrete hook points. |
+| `dsl/exec/Neo4jQueryExecutor` | `ESTIMATE` needs `OBSERVED AS` execution + estimator dispatch (currently returns a placeholder). |
+
+### Tier 2 — performance refactor
+
+| Location | Description |
+|---|---|
+| `plugin/runtime/compile/CompiledCausalGraph` | Replace the `Map<String, Set<String>>` adjacency with a dense `int[][]` layout + `int[] topoOrder` + `int[] topoLayer`. Everything downstream (reachability, path queries) benefits. |
+| `plugin/runtime/compile/CompiledCausalGraph` | Pre-compute `long[][] ancestorBits` / `descendantBits` in reverse topological order. Fill from the dense layout. |
+| `plugin/runtime/algorithms/ReachabilityIndex` | Switch `ancestors` / `descendants` to O(n/64) bitset lookups reading from the snapshot. |
+| `plugin/runtime/DefaultCausalGraphRuntime` | Cache a single `ReachabilityIndex` built at compile time, instead of allocating per query. |
+| `plugin/runtime/compile/CompiledCausalGraph.topoIndex` | Replace the `List.indexOf` scan with an O(1) map lookup. |
+
+### Tier 3 — optional ergonomics / lazy caches
+
+| Location | Description |
+|---|---|
+| `plugin/runtime/compile/CompiledCausalGraph` | Lazy `markovBlanket(v)` = `parents ∪ children ∪ parents_of_children`. One-liner on top of Tier 2 bitsets. |
+| `plugin/runtime/compile/CompiledCausalGraph` | Lazy `forbiddenAdjustmentSet(t, y)` = descendants of `t` on any causal path to `y`. Used by the DSL's `ESTIMATE` validator. |
+| `plugin/runtime/DefaultCausalGraphRuntime` | Lazy pair-index cache: `Map<(treatment, outcome), PairFacts>` with `hasDirectedPath / hasBackdoorPath / mediatorsBitset / minimalAdjustmentSets`. Only add if profiling shows repeat queries on the same pairs. |
+| `plugin/procedures/CausalFunctions.topoOrder` | Expose `CompiledCausalGraph.topoIndex` through `CausalGraphRuntime`. |
+| `dsl/exec/Neo4jQueryExecutor` | `INTERVENE` / `COUNTERFACTUAL` — v1 parse-only stubs; implementations are a separate workstream. |
+
+### Not in scope for v1
+
+- Materialising derived relationships as Neo4j edges (`:ANCESTOR_OF`,
+  `:DESCENDANT_OF`, `:IN_TOPO_LAYER`, `:PairQuery` nodes). The compiled
+  snapshot is the single source of truth; duplicating it in the graph
+  doubles the invalidation burden. Expose derived facts through `causal.*`
+  procedures instead.
+- Districts / c-components (ADMG / latent projection), spouse sets,
+  path-pattern signature caches. Only needed if d-separation is implemented
+  via the moral graph or the DSL grows an ADMG layer.
