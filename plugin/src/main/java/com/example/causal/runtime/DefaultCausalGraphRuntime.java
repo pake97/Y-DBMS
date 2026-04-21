@@ -42,6 +42,7 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     @Override
     public synchronized GraphSnapshot compile(GraphCompileOptions options) {
         snapshot = GraphLoader.load(options);
+        snapshot.logStructure();  // prints adjacency lists + topo order — check the log to verify your structures
         // TODO(student): rebuild ReachabilityIndex here after switching to bitsets
         return snapshot;
     }
