@@ -97,6 +97,44 @@ public interface CausalGraphRuntime {
     AdjustmentCandidateResult candidateAdjustmentSet(VariableRef treatment, VariableRef outcome);
 
     /**
+     * Return variables that lie on at least one directed path from {@code from}
+     * to {@code to}, excluding the endpoints themselves.
+     *
+     * <p>Formally: {@code {v : ∃ directed path from → … → v → … → to}}.
+     *
+     * <p>Used by the DSL to answer {@code MEDIATORS BETWEEN X AND Y}.
+     */
+    Set<VariableRef> mediators(VariableRef from, VariableRef to);
+
+    /**
+     * Return variables {@code Z} where effects originating from {@code x} and
+     * effects originating from {@code y} meet head-to-head (→ Z ←), and
+     * {@code Z} is not itself an ancestor of either endpoint.
+     *
+     * <p>Used by the DSL to answer {@code COLLIDERS BETWEEN X AND Y}.
+     */
+    Set<VariableRef> colliders(VariableRef x, VariableRef y);
+
+    /**
+     * Return common ancestors of {@code x} and {@code y} — variables that
+     * causally precede both, excluding {@code x} and {@code y} themselves.
+     *
+     * <p>Used by the DSL to answer {@code CONFOUNDERS OF X AND Y}.
+     */
+    Set<VariableRef> confounders(VariableRef x, VariableRef y);
+
+    /**
+     * Return variables involved in at least one backdoor path from
+     * {@code treatment} to {@code outcome}. A backdoor path enters
+     * {@code treatment} via an incoming edge and reaches {@code outcome}
+     * through the undirected graph while avoiding descendants of
+     * {@code treatment}.
+     *
+     * <p>Used by the DSL to answer {@code BACKDOOR PATHS BETWEEN T AND Y}.
+     */
+    Set<VariableRef> backdoorVariables(VariableRef treatment, VariableRef outcome);
+
+    /**
      * Return the current compiled snapshot, or {@code null} if {@link #compile}
      * has not yet been called (or the snapshot has been invalidated).
      */

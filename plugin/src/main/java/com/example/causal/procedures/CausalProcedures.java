@@ -171,6 +171,69 @@ public class CausalProcedures {
     }
 
     // =========================================================================
+    // causal.mediators(from, to)
+    // =========================================================================
+
+    @Procedure(name = "causal.mediators", mode = Mode.READ)
+    @Description(
+        "Return variables on at least one directed path from 'from' to 'to', " +
+        "excluding the endpoints. Used by the DSL to answer MEDIATORS BETWEEN."
+    )
+    public Stream<VariableNameRecord> mediators(
+            @Name("from") String from,
+            @Name("to")   String to
+    ) {
+        return pathQuery(from, to, CausalGraphRuntime::mediators);
+    }
+
+    // =========================================================================
+    // causal.colliders(x, y)
+    // =========================================================================
+
+    @Procedure(name = "causal.colliders", mode = Mode.READ)
+    @Description(
+        "Return variables where effects from x and effects from y meet head-to-head. " +
+        "Used by the DSL to answer COLLIDERS BETWEEN."
+    )
+    public Stream<VariableNameRecord> colliders(
+            @Name("x") String x,
+            @Name("y") String y
+    ) {
+        return pathQuery(x, y, CausalGraphRuntime::colliders);
+    }
+
+    // =========================================================================
+    // causal.confounders(x, y)
+    // =========================================================================
+
+    @Procedure(name = "causal.confounders", mode = Mode.READ)
+    @Description(
+        "Return common ancestors of x and y. Used by the DSL to answer CONFOUNDERS OF."
+    )
+    public Stream<VariableNameRecord> confounders(
+            @Name("x") String x,
+            @Name("y") String y
+    ) {
+        return pathQuery(x, y, CausalGraphRuntime::confounders);
+    }
+
+    // =========================================================================
+    // causal.backdoorVariables(treatment, outcome)
+    // =========================================================================
+
+    @Procedure(name = "causal.backdoorVariables", mode = Mode.READ)
+    @Description(
+        "Return variables on backdoor paths from treatment to outcome. " +
+        "Used by the DSL to answer BACKDOOR PATHS BETWEEN."
+    )
+    public Stream<VariableNameRecord> backdoorVariables(
+            @Name("treatment") String treatment,
+            @Name("outcome")   String outcome
+    ) {
+        return pathQuery(treatment, outcome, CausalGraphRuntime::backdoorVariables);
+    }
+
+    // =========================================================================
     // causal.inspectSnapshot()
     // =========================================================================
 
@@ -187,6 +250,24 @@ public class CausalProcedures {
     // =========================================================================
     // Helpers
     // =========================================================================
+
+    @FunctionalInterface
+    private interface PathFn {
+        Set<VariableRef> apply(CausalGraphRuntime rt, VariableRef a, VariableRef b);
+    }
+
+    /**
+     * Shared path-query skeleton: resolve both endpoints, invoke the supplied
+     * runtime method, stream out variable names.
+     */
+    private Stream<VariableNameRecord> pathQuery(String fromId, String toId, PathFn fn) {
+        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        VariableRef a = runtime.resolveVariable(fromId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown variable: " + fromId));
+        VariableRef b = runtime.resolveVariable(toId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown variable: " + toId));
+        return fn.apply(runtime, a, b).stream().map(v -> new VariableNameRecord(v.id()));
+    }
 
     private Set<VariableRef> resolveAll(List<String> ids) {
         if (ids == null || ids.isEmpty()) return Set.of();

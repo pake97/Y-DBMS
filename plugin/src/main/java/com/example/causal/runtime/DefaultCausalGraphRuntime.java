@@ -1,6 +1,7 @@
 package com.example.causal.runtime;
 
 import com.example.causal.api.*;
+import com.example.causal.runtime.algorithms.PathAnalyzer;
 import com.example.causal.runtime.algorithms.ReachabilityIndex;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
 import com.example.causal.runtime.compile.GraphLoader;
@@ -139,6 +140,38 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
         //      (paths that start with an arrow into treatment).
         // Start by computing De(treatment) and checking blocking via d-separation.
         return AdjustmentCandidateResult.unimplemented();
+    }
+
+    // -------------------------------------------------------------------------
+    // Path-based structural queries — delegate to PathAnalyzer
+    // TODO(student): implement PathAnalyzer.{mediators,colliders,confounders,
+    // backdoorVariables}; no changes needed below once those are implemented.
+    // -------------------------------------------------------------------------
+
+    @Override
+    public Set<VariableRef> mediators(VariableRef from, VariableRef to) {
+        return toRefs(new PathAnalyzer(requireSnapshot()).mediators(from.id(), to.id()));
+    }
+
+    @Override
+    public Set<VariableRef> colliders(VariableRef x, VariableRef y) {
+        return toRefs(new PathAnalyzer(requireSnapshot()).colliders(x.id(), y.id()));
+    }
+
+    @Override
+    public Set<VariableRef> confounders(VariableRef x, VariableRef y) {
+        return toRefs(new PathAnalyzer(requireSnapshot()).confounders(x.id(), y.id()));
+    }
+
+    @Override
+    public Set<VariableRef> backdoorVariables(VariableRef treatment, VariableRef outcome) {
+        return toRefs(new PathAnalyzer(requireSnapshot()).backdoorVariables(treatment.id(), outcome.id()));
+    }
+
+    private static Set<VariableRef> toRefs(Set<String> ids) {
+        Set<VariableRef> result = new LinkedHashSet<>();
+        for (String id : ids) result.add(new VariableRef(id));
+        return Collections.unmodifiableSet(result);
     }
 
     // -------------------------------------------------------------------------
