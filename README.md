@@ -165,10 +165,17 @@ dbms.security.procedures.unrestricted=causal.*
 ```
 
 If your Neo4j password is not the default, set it once:
+using bash
 
 ```bash
 export NEO4J_PASSWORD=yourpassword
 ```
+
+or using `mise set` command, or by creating `mise.local.toml` file directly (mise-en-place CLI tool)[https://mise.jdx.dev/]
+```bash
+mise set --env local NEO4J_PASSWORD=yourpassword
+```
+
 
 ### Build, deploy, restart
 

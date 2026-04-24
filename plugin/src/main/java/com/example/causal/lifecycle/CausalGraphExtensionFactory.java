@@ -34,7 +34,7 @@ public final class CausalGraphExtensionFactory
     public Lifecycle newInstance(ExtensionContext context, Dependencies dependencies) {
         return new CausalGraphLifecycle(
             dependencies.databaseManagementService(),
-            dependencies.graphDatabaseAPI().databaseName(),
+            // dependencies.graphDatabaseAPI().databaseName(),
             new CausalGraphChangeListener()
         );
     }

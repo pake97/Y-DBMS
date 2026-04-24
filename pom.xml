@@ -20,8 +20,8 @@
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- Local Neo4j install — change this if you move Neo4j -->
-        <neo4j.home>/Users/amedeo/Downloads/neo4j-community-2025.05.0</neo4j.home>
-        <neo4j.password>neo4j</neo4j.password>
+        <neo4j.home>${NEO4J_HOME}</neo4j.home>
+        <neo4j.password>${NEO4J_PASSWORD}</neo4j.password>
     </properties>
 
     <dependencyManagement>
