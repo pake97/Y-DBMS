@@ -35,6 +35,7 @@ public final class CausalGraphExtensionFactory
         return new CausalGraphLifecycle(
             dependencies.databaseManagementService(),
             // dependencies.graphDatabaseAPI().databaseName(),
+            "neo4j",
             new CausalGraphChangeListener()
         );
     }
