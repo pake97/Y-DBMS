@@ -78,8 +78,11 @@ public final class PathAnalyzer {
      * <p>Suggested approach: one line using {@link ReachabilityIndex#ancestors}.
      */
     public Set<String> confounders(String x, String y) {
-        // TODO(student, tier 1): implement using ReachabilityIndex.ancestors intersection
-        throw new UnsupportedOperationException("TODO(student, tier 1): PathAnalyzer.confounders");
+        Set<String> commonAncestors = new LinkedHashSet<>(reachability.ancestors(x));
+        commonAncestors.retainAll(reachability.ancestors(y));
+        commonAncestors.remove(x);
+        commonAncestors.remove(y);
+        return commonAncestors;
     }
 
     /**
