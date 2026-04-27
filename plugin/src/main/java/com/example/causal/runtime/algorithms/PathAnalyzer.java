@@ -67,8 +67,30 @@ public final class PathAnalyzer {
      * {@code z}, inspect {@code graph.parentsOf(z)}.
      */
     public Set<String> colliders(String x, String y) {
-        // TODO(student, tier 1): implement as described above
-        throw new UnsupportedOperationException("TODO(student, tier 1): PathAnalyzer.colliders");
+        Set<String> reachableFromX = new LinkedHashSet<>(reachability.descendants(x));
+        reachableFromX.add(x);
+
+        Set<String> reachableFromY = new LinkedHashSet<>(reachability.descendants(y));
+        reachableFromY.add(y);
+
+        Set<String> ancestorsOfX = reachability.ancestors(x);
+        Set<String> ancestorsOfY = reachability.ancestors(y);
+
+        Set<String> result = new LinkedHashSet<>();
+        for (String z : graph.topoOrder()) {
+            if (z.equals(x) || z.equals(y)) continue;
+            if (ancestorsOfX.contains(z) || ancestorsOfY.contains(z)) continue;
+
+            Set<String> parentsOfZ = graph.parentsOf(z);
+            boolean hasXSideParent = parentsOfZ.stream().anyMatch(reachableFromX::contains);
+            boolean hasYSideParent = parentsOfZ.stream().anyMatch(reachableFromY::contains);
+
+            if (hasXSideParent && hasYSideParent) {
+                result.add(z);
+            }
+        }
+
+        return result;
     }
 
     /**
