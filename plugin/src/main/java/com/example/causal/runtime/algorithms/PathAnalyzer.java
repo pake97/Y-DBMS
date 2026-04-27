@@ -2,6 +2,8 @@ package com.example.causal.runtime.algorithms;
 
 import com.example.causal.runtime.compile.CompiledCausalGraph;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -121,7 +123,27 @@ public final class PathAnalyzer {
      * {@code outcome} via the same BFS.
      */
     public Set<String> backdoorVariables(String treatment, String outcome) {
-        // TODO(student, tier 1): implement as described above
-        throw new UnsupportedOperationException("TODO(student, tier 1): PathAnalyzer.backdoorVariables");
+        Set<String> forbidden = reachability.descendants(treatment);
+        forbidden.add(treatment);
+        forbidden.remove(outcome);
+
+        Set<String> fromParents = undirectedReachable(graph.parentsOf(treatment), forbidden);
+        Set<String> fromOutcome = undirectedReachable(Set.of(outcome), forbidden);
+
+        fromParents.retainAll(fromOutcome);
+        fromParents.remove(outcome);
+        return fromParents;
+    }
+
+    private Set<String> undirectedReachable(Set<String> starts, Set<String> forbidden) {
+        Set<String> visited = new LinkedHashSet<>();
+        Deque<String> queue = new ArrayDeque<>(starts);
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            if (forbidden.contains(current) || !visited.add(current)) continue;
+            queue.addAll(graph.parentsOf(current));
+            queue.addAll(graph.childrenOf(current));
+        }
+        return visited;
     }
 }
