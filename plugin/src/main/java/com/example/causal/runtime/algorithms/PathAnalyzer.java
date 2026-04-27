@@ -2,6 +2,7 @@ package com.example.causal.runtime.algorithms;
 
 import com.example.causal.runtime.compile.CompiledCausalGraph;
 
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
@@ -50,8 +51,9 @@ public final class PathAnalyzer {
      * does not contain {@code to}.
      */
     public Set<String> mediators(String from, String to) {
-        // TODO(student, tier 1): implement as described above
-        throw new UnsupportedOperationException("TODO(student, tier 1): PathAnalyzer.mediators");
+        Set<String> result = new LinkedHashSet<>(reachability.descendants(from));
+        result.retainAll(reachability.ancestors(to));
+        return result;
     }
 
     /**
