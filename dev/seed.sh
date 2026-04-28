@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-NEO4J_HOME="/Users/amedeo/Downloads/neo4j-community-2025.05.0"
+NEO4J_HOME="${NEO4J_HOME}"
 CYPHER_SHELL="$NEO4J_HOME/bin/cypher-shell"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PASSWORD="${NEO4J_PASSWORD:-neo4j}"
