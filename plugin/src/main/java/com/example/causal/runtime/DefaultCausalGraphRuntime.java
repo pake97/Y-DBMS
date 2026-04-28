@@ -122,26 +122,99 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
 
     @Override
     public DSeparationResult isDSeparated(Set<VariableRef> x, Set<VariableRef> y, Set<VariableRef> z) {
-        requireSnapshot();
-        // TODO(student, tier 1): implement d-separation.
+        CompiledCausalGraph g = requireSnapshot();
+
+        // Vacuous cases: in standard definitions X and Y are disjoint/non-empty,
+        // but we handle empty sets defensively.
+        if (x == null || x.isEmpty() || y == null || y.isEmpty()) {
+            return DSeparationResult.separated("empty `x` or `y` => vacuously d-separated");
+        }
+
+        Set<String> xIds = new LinkedHashSet<>();
+        for (VariableRef v : x) xIds.add(v.id());
+        Set<String> yIds = new LinkedHashSet<>();
+        for (VariableRef v : y) yIds.add(v.id());
+
+        Set<String> zIds = new LinkedHashSet<>();
+        if (z != null) for (VariableRef v : z) zIds.add(v.id());
+
+        // If endpoints overlap, there is a length-0 path connecting them.
+        for (String id : xIds) {
+            if (yIds.contains(id)) {
+                return DSeparationResult.connected("`x` and `y` overlap at `" + id + "`");
+            }
+        }
+
+        // Bayes ball (approach a): traverse on the original DAG directly.
         //
-        // Model this on PathAnalyzer: add a class (e.g. DSeparation) under
-        // runtime/algorithms, construct it from the snapshot, and delegate here.
-        // Building blocks already available:
-        //   - graph.parentsOf(id) / graph.childrenOf(id) / graph.topoOrder()
-        //   - new ReachabilityIndex(snapshot).ancestors(id) / descendants(id)
-        //
-        // Two options — pick one:
-        //   (a) Bayes Ball on the DAG directly. Send balls from X, track which
-        //       reach Y under conditioning set Z. No moral graph needed; works
-        //       with today's forward/reverse adjacency.
-        //   (b) Moral-graph reachability: build the moral graph of An(X ∪ Y ∪ Z),
-        //       remove nodes outside that ancestor set, check reachability.
-        // Recommendation: (a). Fewer moving parts and no spouse_set needed.
-        //
-        // Return DSeparationResult.separated(explanation) when X ⟂ Y | Z, and
-        // DSeparationResult.connected(explanation) when an active path remains.
-        return DSeparationResult.unimplemented();
+        // We represent where the ball came from when entering the current node:
+        //   - FROM_PARENT: entered from a parent into this node
+        //   - FROM_CHILD: entered from a child into this node
+        enum Dir { FROM_CHILD, FROM_PARENT }
+        record State(String nodeId, Dir dir) {}
+
+        // BFS over (node, direction) states.
+        Deque<State> queue = new ArrayDeque<>();
+        Set<State> visited = new HashSet<>();
+
+        // Start a ball at every node in `x`, entering it from both directions.
+        for (String start : xIds) {
+            queue.add(new State(start, Dir.FROM_PARENT));
+            queue.add(new State(start, Dir.FROM_CHILD));
+        }
+
+        while (!queue.isEmpty()) {
+            State cur = queue.poll();
+            if (!visited.add(cur)) continue;
+
+            // Reaching any node in `y` means there exists an open active path.
+            if (yIds.contains(cur.nodeId())) {
+                return DSeparationResult.connected(
+                        "found an active path reaching `" + cur.nodeId() + "`"
+                );
+            }
+
+            boolean observed = zIds.contains(cur.nodeId());
+
+            if (observed) {
+                // Observed node:
+                //   - ball entering from a parent can propagate to parents
+                //     e.g., in a collider A -> M <- B, observing M opens
+                //     the path and allows movement from M toward A or B.
+                //   - ball entering from a child cannot propagate further
+                //     e.g., in a chain A -> M -> B or fork A <- M -> B;
+                //     conditioning on M blocks continuation through M.
+                if (cur.dir() == Dir.FROM_PARENT) {
+                    for (String p : g.parentsOf(cur.nodeId())) {
+                        queue.add(new State(p, Dir.FROM_CHILD));
+                    }
+                }
+            } else {
+                // Unobserved node:
+                //   - entering from parent: propagate to children as from parent
+                //     e.g., chain A -> M -> B can continue through M.
+                //   - entering from child: propagate to parents as from child,
+                //     and to children as from parent
+                //     e.g., in a fork A <- M -> B, arriving from A can
+                //     continue to B.
+                //     However, in both cases; in A -> M <- B (collider), unobserved M will
+                //     still block crossing between parents under these transitions.
+                if (cur.dir() == Dir.FROM_PARENT) {
+                    for (String c : g.childrenOf(cur.nodeId())) {
+                        queue.add(new State(c, Dir.FROM_PARENT));
+                    }
+                } else {
+                    for (String p : g.parentsOf(cur.nodeId())) {
+                        queue.add(new State(p, Dir.FROM_CHILD));
+                    }
+                    for (String c : g.childrenOf(cur.nodeId())) {
+                        queue.add(new State(c, Dir.FROM_PARENT));
+                    }
+                }
+            }
+        }
+
+        return DSeparationResult.separated("no active path connects `x` to `y` given `z`");
     }
 
     @Override
