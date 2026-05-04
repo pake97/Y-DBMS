@@ -25,11 +25,12 @@ public record ChangeBatch(
         List<String> addedVariables,
         List<String> removedVariables,
         List<Edge>   addedEdges,
-        List<Edge>   removedEdges
+        List<Edge>   removedEdges,
+        boolean      requiresInvalidate
 ) {
 
     /** A canonical empty batch — use for transactions that don't touch the causal schema. */
-    public static final ChangeBatch EMPTY = new ChangeBatch(List.of(), List.of(), List.of(), List.of());
+    public static final ChangeBatch EMPTY = new ChangeBatch(List.of(), List.of(), List.of(), List.of(), false);
 
     /** A directed edge identified by endpoint {@code id} properties. */
     public record Edge(String from, String to) {}
@@ -39,7 +40,8 @@ public record ChangeBatch(
         return addedVariables.isEmpty()
             && removedVariables.isEmpty()
             && addedEdges.isEmpty()
-            && removedEdges.isEmpty();
+            && removedEdges.isEmpty()
+            && !requiresInvalidate;
     }
 
     public static Builder builder() {
@@ -51,18 +53,21 @@ public record ChangeBatch(
         private final List<String> removedVariables = new ArrayList<>();
         private final List<Edge>   addedEdges       = new ArrayList<>();
         private final List<Edge>   removedEdges     = new ArrayList<>();
+        private boolean requiresInvalidate;
 
         public Builder addedVariable(String id)              { addedVariables.add(id); return this; }
         public Builder removedVariable(String id)            { removedVariables.add(id); return this; }
         public Builder addedEdge(String from, String to)     { addedEdges.add(new Edge(from, to)); return this; }
         public Builder removedEdge(String from, String to)   { removedEdges.add(new Edge(from, to)); return this; }
+        public Builder requireInvalidate()                   { requiresInvalidate = true; return this; }
 
         public ChangeBatch build() {
             return new ChangeBatch(
                 Collections.unmodifiableList(addedVariables),
                 Collections.unmodifiableList(removedVariables),
                 Collections.unmodifiableList(addedEdges),
-                Collections.unmodifiableList(removedEdges)
+                Collections.unmodifiableList(removedEdges),
+                requiresInvalidate
             );
         }
     }

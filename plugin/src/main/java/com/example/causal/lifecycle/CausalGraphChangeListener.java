@@ -1,7 +1,9 @@
 package com.example.causal.lifecycle;
 
 import com.example.causal.api.CausalGraphRuntime;
+import com.example.causal.runtime.DefaultCausalGraphRuntime;
 import com.example.causal.runtime.RuntimeRegistry;
+import com.example.causal.runtime.compile.CompiledCausalGraph;
 import org.neo4j.graphdb.GraphDatabaseService;
 import org.neo4j.graphdb.Label;
 import org.neo4j.graphdb.Node;
@@ -14,6 +16,7 @@ import org.neo4j.graphdb.event.TransactionData;
 import org.neo4j.graphdb.event.TransactionEventListener;
 
 import java.util.logging.Logger;
+import java.util.*;
 
 /**
  * Neo4j transaction listener that observes causal-schema mutations and keeps
@@ -81,6 +84,9 @@ public final class CausalGraphChangeListener implements TransactionEventListener
 
     /** Property on {@code :CAUSES} toggling whether the edge is loaded into the snapshot. */
     public static final String PROP_ACTIVE = "active";
+    public static final String PROP_LATENT = "latent";
+    public static final String PROP_OBSERVED = "observed";
+    public static final String PROP_NAME = "name";
 
     // -------------------------------------------------------------------------
     // beforeCommit — observe + diff
@@ -110,8 +116,8 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         // Added CAUSES edges (only those with active = true, matching GraphLoader).
         for (Relationship r : data.createdRelationships()) {
             if (r.isType(CAUSES) && isActive(r)) {
-                String from = (String) r.getStartNode().getProperty(PROP_ID, null);
-                String to   = (String) r.getEndNode().getProperty(PROP_ID, null);
+                String from = nodeId(r.getStartNode());
+                String to   = nodeId(r.getEndNode());
                 if (from != null && to != null) batch.addedEdge(from, to);
             }
         }
@@ -125,21 +131,42 @@ public final class CausalGraphChangeListener implements TransactionEventListener
                 if (from != null && to != null) {
                     batch.removedEdge(from, to);
                 }
+             }
+         }
+
+        // Property flips on active CAUSES rels.
+        for (PropertyEntry<Relationship> prop : data.assignedRelationshipProperties()) {
+            if (!PROP_ACTIVE.equals(prop.key())) continue;
+            Relationship r = prop.entity();
+            if (!r.isType(CAUSES)) continue;
+            boolean prev = asBoolean(prop.previouslyCommittedValue(), true);
+            boolean next = asBoolean(prop.value(), true);
+            if (prev == next) continue;
+
+            String from = nodeId(r.getStartNode());
+            String to = nodeId(r.getEndNode());
+            if (from == null || to == null) continue;
+            if (!prev && next) batch.addedEdge(from, to);
+            if (prev && !next) batch.removedEdge(from, to);
+        }
+
+        // Tier 1 behavior: variable property updates still require a full
+        // invalidate because ChangeBatch currently patches only topology.
+        // TODO(tier 2): add property updates to ChangeBatch and evolve the snapshot incrementally, instead of full invalidation.
+        for (PropertyEntry<Node> prop : data.assignedNodeProperties()) {
+            Node n = prop.entity();
+            if (!n.hasLabel(VARIABLE)) continue;
+            String key = prop.key();
+            if (PROP_LATENT.equals(key) || PROP_OBSERVED.equals(key) || PROP_NAME.equals(key) || PROP_ID.equals(key)) {
+                batch.requireInvalidate();
+                break;
             }
         }
 
-        // TODO(student, tier 1): handle property-change cases:
-        //   - r.active flips false → true  ⇒  treat as an added edge
-        //   - r.active flips true  → false ⇒  treat as a removed edge
-        //   - v.latent flips               ⇒  in-place property update on snapshot
-        // Use data.assignedRelationshipProperties() / data.assignedNodeProperties()
-        // and inspect previouslyCommittedValue() vs value().
-
-        // TODO(student, tier 1): validation. If an added edge would create a
-        // cycle in the resulting DAG, throw here to abort the transaction.
-        // Example: new PathAnalyzer(snapshot).hasDirectedPath(to, from) ⇒ cycle.
-
-        return batch.build();
+        ChangeBatch built = batch.build();
+        // validate the batch, throw if it would create a cycle in the resulting DAG
+        validateBatchOrThrow(built);
+        return built;
     }
 
     // -------------------------------------------------------------------------
@@ -173,8 +200,23 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         //
         // Safe default until step 1 lands: blow away the snapshot.
         CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        if (batch.requiresInvalidate()) {
+            runtime.invalidate();
+            LOG.fine(() -> "Invalidated snapshot after transaction (property update): " + summarise(batch));
+            return;
+        }
+        if (runtime instanceof DefaultCausalGraphRuntime internal) {
+            try {
+                if (internal.applyChange(batch)) {
+                    LOG.fine(() -> "Applied incremental snapshot patch: " + summarise(batch));
+                    return;
+                }
+            } catch (RuntimeException ex) {
+                LOG.warning("Incremental patch failed, falling back to invalidate: " + ex.getMessage());
+            }
+        }
         runtime.invalidate();
-        LOG.fine(() -> "Invalidated snapshot after transaction: " + summarise(batch));
+        LOG.fine(() -> "Invalidated snapshot after transaction (fallback): " + summarise(batch));
     }
     @Override
     public void afterRollback(TransactionData data, ChangeBatch batch, GraphDatabaseService db) {
@@ -194,16 +236,21 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         if (data.deletedNodes().iterator().hasNext()) return true;
         if (data.createdRelationships().iterator().hasNext()) return true;
         if (data.deletedRelationships().iterator().hasNext()) return true;
+        if (data.assignedRelationshipProperties().iterator().hasNext()) return true;
+        if (data.assignedNodeProperties().iterator().hasNext()) return true;
         for (LabelEntry l : data.assignedLabels())   if (l.label().equals(VARIABLE)) return true;
         for (LabelEntry l : data.removedLabels())    if (l.label().equals(VARIABLE)) return true;
-        // Property-change paths — enable once the TODOs above consume them.
-        // if (data.assignedRelationshipProperties().iterator().hasNext()) return true;
         return false;
     }
 
     private static boolean isActive(Relationship r) {
         Object v = r.getProperty(PROP_ACTIVE, Boolean.TRUE);
         return v instanceof Boolean b ? b : true;
+    }
+
+    private static boolean asBoolean(Object value, boolean defaultValue) {
+        if (value == null) return defaultValue;
+        return value instanceof Boolean b ? b : defaultValue;
     }
 
     private static boolean isDeleted(TransactionData data, Node n) {
@@ -235,5 +282,71 @@ public final class CausalGraphChangeListener implements TransactionEventListener
             b.addedEdges().size(),
             b.removedEdges().size()
         );
+    }
+
+    private static String nodeId(Node node) {
+        Object id = node.getProperty(PROP_ID, null);
+        return id == null ? null : String.valueOf(id);
+    }
+
+    private static void validateBatchOrThrow(ChangeBatch batch) {
+        // validation against the staged graph + all in-transaction changes, not just the current snapshot.
+        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        if (!(runtime instanceof DefaultCausalGraphRuntime internal)) return;
+        if (!(internal.currentSnapshot() instanceof CompiledCausalGraph snapshot)) return;
+
+        Map<String, Set<String>> adjacency = mutableCopy(snapshot.forwardAdjView());
+        Set<String> variables = new LinkedHashSet<>(snapshot.variableByIdView().keySet());
+
+        for (String id : batch.addedVariables()) {
+            variables.add(id);
+            adjacency.putIfAbsent(id, new LinkedHashSet<>());
+        }
+        for (String id : batch.removedVariables()) {
+            variables.remove(id);
+            adjacency.remove(id);
+        }
+        for (Set<String> children : adjacency.values()) children.removeAll(batch.removedVariables());
+
+        for (ChangeBatch.Edge e : batch.removedEdges()) {
+            Set<String> children = adjacency.get(e.from());
+            if (children != null) children.remove(e.to());
+        }
+
+        for (ChangeBatch.Edge e : batch.addedEdges()) {
+            if (!variables.contains(e.from()) || !variables.contains(e.to())) {
+                throw new IllegalStateException(
+                        "reject write: edge endpoint missing in variable set: " + e.from() + " -> " + e.to());
+            }
+            adjacency.putIfAbsent(e.from(), new LinkedHashSet<>());
+            adjacency.putIfAbsent(e.to(), new LinkedHashSet<>());
+            if (createsCycle(adjacency, e.from(), e.to())) {
+                throw new IllegalStateException(
+                        "reject write: cycle would be introduced by edge " + e.from() + " -> " + e.to());
+            }
+            adjacency.get(e.from()).add(e.to());
+        }
+    }
+
+    private static Map<String, Set<String>> mutableCopy(Map<String, Set<String>> src) {
+        Map<String, Set<String>> copy = new LinkedHashMap<>();
+        for (Map.Entry<String, Set<String>> e : src.entrySet()) {
+            copy.put(e.getKey(), new LinkedHashSet<>(e.getValue()));
+        }
+        return copy;
+    }
+
+    private static boolean createsCycle(Map<String, Set<String>> adjacency, String from, String to) {
+        if (from.equals(to)) return true;
+        Deque<String> stack = new ArrayDeque<>();
+        Set<String> visited = new HashSet<>();
+        stack.push(to);
+        while (!stack.isEmpty()) {
+            String cur = stack.pop();
+            if (!visited.add(cur)) continue;
+            if (cur.equals(from)) return true;
+            for (String next : adjacency.getOrDefault(cur, Set.of())) stack.push(next);
+        }
+        return false;
     }
 }

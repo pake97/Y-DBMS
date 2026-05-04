@@ -261,6 +261,22 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         return indexToVar[denseIndex].id();
     }
 
+    public Map<String, Variable> variableByIdView() {
+        return variableById;
+    }
+
+    public Map<String, Set<String>> forwardAdjView() {
+        return forwardAdj;
+    }
+
+    public Map<String, Set<String>> reverseAdjView() {
+        return reverseAdj;
+    }
+
+    public Map<String, Map<String, Double>> edgeWeightsView() {
+        return edgeWeights;
+    }
+
     // -------------------------------------------------------------------------
     // Linear-Gaussian SEM accessors
     // -------------------------------------------------------------------------

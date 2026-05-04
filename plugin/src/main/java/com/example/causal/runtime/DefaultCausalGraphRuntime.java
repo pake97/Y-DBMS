@@ -6,9 +6,11 @@ import com.example.causal.runtime.algorithms.PathAnalyzer;
 import com.example.causal.runtime.algorithms.ReachabilityIndex;
 import com.example.causal.runtime.algorithms.CounterfactualInference;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
+import com.example.causal.runtime.compile.CompiledCausalGraphEvolver;
 import com.example.causal.runtime.compile.GraphLoader;
 import com.example.causal.dto.CounterfactualRecord;
 import com.example.causal.dto.LinearGaussianRecord;
+import com.example.causal.lifecycle.ChangeBatch;
 
 import java.util.*;
 
@@ -58,6 +60,19 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     @Override
     public synchronized void invalidate() {
         snapshot = null;
+    }
+
+    /**
+     * Internal hook for lifecycle listeners: apply an in-memory diff to the
+     * current snapshot without reloading from Neo4j.
+     *
+     * @return true when the patch was applied, false when there is no snapshot
+     *         to patch.
+     */
+    public synchronized boolean applyChange(ChangeBatch batch) {
+        if (snapshot == null || batch == null || batch.isEmpty() || batch.requiresInvalidate()) return false;
+        snapshot = CompiledCausalGraphEvolver.evolve(snapshot, batch);
+        return true;
     }
 
     // -------------------------------------------------------------------------
