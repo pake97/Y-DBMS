@@ -2,6 +2,9 @@ package com.example.causal.runtime.algorithms;
 
 import com.example.causal.runtime.compile.CompiledCausalGraph;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
@@ -50,8 +53,9 @@ public final class PathAnalyzer {
      * does not contain {@code to}.
      */
     public Set<String> mediators(String from, String to) {
-        // TODO(student, tier 1): implement as described above
-        throw new UnsupportedOperationException("TODO(student, tier 1): PathAnalyzer.mediators");
+        Set<String> result = new LinkedHashSet<>(reachability.descendants(from));
+        result.retainAll(reachability.ancestors(to));
+        return result;
     }
 
     /**
@@ -65,8 +69,30 @@ public final class PathAnalyzer {
      * {@code z}, inspect {@code graph.parentsOf(z)}.
      */
     public Set<String> colliders(String x, String y) {
-        // TODO(student, tier 1): implement as described above
-        throw new UnsupportedOperationException("TODO(student, tier 1): PathAnalyzer.colliders");
+        Set<String> reachableFromX = new LinkedHashSet<>(reachability.descendants(x));
+        reachableFromX.add(x);
+
+        Set<String> reachableFromY = new LinkedHashSet<>(reachability.descendants(y));
+        reachableFromY.add(y);
+
+        Set<String> ancestorsOfX = reachability.ancestors(x);
+        Set<String> ancestorsOfY = reachability.ancestors(y);
+
+        Set<String> result = new LinkedHashSet<>();
+        for (String z : graph.topoOrder()) {
+            if (z.equals(x) || z.equals(y)) continue;
+            if (ancestorsOfX.contains(z) || ancestorsOfY.contains(z)) continue;
+
+            Set<String> parentsOfZ = graph.parentsOf(z);
+            boolean hasXSideParent = parentsOfZ.stream().anyMatch(reachableFromX::contains);
+            boolean hasYSideParent = parentsOfZ.stream().anyMatch(reachableFromY::contains);
+
+            if (hasXSideParent && hasYSideParent) {
+                result.add(z);
+            }
+        }
+
+        return result;
     }
 
     /**
@@ -76,8 +102,11 @@ public final class PathAnalyzer {
      * <p>Suggested approach: one line using {@link ReachabilityIndex#ancestors}.
      */
     public Set<String> confounders(String x, String y) {
-        // TODO(student, tier 1): implement using ReachabilityIndex.ancestors intersection
-        throw new UnsupportedOperationException("TODO(student, tier 1): PathAnalyzer.confounders");
+        Set<String> commonAncestors = new LinkedHashSet<>(reachability.ancestors(x));
+        commonAncestors.retainAll(reachability.ancestors(y));
+        commonAncestors.remove(x);
+        commonAncestors.remove(y);
+        return commonAncestors;
     }
 
     /**
@@ -94,7 +123,27 @@ public final class PathAnalyzer {
      * {@code outcome} via the same BFS.
      */
     public Set<String> backdoorVariables(String treatment, String outcome) {
-        // TODO(student, tier 1): implement as described above
-        throw new UnsupportedOperationException("TODO(student, tier 1): PathAnalyzer.backdoorVariables");
+        Set<String> forbidden = reachability.descendants(treatment);
+        forbidden.add(treatment);
+        forbidden.remove(outcome);
+
+        Set<String> fromParents = undirectedReachable(graph.parentsOf(treatment), forbidden);
+        Set<String> fromOutcome = undirectedReachable(Set.of(outcome), forbidden);
+
+        fromParents.retainAll(fromOutcome);
+        fromParents.remove(outcome);
+        return fromParents;
+    }
+
+    private Set<String> undirectedReachable(Set<String> starts, Set<String> forbidden) {
+        Set<String> visited = new LinkedHashSet<>();
+        Deque<String> queue = new ArrayDeque<>(starts);
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            if (forbidden.contains(current) || !visited.add(current)) continue;
+            queue.addAll(graph.parentsOf(current));
+            queue.addAll(graph.childrenOf(current));
+        }
+        return visited;
     }
 }
