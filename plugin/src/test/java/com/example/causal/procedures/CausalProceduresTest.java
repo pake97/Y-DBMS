@@ -10,7 +10,6 @@ import org.neo4j.harness.Neo4jBuilders;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -80,29 +79,54 @@ class CausalProceduresTest {
     @Test
     void parentsOfC() {
         compile();
-        List<String> parents = collectVariableIds("CALL causal.parents(['C']) YIELD variableId RETURN variableId ORDER BY variableId");
+        List<String> parents = collectVariableIds(
+                "MATCH (c:Variable {id: 'C'}) " +
+                "CALL causal.parents([c]) YIELD variable " +
+                "RETURN variable.id AS variableId ORDER BY variableId");
         assertEquals(List.of("A", "B"), parents);
     }
 
     @Test
     void childrenOfA() {
         compile();
-        List<String> children = collectVariableIds("CALL causal.children(['A']) YIELD variableId RETURN variableId ORDER BY variableId");
+        List<String> children = collectVariableIds(
+                "MATCH (a:Variable {id: 'A'}) " +
+                "CALL causal.children([a]) YIELD variable " +
+                "RETURN variable.id AS variableId ORDER BY variableId");
         assertEquals(List.of("B", "C"), children);
     }
 
     @Test
     void ancestorsOfC() {
         compile();
-        List<String> ancestors = collectVariableIds("CALL causal.ancestors(['C']) YIELD variableId RETURN variableId ORDER BY variableId");
+        List<String> ancestors = collectVariableIds(
+                "MATCH (c:Variable {id: 'C'}) " +
+                "CALL causal.ancestors([c]) YIELD variable " +
+                "RETURN variable.id AS variableId ORDER BY variableId");
         assertEquals(List.of("A", "B"), ancestors);
     }
 
     @Test
     void descendantsOfA() {
         compile();
-        List<String> descendants = collectVariableIds("CALL causal.descendants(['A']) YIELD variableId RETURN variableId ORDER BY variableId");
+        List<String> descendants = collectVariableIds(
+                "MATCH (a:Variable {id: 'A'}) " +
+                "CALL causal.descendants([a]) YIELD variable " +
+                "RETURN variable.id AS variableId ORDER BY variableId");
         assertEquals(List.of("B", "C"), descendants);
+    }
+
+    @Test
+    void yieldsVariableNodesWithCorrectLabel() {
+        compile();
+        try (Transaction tx = db.beginTx()) {
+            Result r = tx.execute(
+                    "MATCH (c:Variable {id: 'C'}) " +
+                    "CALL causal.parents([c]) YIELD variable RETURN labels(variable) AS labels");
+            @SuppressWarnings("unchecked")
+            List<String> labels = (List<String>) r.next().get("labels");
+            assertTrue(labels.contains("Variable"));
+        }
     }
 
     @Test
@@ -140,10 +164,24 @@ class CausalProceduresTest {
     @Test
     void dsepReturnsResult() {
         compile();
-        // The result is unimplemented, but the procedure must not throw
         try (Transaction tx = db.beginTx()) {
-            Result result = tx.execute("CALL causal.dsep(['A'], ['C'], ['B']) YIELD separated RETURN separated");
+            Result result = tx.execute(
+                    "MATCH (a:Variable {id: 'A'}), (c:Variable {id: 'C'}), (b:Variable {id: 'B'}) " +
+                    "CALL causal.dsep([a], [c], [b]) YIELD separated RETURN separated");
             assertNotNull(result.next().get("separated"));
+        }
+    }
+
+    @Test
+    void rejectsNonVariableNode() {
+        compile();
+        try (Transaction tx = db.beginTx()) {
+            assertThrows(Exception.class, () -> {
+                tx.execute(
+                        "CREATE (n:Other) " +
+                        "WITH n " +
+                        "CALL causal.parents([n]) YIELD variable RETURN variable");
+            });
         }
     }
 
@@ -153,7 +191,6 @@ class CausalProceduresTest {
 
     private void compile() {
         try (Transaction tx = db.beginTx()) {
-            // Consume all rows to ensure the procedure body fully executes before closing
             Result r = tx.execute("CALL causal.compile()");
             while (r.hasNext()) r.next();
             tx.commit();

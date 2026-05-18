@@ -119,10 +119,12 @@ public class Neo4jQueryExecutor implements QueryExecutor {
         CypherQuery q = translator.adjustmentCandidate(s.treatment(), s.outcome());
         try (Session session = openSession()) {
             Record row = session.run(q.cypher(), q.params()).single();
-            boolean exists = row.get("exists").asBoolean();
+            boolean exists = row.get("adjustmentSetExists").asBoolean();
             String explanation = row.get("explanation").asString();
-            List<Set<String>> sets = row.get("sets").asList(v -> v.asList(Value::asString))
-                .stream().map(LinkedHashSet<String>::new).collect(Collectors.toList());
+            List<Set<String>> sets = row.get("candidateSets").asList(outer ->
+                    new LinkedHashSet<>(outer.asList(inner ->
+                            inner.asNode().get("id").asString())))
+                .stream().collect(Collectors.toList());
             return new IdentificationResult(
                 s.treatment(), s.outcome(), exists,
                 exists ? "backdoor adjustment" : "not identifiable via backdoor",

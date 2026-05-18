@@ -139,8 +139,10 @@ public final class CypherTranslator {
 
     public CypherQuery adjustmentCandidate(String treatment, String outcome) {
         return CypherQuery.read(
-            "CALL causal.adjustmentCandidate($t, $o) YIELD exists, sets, explanation " +
-            "RETURN exists, sets, explanation",
+            "MATCH (t:Variable {id: $t}), (o:Variable {id: $o}) " +
+            "CALL causal.adjustmentCandidate(t, o) " +
+            "YIELD adjustmentSetExists, candidateSets, explanation " +
+            "RETURN adjustmentSetExists, candidateSets, explanation",
             Map.of("t", treatment, "o", outcome),
             null // multi-column — handled specially
         );
@@ -177,15 +179,19 @@ public final class CypherTranslator {
 
     private CypherQuery callList(String procedure, String var) {
         return CypherQuery.read(
-            "CALL " + procedure + "($vars) YIELD variableId RETURN variableId",
-            Map.of("vars", List.of(var)),
+            "MATCH (anchor:Variable {id: $var}) " +
+            "CALL " + procedure + "([anchor]) YIELD variable " +
+            "RETURN variable.id AS variableId ORDER BY variableId",
+            Map.of("var", var),
             "variableId"
         );
     }
 
     private CypherQuery callPair(String procedure, String a, String b) {
         return CypherQuery.read(
-            "CALL " + procedure + "($a, $b) YIELD variableId RETURN variableId",
+            "MATCH (a:Variable {id: $a}), (b:Variable {id: $b}) " +
+            "CALL " + procedure + "(a, b) YIELD variable " +
+            "RETURN variable.id AS variableId ORDER BY variableId",
             Map.of("a", a, "b", b),
             "variableId"
         );
