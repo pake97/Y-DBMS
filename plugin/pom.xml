@@ -40,6 +40,14 @@
     </dependencies>
 
     <build>
+        <testResources>
+            <testResource>
+                <directory>${project.basedir}/../dev</directory>
+                <includes>
+                    <include>seed-dag.cypher</include>
+                </includes>
+            </testResource>
+        </testResources>
         <plugins>
             <!--
                 Shade produces a fat JAR with all non-provided dependencies bundled.
