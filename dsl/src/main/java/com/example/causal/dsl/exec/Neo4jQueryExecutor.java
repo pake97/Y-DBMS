@@ -174,6 +174,33 @@ public class Neo4jQueryExecutor implements QueryExecutor {
         return new TextResult(sb.toString());
     }
 
+    // ─── REPL escape hatch ───────────────────────────────────────────────────
+
+    /**
+     * Run arbitrary Cypher against the same database the DSL targets and return
+     * the rows as formatted lines. This is the REPL's {@code :cypher} passthrough:
+     * the DSL grammar does not parse Cypher, so this bypasses it entirely while
+     * reusing this executor's session/database configuration.
+     *
+     * <p>Accepts reads and writes alike — uses an auto-commit transaction.
+     * Returns the column header plus one line per row; an empty result yields a
+     * single {@code "(no rows)"} line.
+     */
+    public List<String> runRawCypher(String cypher) {
+        List<String> lines = new ArrayList<>();
+        try (Session session = openSession()) {
+            org.neo4j.driver.Result result = session.run(cypher);
+            List<String> keys = result.keys();
+            if (!keys.isEmpty()) lines.add(String.join(" | ", keys));
+            result.stream().forEach(rec ->
+                lines.add(keys.stream()
+                    .map(k -> rec.get(k).toString())
+                    .collect(Collectors.joining(" | "))));
+        }
+        if (lines.size() <= 1) lines.add("(no rows)");
+        return lines;
+    }
+
     // ─── Session plumbing ────────────────────────────────────────────────────
 
     private Session openSession() {
