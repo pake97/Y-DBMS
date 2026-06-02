@@ -41,6 +41,14 @@
             <version>5.28.1</version>
         </dependency>
 
+        <!-- Embedded Neo4j for DSL→plugin end-to-end tests: Bolt + the causal.* procedures. -->
+        <dependency>
+            <groupId>org.neo4j.test</groupId>
+            <artifactId>neo4j-harness</artifactId>
+            <version>${neo4j.version}</version>
+            <scope>test</scope>
+        </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

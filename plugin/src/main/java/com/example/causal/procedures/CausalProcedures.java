@@ -41,7 +41,7 @@ public class CausalProcedures {
     // causal.compile()
     // =========================================================================
 
-    @Procedure(name = "causal.compile", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.COMPILE, mode = Mode.READ)
     @Description(
         "Compile the causal graph from Neo4j (:Variable nodes, :CAUSES relationships) " +
         "into an in-memory snapshot. Must be called before any structural query procedure. " +
@@ -57,7 +57,7 @@ public class CausalProcedures {
     // causal.invalidate()
     // =========================================================================
 
-    @Procedure(name = "causal.invalidate", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.INVALIDATE, mode = Mode.READ)
     @Description(
         "Discard the current compiled snapshot. " +
         "The next call to causal.compile() will re-read the graph from Neo4j."
@@ -71,7 +71,7 @@ public class CausalProcedures {
     // causal.parents(variables)
     // =========================================================================
 
-    @Procedure(name = "causal.parents", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.PARENTS, mode = Mode.READ)
     @Description("Return the direct parents (immediate causes) of each :Variable node.")
     public Stream<VariableNodeRecord> parents(
             @Name("variables") List<Node> variables
@@ -84,7 +84,7 @@ public class CausalProcedures {
     // causal.children(variables)
     // =========================================================================
 
-    @Procedure(name = "causal.children", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.CHILDREN, mode = Mode.READ)
     @Description("Return the direct children (immediate effects) of each :Variable node.")
     public Stream<VariableNodeRecord> children(
             @Name("variables") List<Node> variables
@@ -97,7 +97,7 @@ public class CausalProcedures {
     // causal.ancestors(variables)
     // =========================================================================
 
-    @Procedure(name = "causal.ancestors", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.ANCESTORS, mode = Mode.READ)
     @Description("Return all ancestors (transitive causes) of each :Variable node.")
     public Stream<VariableNodeRecord> ancestors(
             @Name("variables") List<Node> variables
@@ -110,7 +110,7 @@ public class CausalProcedures {
     // causal.descendants(variables)
     // =========================================================================
 
-    @Procedure(name = "causal.descendants", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.DESCENDANTS, mode = Mode.READ)
     @Description("Return all descendants (transitive effects) of each :Variable node.")
     public Stream<VariableNodeRecord> descendants(
             @Name("variables") List<Node> variables
@@ -123,7 +123,7 @@ public class CausalProcedures {
     // causal.dsep(x, y, z)
     // =========================================================================
 
-    @Procedure(name = "causal.dsep", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.DSEP, mode = Mode.READ)
     @Description(
         "Test d-separation: are the variables in X independent of those in Y " +
         "conditional on Z? (X ⊥ Y | Z in the causal DAG)"
@@ -145,7 +145,7 @@ public class CausalProcedures {
     // causal.adjustmentCandidate(treatment, outcome)
     // =========================================================================
 
-    @Procedure(name = "causal.adjustmentCandidate", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.ADJUSTMENT_CANDIDATE, mode = Mode.READ)
     @Description(
         "Find candidate adjustment sets for identifying the causal effect of " +
         "treatment on outcome from observational data."
@@ -174,7 +174,7 @@ public class CausalProcedures {
     // causal.mediators(from, to)
     // =========================================================================
 
-    @Procedure(name = "causal.mediators", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.MEDIATORS, mode = Mode.READ)
     @Description(
         "Return variables on at least one directed path from from to to, " +
         "excluding the endpoints. Used by the DSL to answer MEDIATORS BETWEEN."
@@ -190,7 +190,7 @@ public class CausalProcedures {
     // causal.colliders(x, y)
     // =========================================================================
 
-    @Procedure(name = "causal.colliders", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.COLLIDERS, mode = Mode.READ)
     @Description(
         "Return variables where effects from x and effects from y meet head-to-head. " +
         "Used by the DSL to answer COLLIDERS BETWEEN."
@@ -206,7 +206,7 @@ public class CausalProcedures {
     // causal.confounders(x, y)
     // =========================================================================
 
-    @Procedure(name = "causal.confounders", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.CONFOUNDERS, mode = Mode.READ)
     @Description(
         "Return common ancestors of x and y. Used by the DSL to answer CONFOUNDERS OF."
     )
@@ -221,7 +221,7 @@ public class CausalProcedures {
     // causal.backdoorVariables(treatment, outcome)
     // =========================================================================
 
-    @Procedure(name = "causal.backdoorVariables", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.BACKDOOR_VARIABLES, mode = Mode.READ)
     @Description(
         "Return variables on backdoor paths from treatment to outcome. " +
         "Used by the DSL to answer BACKDOOR PATHS BETWEEN."
@@ -237,7 +237,7 @@ public class CausalProcedures {
     // causal.inspectSnapshot()
     // =========================================================================
 
-    @Procedure(name = "causal.inspectSnapshot", mode = Mode.READ)
+    @Procedure(name = ProcedureNames.INSPECT_SNAPSHOT, mode = Mode.READ)
     @Description("Return metadata about the current compiled snapshot without recompiling.")
     public Stream<SnapshotRecord> inspectSnapshot() {
         GraphSnapshot snap = RuntimeRegistry.getInstance().currentSnapshot();
