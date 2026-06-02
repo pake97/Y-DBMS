@@ -133,7 +133,7 @@ class CausalProceduresTest {
     void hasDirectedPathFromAtoC() {
         compile();
         try (Transaction tx = db.beginTx()) {
-            Result result = tx.execute("RETURN causal.hasDirectedPath('A', 'C') AS connected");
+            Result result = tx.execute("MATCH (a:Variable {id: 'A'}), (c:Variable {id: 'C'}) RETURN causal.hasDirectedPath(a, c) AS connected");
             assertEquals(Boolean.TRUE, result.next().get("connected"));
         }
     }
@@ -142,7 +142,7 @@ class CausalProceduresTest {
     void noDirectedPathFromCtoA() {
         compile();
         try (Transaction tx = db.beginTx()) {
-            Result result = tx.execute("RETURN causal.hasDirectedPath('C', 'A') AS connected");
+            Result result = tx.execute("MATCH (a:Variable {id: 'A'}), (c:Variable {id: 'C'}) RETURN causal.hasDirectedPath(c, a) AS connected");
             assertEquals(Boolean.FALSE, result.next().get("connected"));
         }
     }
