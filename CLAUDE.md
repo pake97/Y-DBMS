@@ -21,10 +21,22 @@ mvn test -pl plugin                        # all plugin tests
 mvn test -pl plugin -Dtest=TopologicalSorterTest   # pure Java unit tests (fast, no Neo4j)
 mvn test -pl plugin -Dtest=CausalProceduresTest    # integration tests (~2 min, embedded Neo4j)
 
+# DSL module — note the -am
+mvn test -pl dsl -am                       # ALWAYS pass -am for module-scoped dsl tests
+mvn test -pl dsl -Dtest=DslPluginE2ETest -am -Dsurefire.failIfNoSpecifiedTests=false
+
 # Local dev workflow — build, deploy to local Neo4j, restart
 mvn package -pl plugin -P deploy -DskipTests
 ./dev/seed.sh                              # load the COVID-19 DAG after Neo4j starts
 ```
+
+**Module-scoped tests and `-am`**: `dsl` depends on `causal4j-plugin`. Running
+`mvn test -pl dsl` *without* `-am` resolves a possibly-stale `causal4j-plugin`
+from your local `~/.m2` instead of rebuilding it from source — which produces
+confusing failures (e.g. "no procedure `causal.mediators`" or "expected
+List<String> but was List<Node>") when source has moved ahead of the installed
+JAR. Always use `-am` (or `mvn install` the plugin first). A full `mvn test`
+from the repo root builds the reactor in order and is unaffected.
 
 Java 17 required (same as Neo4j 2025.x).
 
