@@ -122,7 +122,9 @@ public final class CypherTranslator {
 
     /** Trigger a recompile of the plugin's in-memory snapshot. */
     public CypherQuery compile() {
-        return CypherQuery.read("CALL causal.compile() YIELD size RETURN size", Map.of(), "size");
+        return CypherQuery.read(
+            "CALL causal.compile() YIELD variableCount RETURN variableCount",
+            Map.of(), "variableCount");
     }
 
     // ─── Reads (structural + identification) ─────────────────────────────────
