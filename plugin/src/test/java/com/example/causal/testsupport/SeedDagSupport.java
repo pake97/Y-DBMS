@@ -17,8 +17,8 @@ import java.util.stream.Collectors;
  */
 public final class SeedDagSupport {
 
-    public static final int EXPECTED_VARIABLES = 25;
-    public static final int EXPECTED_CAUSES_EDGES = 78;
+    public static final long EXPECTED_VARIABLES = 25;
+    public static final long EXPECTED_CAUSES_EDGES = 78;
 
     private SeedDagSupport() {}
 
