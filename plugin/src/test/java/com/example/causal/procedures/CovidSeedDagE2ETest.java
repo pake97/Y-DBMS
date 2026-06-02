@@ -59,7 +59,7 @@ class CovidSeedDagE2ETest {
             Result result = tx.execute(
                 "CALL causal.compile() YIELD variableCount, variables RETURN variableCount, variables");
             var row = result.next();
-            assertEquals(SeedDagSupport.EXPECTED_VARIABLES, row.get("variableCount"));
+            assertEquals((long) SeedDagSupport.EXPECTED_VARIABLES, row.get("variableCount"));
             @SuppressWarnings("unchecked")
             List<String> vars = (List<String>) row.get("variables");
             assertEquals(SeedDagSupport.EXPECTED_VARIABLES, vars.size());
@@ -71,7 +71,9 @@ class CovidSeedDagE2ETest {
     void parentsOfOnsetCovid19() {
         SeedDagSupport.compile(db);
         List<String> parents = collectIds(
-            "CALL causal.parents(['onset_covid19']) YIELD variableId RETURN variableId ORDER BY variableId");
+            "MATCH (v:Variable {id: 'onset_covid19'}) " +
+            "CALL causal.parents([v]) YIELD variable " +
+            "RETURN variable.id AS variableId ORDER BY variableId");
         assertEquals(
             List.of("access_tests", "age", "exposure_sarscov2", "gender", "susceptibility"),
             parents);
@@ -81,7 +83,9 @@ class CovidSeedDagE2ETest {
     void childrenOfInterventions() {
         SeedDagSupport.compile(db);
         List<String> children = collectIds(
-            "CALL causal.children(['interventions']) YIELD variableId RETURN variableId ORDER BY variableId");
+            "MATCH (v:Variable {id: 'interventions'}) " +
+            "CALL causal.children([v]) YIELD variable " +
+            "RETURN variable.id AS variableId ORDER BY variableId");
         assertEquals(List.of("exposure_sarscov2", "mobility", "searches_corona"), children);
     }
 
@@ -89,7 +93,9 @@ class CovidSeedDagE2ETest {
     void ancestorsOfReportedCasesIncludeExposureChain() {
         SeedDagSupport.compile(db);
         Set<String> ancestors = Set.copyOf(collectIds(
-            "CALL causal.ancestors(['reported_cases']) YIELD variableId RETURN variableId"));
+            "MATCH (v:Variable {id: 'reported_cases'}) " +
+            "CALL causal.ancestors([v]) YIELD variable " +
+            "RETURN variable.id AS variableId"));
         assertTrue(ancestors.contains("onset_covid19"));
         assertTrue(ancestors.contains("exposure_sarscov2"));
         assertTrue(ancestors.contains("interventions"));

@@ -1,5 +1,7 @@
 package com.example.causal.dsl.exec;
 
+import com.example.causal.api.ProcedureNames;
+import com.example.causal.api.ResultColumns;
 import com.example.causal.dsl.ast.*;
 import com.example.causal.dsl.model.VariableType;
 
@@ -123,28 +125,32 @@ public final class CypherTranslator {
     /** Trigger a recompile of the plugin's in-memory snapshot. */
     public CypherQuery compile() {
         return CypherQuery.read(
-            "CALL causal.compile() YIELD variableCount RETURN variableCount",
-            Map.of(), "variableCount");
+            "CALL " + ProcedureNames.COMPILE + "() YIELD " + ResultColumns.VARIABLE_COUNT +
+            " RETURN " + ResultColumns.VARIABLE_COUNT,
+            Map.of(), ResultColumns.VARIABLE_COUNT);
     }
 
     // ─── Reads (structural + identification) ─────────────────────────────────
 
-    public CypherQuery causesOf(String var)      { return callList("causal.parents",     var); }
-    public CypherQuery effectsOf(String var)     { return callList("causal.children",    var); }
-    public CypherQuery ancestorsOf(String var)   { return callList("causal.ancestors",   var); }
-    public CypherQuery descendantsOf(String var) { return callList("causal.descendants", var); }
+    public CypherQuery causesOf(String var)      { return callList(ProcedureNames.PARENTS,     var); }
+    public CypherQuery effectsOf(String var)     { return callList(ProcedureNames.CHILDREN,    var); }
+    public CypherQuery ancestorsOf(String var)   { return callList(ProcedureNames.ANCESTORS,   var); }
+    public CypherQuery descendantsOf(String var) { return callList(ProcedureNames.DESCENDANTS, var); }
 
-    public CypherQuery mediators(String from, String to)    { return callPair("causal.mediators", from, to); }
-    public CypherQuery colliders(String x, String y)        { return callPair("causal.colliders", x, y); }
-    public CypherQuery confounders(String x, String y)      { return callPair("causal.confounders", x, y); }
-    public CypherQuery backdoorPaths(String t, String y)    { return callPair("causal.backdoorVariables", t, y); }
+    public CypherQuery mediators(String from, String to)    { return callPair(ProcedureNames.MEDIATORS, from, to); }
+    public CypherQuery colliders(String x, String y)        { return callPair(ProcedureNames.COLLIDERS, x, y); }
+    public CypherQuery confounders(String x, String y)      { return callPair(ProcedureNames.CONFOUNDERS, x, y); }
+    public CypherQuery backdoorPaths(String t, String y)    { return callPair(ProcedureNames.BACKDOOR_VARIABLES, t, y); }
 
     public CypherQuery adjustmentCandidate(String treatment, String outcome) {
+        String cols = ResultColumns.ADJUSTMENT_SET_EXISTS + ", " +
+                      ResultColumns.CANDIDATE_SETS + ", " +
+                      ResultColumns.EXPLANATION;
         return CypherQuery.read(
             "MATCH (t:Variable {id: $t}), (o:Variable {id: $o}) " +
-            "CALL causal.adjustmentCandidate(t, o) " +
-            "YIELD adjustmentSetExists, candidateSets, explanation " +
-            "RETURN adjustmentSetExists, candidateSets, explanation",
+            "CALL " + ProcedureNames.ADJUSTMENT_CANDIDATE + "(t, o) " +
+            "YIELD " + cols + " " +
+            "RETURN " + cols,
             Map.of("t", treatment, "o", outcome),
             null // multi-column — handled specially
         );
@@ -180,20 +186,22 @@ public final class CypherTranslator {
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     private CypherQuery callList(String procedure, String var) {
+        String v = ResultColumns.VARIABLE;
         return CypherQuery.read(
             "MATCH (anchor:Variable {id: $var}) " +
-            "CALL " + procedure + "([anchor]) YIELD variable " +
-            "RETURN variable.id AS variableId ORDER BY variableId",
+            "CALL " + procedure + "([anchor]) YIELD " + v + " " +
+            "RETURN " + v + ".id AS variableId ORDER BY variableId",
             Map.of("var", var),
             "variableId"
         );
     }
 
     private CypherQuery callPair(String procedure, String a, String b) {
+        String v = ResultColumns.VARIABLE;
         return CypherQuery.read(
             "MATCH (a:Variable {id: $a}), (b:Variable {id: $b}) " +
-            "CALL " + procedure + "(a, b) YIELD variable " +
-            "RETURN variable.id AS variableId ORDER BY variableId",
+            "CALL " + procedure + "(a, b) YIELD " + v + " " +
+            "RETURN " + v + ".id AS variableId ORDER BY variableId",
             Map.of("a", a, "b", b),
             "variableId"
         );

@@ -12,13 +12,13 @@ import java.util.Arrays;
 import java.util.stream.Collectors;
 
 /**
- * Loads {@code dev/seed-dag.cypher} (COVID-19 DAG: 25 variables, 76 edges) into
+ * Loads {@code dev/seed-dag.cypher} (COVID-19 DAG: 25 variables, 78 edges) into
  * an embedded or harness Neo4j database for end-to-end tests.
  */
 public final class SeedDagSupport {
 
     public static final int EXPECTED_VARIABLES = 25;
-    public static final int EXPECTED_CAUSES_EDGES = 76;
+    public static final int EXPECTED_CAUSES_EDGES = 78;
 
     private SeedDagSupport() {}
 
