@@ -146,8 +146,10 @@ Sample output:
 
  [1/1] READ (yield: variableId)
    Cypher:
-     CALL causal.parents($vars) YIELD variableId RETURN variableId
-   Params: vars = [Retention30]
+     MATCH (anchor:Variable {id: $var})
+     CALL causal.parents([anchor]) YIELD variable
+     RETURN variable.id AS variableId ORDER BY variableId
+   Params: var = Retention30
 ```
 
 ---
@@ -201,20 +203,26 @@ Waits until Neo4j is ready, then loads 25 variables and 76 causal edges from
 // Compile the in-memory snapshot
 CALL causal.compile() YIELD size RETURN size;
 
-// Structural queries
-CALL causal.ancestors(['reported_cases'])  YIELD variableId RETURN variableId;
-CALL causal.parents(['exposure_sarscov2']) YIELD variableId RETURN variableId;
+// Structural queries (pass :Variable nodes; procedures yield nodes)
+MATCH (cases:Variable {id: 'reported_cases'})
+CALL causal.ancestors([cases]) YIELD variable RETURN variable;
+
+MATCH (exposure:Variable {id: 'exposure_sarscov2'})
+CALL causal.parents([exposure]) YIELD variable RETURN variable;
+
 RETURN causal.hasDirectedPath('interventions', 'reported_cases') AS isCause;
 
 // Adjustment set candidate (backdoor)
-CALL causal.adjustmentCandidate('interventions', 'reported_cases')
-    YIELD exists, sets, explanation
-RETURN exists, sets;
+MATCH (t:Variable {id: 'interventions'}), (y:Variable {id: 'reported_cases'})
+CALL causal.adjustmentCandidate(t, y)
+    YIELD adjustmentSetExists, candidateSets, explanation
+RETURN adjustmentSetExists, candidateSets;
 
-// Path queries (new — used by the DSL)
-CALL causal.mediators('interventions', 'reported_cases')        YIELD variableId RETURN variableId;
-CALL causal.confounders('interventions', 'reported_cases')      YIELD variableId RETURN variableId;
-CALL causal.backdoorVariables('interventions', 'reported_cases') YIELD variableId RETURN variableId;
+// Path queries (used by the DSL)
+MATCH (t:Variable {id: 'interventions'}), (y:Variable {id: 'reported_cases'})
+CALL causal.mediators(t, y) YIELD variable RETURN variable;
+CALL causal.confounders(t, y) YIELD variable RETURN variable;
+CALL causal.backdoorVariables(t, y) YIELD variable RETURN variable;
 ```
 
 ### Deploy to a different Neo4j server
