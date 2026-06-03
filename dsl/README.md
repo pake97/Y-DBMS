@@ -15,13 +15,15 @@ REPLs, and how programs are executed against Neo4j, see
 
 1. [Lexical structure](#lexical-structure)
 2. [Schema statements](#schema-statements) — `DEFINE CAUSAL VARIABLE`, `DEFINE CAUSAL DAG`, `DEFINE MODEL`
-3. [Structural queries](#structural-queries) — parents, children, ancestors, descendants, mediators, colliders, confounders, backdoor
-4. [Identification](#identification) — `IDENTIFY EFFECT OF … ON …`
-5. [Estimation](#estimation) — `ESTIMATE EFFECT OF … ON …` *(v1 stub)*
-6. [Intervention & counterfactual](#intervention--counterfactual) *(v1 stubs)*
-7. [Inspection](#inspection) — `SHOW DAG`, `DESCRIBE VARIABLE`
-8. [Grammar](#grammar)
-9. [Full example](#full-example)
+3. [Linear-Gaussian parameters](#linear-gaussian-parameters) — `WEIGHT`, `MEAN`, `NOISE`
+4. [Structural queries](#structural-queries) — parents, children, ancestors, descendants, mediators, colliders, confounders, backdoor
+5. [Identification](#identification) — `IDENTIFY EFFECT OF … ON …`
+6. [Estimation](#estimation) — `ESTIMATE EFFECT OF … ON …` *(v1 stub)*
+7. [Intervention & context switching](#intervention--context-switching) — `INTERVENE`, `USE MODEL`, `RESET`
+8. [Counterfactual](#counterfactual) *(v1 stub)*
+9. [Inspection](#inspection) — `SHOW DAG`, `DESCRIBE VARIABLE`
+10. [Grammar](#grammar)
+11. [Full example](#full-example)
 
 ---
 
@@ -66,6 +68,8 @@ DEFINE CAUSAL VARIABLE <name>
     [OBSERVED AS "<cypher>"]
     [TYPE <variableType>]
     [ROLE <variableRole>]
+    [MEAN <number>]
+    [NOISE <number>]
 ```
 
 Registers a single variable.
@@ -79,6 +83,10 @@ Registers a single variable.
   `latent` marks a variable that is not directly observed; all others are observed.
 - `ROLE` — one of `treatment`, `outcome`, `covariate`, `mediator`, `collider`,
   `confounder`, `unknown`. Hint for planners; does not constrain the graph.
+- `MEAN` / `NOISE` — linear-Gaussian parameters (intercept and noise variance);
+  see [Linear-Gaussian parameters](#linear-gaussian-parameters). Honored when the
+  variable is declared inside a `DEFINE MODEL` block; on a standalone
+  `DEFINE CAUSAL VARIABLE` they are accepted but ignored in v1.
 
 **Example**
 
@@ -90,12 +98,14 @@ DEFINE CAUSAL VARIABLE Age FOR UNIT User TYPE continuous ROLE covariate
 
 ```
 DEFINE CAUSAL DAG <name> {
-    <from> -> <to>
+    <from> -> <to> [WEIGHT <number>]
     ...
 }
 ```
 
-Declares a set of causal edges. Endpoints that were not previously defined are
+Declares a set of causal edges. The optional `WEIGHT` is the linear-Gaussian
+structural coefficient β for that edge (see
+[Linear-Gaussian parameters](#linear-gaussian-parameters)). Endpoints that were not previously defined are
 auto-registered as observed variables with no type / role. Prefer
 [`DEFINE MODEL`](#define-model) when you want to declare variable metadata and
 the graph together.
@@ -114,10 +124,10 @@ DEFINE CAUSAL DAG Retention {
 
 ```
 DEFINE MODEL <name> {
-    VARIABLE <name> [FOR UNIT ...] [OBSERVED AS ...] [TYPE ...] [ROLE ...]
+    VARIABLE <name> [FOR UNIT ...] [OBSERVED AS ...] [TYPE ...] [ROLE ...] [MEAN ...] [NOISE ...]
     ...
     DAG {
-        <from> -> <to>
+        <from> -> <to> [WEIGHT <number>]
         ...
     }
 }
@@ -145,6 +155,51 @@ DEFINE MODEL UserRetentionModel {
     }
 }
 ```
+
+---
+
+## Linear-Gaussian parameters
+
+Edges and variables may carry **linear-Gaussian structural-equation parameters**.
+With them, a model is no longer just a structural DAG — each variable is
+
+```
+V = intercept_V  +  Σ_{P ∈ parents(V)} β_{P→V} · P  +  ε_V ,   ε_V ~ N(0, σ²_V)
+```
+
+| Clause | Where | Meaning | Default |
+|---|---|---|---|
+| `WEIGHT <number>` | on an edge `A -> B` | coefficient β for `A → B` | `1.0` |
+| `MEAN <number>` | on a variable | intercept (structural constant) | `0.0` |
+| `NOISE <number>` | on a variable | noise variance σ² | `1.0` |
+
+A model that declares **any** of these is *parameterized*; one that declares none
+stays *structural-only*. Parameters power numeric answers from
+[`INTERVENE`](#intervention--context-switching) (`EXPECTATION`, `DISTRIBUTION`,
+`EFFECT`); a structural-only model answers `INTERVENE` qualitatively instead.
+
+`MEAN` / `NOISE` are honored on variables declared inside a `DEFINE MODEL` block
+(and default otherwise). `WEIGHT` is honored on edges in either DAG form.
+
+> **Scope:** numeric evaluation runs on the **in-memory** executor. Against the
+> Neo4j backend the linear-Gaussian engine is not yet wired (it is a plugin
+> exercise), so `INTERVENE` there returns the structural answer.
+
+**Example**
+
+```
+DEFINE MODEL Chain {
+    VARIABLE X MEAN 0 NOISE 1
+    VARIABLE M MEAN 0 NOISE 1
+    VARIABLE Y MEAN 0 NOISE 1
+    DAG {
+        X -> M WEIGHT 2
+        M -> Y WEIGHT 3
+    }
+}
+```
+
+Here the total effect of `X` on `Y` is `2 · 3 = 6`.
 
 ---
 
@@ -241,10 +296,7 @@ ESTIMATE EFFECT OF Treatment ON Retention30 ADJUST FOR [Engagement]
 
 ---
 
-## Intervention & counterfactual
-
-> Both are **v1 parse-only stubs** — the AST is built but execution is not
-> implemented. They are listed here so the syntax is stable for future work.
+## Intervention & context switching
 
 ### `INTERVENE`
 
@@ -255,10 +307,65 @@ INTERVENE ON <var> = <value>
     RETURN (DISTRIBUTION OF <V> | EFFECT ON <V> | EXPECTATION OF <V>)
 ```
 
-Do-calculus intervention: `do(X = x)`. `COMPARE TO` computes a contrast against
-a second intervention (for ATE-like quantities).
+The do-operator `do(X = x)`. Execution is a **graph transformation plus a context
+switch**:
 
-### `COUNTERFACTUAL`
+1. A new **derived world** is created by graph surgery — every edge *into* `X` is
+   removed and `X` is fixed to `value`. The original model is left untouched.
+2. The derived world is registered under an ID-safe name
+   `<model>_do_<var>_<value>` and becomes the **active graph**. Every subsequent
+   statement runs against it until you [`USE MODEL`](#use-model) or
+   [`RESET`](#reset).
+3. The `RETURN` clause is answered against the derived world.
+
+`FROM MODEL` derives from a named model instead of the active one. `COMPARE TO`
+contrasts against a second intervention value.
+
+**What `RETURN` yields** depends on whether the model is
+[parameterized](#linear-gaussian-parameters):
+
+| | Structural-only model | Linear-Gaussian model |
+|---|---|---|
+| `EFFECT ON Y` | does `do(X)` reach `Y`? + the causal pathway | total causal effect coefficient |
+| `EXPECTATION OF Y` | structural note | `E[Y \| do(X=x)]` |
+| `DISTRIBUTION OF Y` | structural note | mean **and** variance of `Y` |
+| `COMPARE TO` | "identical structure" note | numeric contrast `Δ` |
+
+**Example** (against the parameterized `Chain` model above)
+
+```
+INTERVENE ON X = 1 RETURN EFFECT ON Y          // total effect = 6
+INTERVENE ON X = 4 RETURN EXPECTATION OF Y      // E[Y | do(X=4)] = 24
+INTERVENE ON X = 1 RETURN DISTRIBUTION OF Y     // mean 6, variance 10
+INTERVENE ON X = 1 COMPARE TO X = 0 RETURN EFFECT ON Y   // Δ = 6
+```
+
+### `USE MODEL`
+
+```
+USE MODEL <name>
+```
+
+Switch the active graph to a registered model — a base model or a derived
+intervention world (e.g. `Chain_do_X_1`). Lets you move between worlds and
+compare queries across them.
+
+### `RESET`
+
+```
+RESET
+```
+
+Reset the active graph back to the base (original) model, discarding the active
+intervention world. Derived worlds stay registered and remain reachable via
+`USE MODEL`.
+
+---
+
+## Counterfactual
+
+> **v1 parse-only stub** — the AST is built but execution is not implemented.
+> Listed here so the syntax is stable for future work.
 
 ```
 COUNTERFACTUAL [FOR <unit>("<id>")]
@@ -309,6 +416,8 @@ statement           = defineVariableStmt
                     | estimateStmt
                     | interveneStmt
                     | counterfactualStmt
+                    | useModelStmt
+                    | resetStmt
                     | showDagStmt
                     | describeVariableStmt ;
 
@@ -316,17 +425,20 @@ defineVariableStmt  = 'DEFINE' 'CAUSAL' 'VARIABLE' ID
                       [ 'FOR' 'UNIT' ID ]
                       [ 'OBSERVED' 'AS' STRING ]
                       [ 'TYPE' variableType ]
-                      [ 'ROLE' variableRole ] ;
+                      [ 'ROLE' variableRole ]
+                      [ 'MEAN' NUMBER ]
+                      [ 'NOISE' NUMBER ] ;
 
 defineModelStmt     = 'DEFINE' 'MODEL' ID '{' variableDecl* dagBlock '}'
                     | 'DEFINE' 'CAUSAL' 'DAG' ID '{' edge+ '}' ;
 
 variableDecl        = 'VARIABLE' ID [ 'FOR' 'UNIT' ID ]
                       [ 'OBSERVED' 'AS' STRING ]
-                      [ 'TYPE' variableType ] [ 'ROLE' variableRole ] ;
+                      [ 'TYPE' variableType ] [ 'ROLE' variableRole ]
+                      [ 'MEAN' NUMBER ] [ 'NOISE' NUMBER ] ;
 
 dagBlock            = 'DAG' '{' edge+ '}' ;
-edge                = ID '->' ID ;
+edge                = ID '->' ID [ 'WEIGHT' NUMBER ] ;
 
 structuralQuery     = 'CAUSES' 'OF' ID
                     | 'EFFECTS' 'OF' ID
@@ -354,6 +466,9 @@ interveneStmt       = [ 'FROM' 'MODEL' ID ]
 counterfactualStmt  = 'COUNTERFACTUAL' [ 'FOR' ID '(' STRING ')' ]
                       [ 'GIVEN' assignment (',' assignment)* ]
                       'WHAT' 'WOULD' ID 'HAVE' 'BEEN' 'IF' assignment ;
+
+useModelStmt        = 'USE' 'MODEL' ID ;
+resetStmt           = 'RESET' ;
 
 assignment          = ID '=' literal ;
 literal             = NUMBER | STRING | BOOL ;
