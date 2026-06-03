@@ -71,6 +71,7 @@ public final class CypherTranslator {
             case CounterfactualStmt s -> List.of();
             case UseModelStmt       s -> List.of();  // context switch — no Cypher
             case ResetStmt          s -> List.of();
+            case ShowModelsStmt     s -> List.of();  // registry-side listing — no Cypher
         };
     }
 

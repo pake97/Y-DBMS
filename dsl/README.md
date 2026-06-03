@@ -21,7 +21,7 @@ REPLs, and how programs are executed against Neo4j, see
 6. [Estimation](#estimation) — `ESTIMATE EFFECT OF … ON …` *(v1 stub)*
 7. [Intervention & context switching](#intervention--context-switching) — `INTERVENE`, `USE MODEL`, `RESET`
 8. [Counterfactual](#counterfactual) *(v1 stub)*
-9. [Inspection](#inspection) — `SHOW DAG`, `DESCRIBE VARIABLE`
+9. [Inspection](#inspection) — `SHOW MODELS`, `SHOW DAG`, `DESCRIBE VARIABLE`
 10. [Grammar](#grammar)
 11. [Full example](#full-example)
 
@@ -380,6 +380,17 @@ would the outcome have been under the stated intervention.
 
 ## Inspection
 
+### `SHOW MODELS`
+
+```
+SHOW MODELS
+```
+
+Lists every registered model — base models and derived intervention worlds (e.g.
+`Chain_do_X_1`) — marking which one is the **active graph** with `*`. Pairs with
+[`INTERVENE`](#intervention--context-switching) / [`USE MODEL`](#use-model) /
+[`RESET`](#reset) so you can see and navigate the worlds you have created.
+
 ### `SHOW DAG`
 
 ```
@@ -418,6 +429,7 @@ statement           = defineVariableStmt
                     | counterfactualStmt
                     | useModelStmt
                     | resetStmt
+                    | showModelsStmt
                     | showDagStmt
                     | describeVariableStmt ;
 
@@ -473,6 +485,7 @@ resetStmt           = 'RESET' ;
 assignment          = ID '=' literal ;
 literal             = NUMBER | STRING | BOOL ;
 
+showModelsStmt      = 'SHOW' 'MODELS' ;
 showDagStmt         = 'SHOW' 'DAG' [ ID ] ;
 describeVariableStmt= 'DESCRIBE' 'VARIABLE' ID ;
 

@@ -21,6 +21,7 @@ statement
     | counterfactualStmt
     | useModelStmt
     | resetStmt
+    | showModelsStmt
     | showDagStmt
     | describeVariableStmt
     ;
@@ -128,6 +129,7 @@ resetStmt    : RESET ;
 
 // ─── Inspection ───────────────────────────────────────────────────────────────
 
+showModelsStmt       : SHOW MODELS ;
 showDagStmt          : SHOW DAG name=ID? ;
 describeVariableStmt : DESCRIBE VARIABLE name=ID ;
 
@@ -145,6 +147,7 @@ literal : NUMBER | STRING | BOOL ;
 DEFINE        : 'DEFINE' ;
 CAUSAL        : 'CAUSAL' ;
 VARIABLE      : 'VARIABLE' ;
+MODELS        : 'MODELS' ;
 MODEL         : 'MODEL' ;
 DAG           : 'DAG' ;
 FOR           : 'FOR' ;

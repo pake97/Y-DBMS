@@ -43,6 +43,7 @@ public class InMemoryQueryExecutor implements QueryExecutor {
             case CounterfactualStmt  s -> new TextResult("COUNTERFACTUAL not yet implemented in v1");
             case UseModelStmt        s -> executeUseModel(s);
             case ResetStmt           s -> executeReset(s);
+            case ShowModelsStmt      s -> ModelListResult.from(registry);
             case ShowDagStmt         s -> executeShowDag(s);
             case DescribeVariableStmt s -> executeDescribeVariable(s);
         };

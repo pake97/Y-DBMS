@@ -5,4 +5,5 @@ public sealed interface QueryResult permits
     VariableSetResult,
     IdentificationResult,
     InterventionResult,
+    ModelListResult,
     TextResult {}
