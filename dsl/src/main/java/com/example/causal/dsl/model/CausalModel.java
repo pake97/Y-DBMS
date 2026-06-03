@@ -18,6 +18,14 @@ public class CausalModel {
     /** Variables fixed by intervention: var -> value of do(var = value). Empty for a base model. */
     private final Map<String, String> fixedValues = new LinkedHashMap<>();
 
+    // ─── Linear-Gaussian SEM parameters (all optional; absent ⇒ structural-only graph) ──
+    /** Edge coefficients β, keyed child -> (parent -> β) to match parents(V) iteration. */
+    private final Map<String, Map<String, Double>> weights = new HashMap<>();
+    /** Per-variable intercept μ₀ (structural-equation constant). Default 0.0. */
+    private final Map<String, Double> intercepts = new HashMap<>();
+    /** Per-variable noise variance σ². Default 1.0. */
+    private final Map<String, Double> noiseVars = new HashMap<>();
+
     public CausalModel(String name) {
         this.name = name;
     }
@@ -44,6 +52,64 @@ public class CausalModel {
 
     public Optional<CausalVariable> variable(String name) {
         return Optional.ofNullable(variables.get(name));
+    }
+
+    // ─── Linear-Gaussian SEM parameters ─────────────────────────────────────────
+
+    /** Declare the structural coefficient β for edge {@code from -> to}. */
+    public void setWeight(String from, String to, double beta) {
+        weights.computeIfAbsent(to, k -> new LinkedHashMap<>()).put(from, beta);
+    }
+
+    /** Declare the intercept (structural-equation constant) for a variable. */
+    public void setIntercept(String var, double mean) {
+        intercepts.put(var, mean);
+    }
+
+    /** Declare the noise variance σ² for a variable. */
+    public void setNoise(String var, double variance) {
+        noiseVars.put(var, variance);
+    }
+
+    /** Coefficient β for edge {@code from -> to}; default 1.0 when not declared. */
+    public double weight(String from, String to) {
+        return weights.getOrDefault(to, Map.of()).getOrDefault(from, 1.0);
+    }
+
+    /** Intercept for a variable; default 0.0 when not declared. */
+    public double intercept(String var) {
+        return intercepts.getOrDefault(var, 0.0);
+    }
+
+    /** Noise variance σ² for a variable; default 1.0 when not declared. */
+    public double noiseVar(String var) {
+        return noiseVars.getOrDefault(var, 1.0);
+    }
+
+    /** True if any SEM parameter (weight, intercept, or noise) was explicitly declared. */
+    public boolean isParameterized() {
+        return !weights.isEmpty() || !intercepts.isEmpty() || !noiseVars.isEmpty();
+    }
+
+    /**
+     * Topological order (parents before children) via Kahn's algorithm. Used by the
+     * linear-Gaussian engine to propagate means/variances along the DAG.
+     */
+    public List<String> topologicalOrder() {
+        Map<String, Integer> indegree = new LinkedHashMap<>();
+        for (String v : variables.keySet()) indegree.put(v, parents.getOrDefault(v, Set.of()).size());
+        Deque<String> ready = new ArrayDeque<>();
+        for (var e : indegree.entrySet()) if (e.getValue() == 0) ready.add(e.getKey());
+        List<String> order = new ArrayList<>();
+        while (!ready.isEmpty()) {
+            String v = ready.poll();
+            order.add(v);
+            for (String child : children.getOrDefault(v, Set.of())) {
+                int d = indegree.merge(child, -1, Integer::sum);
+                if (d == 0) ready.add(child);
+            }
+        }
+        return order;
     }
 
     // ─── Intervention (the do-operator) ─────────────────────────────────────────
@@ -74,6 +140,10 @@ public class CausalModel {
         for (Map.Entry<String, Set<String>> e : children.entrySet())
             for (String to : e.getValue()) c.addEdge(e.getKey(), to);
         c.fixedValues.putAll(this.fixedValues);
+        // Deep-copy SEM parameters (inner maps are mutable) so the derived world is independent.
+        this.weights.forEach((to, byParent) -> c.weights.put(to, new LinkedHashMap<>(byParent)));
+        c.intercepts.putAll(this.intercepts);
+        c.noiseVars.putAll(this.noiseVars);
         return c;
     }
 

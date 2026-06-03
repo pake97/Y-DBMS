@@ -98,8 +98,9 @@ final class StructuralEvaluator {
     }
 
     /**
-     * Render the RETURN answer of an INTERVENE against the already-derived world
-     * G′. Structural only: reports whether do(x) reaches y and the causal pathway.
+     * Render the RETURN answer of an INTERVENE against the already-derived world G′.
+     * Structural always (does do(x) reach y, and the pathway); plus numeric answers
+     * when G′ is a parameterized linear-Gaussian model with numeric do-values.
      */
     private static InterventionResult render(CausalModel gPrime, InterveneStmt s) {
         String x = s.intervention().variable();
@@ -109,12 +110,29 @@ final class StructuralEvaluator {
         boolean affects = gPrime.descendants(x).contains(y);
         Set<String> pathway = affects ? gPrime.mediators(x, y) : Set.of();
 
+        boolean numeric = gPrime.isParameterized() && LinearGaussianSEM.hasNumericInterventions(gPrime);
+        if (numeric) {
+            LinearGaussianSEM sem = new LinearGaussianSEM(gPrime);
+            double expectation = sem.means().get(y);
+            double totalEffect = sem.totalEffect(x, y);
+            Double variance = s.returnType().equals("DISTRIBUTION") ? sem.variances().get(y) : null;
+            Double compareDelta = null;
+            String compareNote = null;
+            if (s.compareTo() != null) {
+                double v2 = Double.parseDouble(s.compareTo().value());
+                compareDelta = totalEffect * (Double.parseDouble(v) - v2);
+                compareNote = "linear-Gaussian: contrast = totalEffect·(v − v₂) = " + compareDelta;
+            }
+            return new InterventionResult(x, v, y, s.returnType(), affects, pathway, gPrime.name(),
+                null, compareNote, expectation, variance, totalEffect, compareDelta);
+        }
+
+        // Structural-only fallback (no declared parameters, or non-numeric do-value).
         String note = switch (s.returnType()) {
             case "EFFECT" -> "Numeric magnitude of the effect requires the parameter layer (not implemented in v1).";
             default       -> "Structural form only; numeric " + s.returnType()
                               + " requires the parameter layer (not implemented in v1).";
         };
-
         String compareNote = null;
         if (s.compareTo() != null) {
             String v2 = s.compareTo().value();
@@ -123,7 +141,7 @@ final class StructuralEvaluator {
                 + "numeric contrast E[" + y + "|do(" + x + "=" + v + ")] − E[" + y + "|do(" + x + "=" + v2 + ")] "
                 + "requires the parameter layer.";
         }
-
-        return new InterventionResult(x, v, y, s.returnType(), affects, pathway, gPrime.name(), note, compareNote);
+        return new InterventionResult(x, v, y, s.returnType(), affects, pathway, gPrime.name(),
+            note, compareNote, null, null, null, null);
     }
 }

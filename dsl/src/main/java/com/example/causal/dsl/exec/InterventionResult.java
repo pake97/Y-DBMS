@@ -18,8 +18,12 @@ import java.util.Set;
  * @param affectsTarget   whether {@code do(x)} causally reaches y (y is a descendant of x)
  * @param pathway         mediators on the directed path(s) x → y (empty if unaffected)
  * @param derivedModel    name of the derived world now active (e.g. {@code Model_do_x_1})
- * @param note            structural caveat — numeric values require the parameter layer
+ * @param note            structural caveat (null once numerics are present)
  * @param compareNote     non-null when COMPARE TO was given; describes the structural contrast
+ * @param expectation     E[y | do(x=v)] — non-null only for a parameterized (linear-Gaussian) model
+ * @param variance        Var(y | do(x=v)) — non-null only for a parameterized model
+ * @param totalEffect     total causal effect coefficient of x on y — non-null only for a parameterized model
+ * @param compareDelta    E[y|do(x=v)] − E[y|do(x=v₂)] — non-null only with COMPARE TO on a parameterized model
  */
 public record InterventionResult(
     String intervenedVar,
@@ -30,8 +34,17 @@ public record InterventionResult(
     Set<String> pathway,
     String derivedModel,
     String note,
-    String compareNote
+    String compareNote,
+    Double expectation,
+    Double variance,
+    Double totalEffect,
+    Double compareDelta
 ) implements QueryResult {
+
+    /** True when this carries numeric answers from a parameterized linear-Gaussian model. */
+    public boolean isNumeric() {
+        return expectation != null || totalEffect != null;
+    }
 
     @Override
     public String toString() {
@@ -47,8 +60,13 @@ public record InterventionResult(
             sb.append("  no causal effect: P(").append(targetVar).append(" | do(")
               .append(intervenedVar).append(")) = P(").append(targetVar).append(")\n");
         }
+        if (expectation != null) sb.append("  E[").append(targetVar).append(" | do] = ").append(expectation).append('\n');
+        if (variance != null)    sb.append("  Var[").append(targetVar).append(" | do] = ").append(variance).append('\n');
+        if (totalEffect != null) sb.append("  total effect ").append(intervenedVar).append("→").append(targetVar)
+                                   .append(" = ").append(totalEffect).append('\n');
+        if (compareDelta != null) sb.append("  contrast Δ = ").append(compareDelta).append('\n');
         if (compareNote != null) sb.append("  ").append(compareNote).append('\n');
-        sb.append("  ").append(note);
-        return sb.toString();
+        if (note != null) sb.append("  ").append(note);
+        return sb.toString().stripTrailing();
     }
 }

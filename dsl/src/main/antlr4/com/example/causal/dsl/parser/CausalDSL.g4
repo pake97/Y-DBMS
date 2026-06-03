@@ -34,6 +34,8 @@ defineVariableStmt
       (OBSERVED AS observedAs=STRING)?
       (TYPE varType=variableType)?
       (ROLE varRole=variableRole)?
+      (MEAN m=NUMBER)?
+      (NOISE n=NUMBER)?
     ;
 
 // Block form:  DEFINE MODEL Name { VARIABLE ... DAG { ... } }
@@ -49,11 +51,14 @@ variableDecl
       (OBSERVED AS observedAs=STRING)?
       (TYPE varType=variableType)?
       (ROLE varRole=variableRole)?
+      (MEAN m=NUMBER)?
+      (NOISE n=NUMBER)?
     ;
 
 dagBlock : DAG LBRACE edge+ RBRACE ;
 
-edge : from=ID ARROW to=ID ;
+// Optional WEIGHT carries the linear-Gaussian structural coefficient β for the edge.
+edge : from=ID ARROW to=ID (WEIGHT w=NUMBER)? ;
 
 // ─── Structural queries ───────────────────────────────────────────────────────
 
@@ -185,6 +190,9 @@ IF            : 'IF' ;
 GIVEN         : 'GIVEN' ;
 USE           : 'USE' ;
 RESET         : 'RESET' ;
+WEIGHT        : 'WEIGHT' ;
+MEAN          : 'MEAN' ;
+NOISE         : 'NOISE' ;
 SHOW          : 'SHOW' ;
 DESCRIBE      : 'DESCRIBE' ;
 

@@ -70,7 +70,7 @@ public class AstBuilder extends CausalDSLBaseVisitor<Object> {
             .map(vd -> (VariableDecl) visit(vd))
             .collect(Collectors.toList());
         List<DagEdge> edges = ctx.dagBlock().edge().stream()
-            .map(e -> new DagEdge(e.from.getText(), e.to.getText()))
+            .map(e -> new DagEdge(e.from.getText(), e.to.getText(), dbl(e.w)))
             .collect(Collectors.toList());
         return new DefineModelStmt(ctx.name.getText(), vars, edges);
     }
@@ -78,7 +78,7 @@ public class AstBuilder extends CausalDSLBaseVisitor<Object> {
     @Override
     public Object visitDefineCausalDagBlock(CausalDSLParser.DefineCausalDagBlockContext ctx) {
         List<DagEdge> edges = ctx.edge().stream()
-            .map(e -> new DagEdge(e.from.getText(), e.to.getText()))
+            .map(e -> new DagEdge(e.from.getText(), e.to.getText(), dbl(e.w)))
             .collect(Collectors.toList());
         return new DefineDagStmt(ctx.name.getText(), edges);
     }
@@ -90,7 +90,9 @@ public class AstBuilder extends CausalDSLBaseVisitor<Object> {
             ctx.unit != null ? ctx.unit.getText() : null,
             ctx.observedAs != null ? new ObservationBinding(stripQuotes(ctx.observedAs.getText()), ctx.unit != null ? ctx.unit.getText() : null) : null,
             ctx.varType != null ? toVariableType(ctx.varType) : null,
-            ctx.varRole != null ? toVariableRole(ctx.varRole) : null
+            ctx.varRole != null ? toVariableRole(ctx.varRole) : null,
+            dbl(ctx.m),
+            dbl(ctx.n)
         );
     }
 
@@ -218,6 +220,11 @@ public class AstBuilder extends CausalDSLBaseVisitor<Object> {
 
     private Assignment toAssignment(CausalDSLParser.AssignmentContext ctx) {
         return new Assignment(ctx.var.getText(), ctx.value.getText());
+    }
+
+    /** Parse an optional NUMBER token to a Double, or null when the token is absent. */
+    private static Double dbl(Token t) {
+        return t != null ? Double.parseDouble(t.getText()) : null;
     }
 
     private VariableType toVariableType(CausalDSLParser.VariableTypeContext ctx) {

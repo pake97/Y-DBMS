@@ -61,6 +61,9 @@ public class InMemoryQueryExecutor implements QueryExecutor {
         CausalModel model = new CausalModel(s.name());
         for (VariableDecl vd : s.variables()) {
             model.addVariable(new CausalVariable(vd.name(), vd.unit(), vd.binding(), vd.type(), vd.role()));
+            // Linear-Gaussian parameters are honored inside DEFINE MODEL blocks.
+            if (vd.mean()  != null) model.setIntercept(vd.name(), vd.mean());
+            if (vd.noise() != null) model.setNoise(vd.name(), vd.noise());
         }
         // Merge in any standalone variables whose names appear in the DAG edges
         Set<String> edgeVarNames = new HashSet<>();
@@ -69,7 +72,7 @@ public class InMemoryQueryExecutor implements QueryExecutor {
             if (edgeVarNames.contains(name) && model.variables().get(name) == null)
                 model.addVariable(v);
         });
-        for (DagEdge e : s.edges()) model.addEdge(e.from(), e.to());
+        for (DagEdge e : s.edges()) addEdge(model, e);
         registry.registerModel(model);
         return new TextResult("defined model: " + s.name() + " (" + s.edges().size() + " edges)");
     }
@@ -82,10 +85,16 @@ public class InMemoryQueryExecutor implements QueryExecutor {
             CausalVariable to   = registry.standaloneVariables().get(e.to());
             if (from != null) model.addVariable(from);
             if (to   != null) model.addVariable(to);
-            model.addEdge(e.from(), e.to());
+            addEdge(model, e);
         }
         registry.registerModel(model);
         return new TextResult("defined DAG: " + s.name() + " (" + s.edges().size() + " edges)");
+    }
+
+    /** Add an edge and, when a WEIGHT was declared, its linear-Gaussian coefficient. */
+    private static void addEdge(CausalModel model, DagEdge e) {
+        model.addEdge(e.from(), e.to());
+        if (e.weight() != null) model.setWeight(e.from(), e.to(), e.weight());
     }
 
     // ─── Structural queries + identification ────────────────────────────────────

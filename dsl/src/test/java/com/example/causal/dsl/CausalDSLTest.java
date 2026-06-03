@@ -241,6 +241,83 @@ class CausalDSLTest {
         assertEquals(Set.of(), derived.variables());
     }
 
+    // ─── Linear-Gaussian SEM (declared coefficients) ────────────────────────────
+
+    private static CausalDSL chainModel() {
+        // X --2--> M --3--> Y, all noise 1, intercept 0.  total effect X→Y = 2·3 = 6
+        CausalDSL m = new CausalDSL();
+        m.executeScript("""
+            DEFINE MODEL Chain {
+              VARIABLE X MEAN 0 NOISE 1
+              VARIABLE M MEAN 0 NOISE 1
+              VARIABLE Y MEAN 0 NOISE 1
+              DAG { X -> M WEIGHT 2   M -> Y WEIGHT 3 }
+            }
+            """);
+        return m;
+    }
+
+    @Test
+    void sem_totalEffectIsProductOfPathCoefficients() {
+        InterventionResult r = (InterventionResult)
+            chainModel().execute("INTERVENE ON X=1 RETURN EFFECT ON Y");
+        assertEquals(6.0, r.totalEffect(), 1e-9);
+    }
+
+    @Test
+    void sem_interventionalExpectationPropagates() {
+        // do(X=4): μ(M)=2·4=8, μ(Y)=3·8=24
+        InterventionResult r = (InterventionResult)
+            chainModel().execute("INTERVENE ON X=4 RETURN EXPECTATION OF Y");
+        assertEquals(24.0, r.expectation(), 1e-9);
+    }
+
+    @Test
+    void sem_distributionGivesMeanAndVariance() {
+        // do(X=1): μ(Y)=3·2=6; Var(M)=σ²=1, Var(Y)=3²·1+1=10
+        InterventionResult r = (InterventionResult)
+            chainModel().execute("INTERVENE ON X=1 RETURN DISTRIBUTION OF Y");
+        assertEquals(6.0, r.expectation(), 1e-9);
+        assertEquals(10.0, r.variance(), 1e-9);
+    }
+
+    @Test
+    void sem_compareToGivesNumericContrast() {
+        InterventionResult r = (InterventionResult)
+            chainModel().execute("INTERVENE ON X=1 COMPARE TO X=0 RETURN EFFECT ON Y");
+        assertEquals(6.0, r.compareDelta(), 1e-9);   // totalEffect·(1−0)
+    }
+
+    @Test
+    void sem_doIsolatesDirectPathInConfoundedFork() {
+        // Z--5-->X, Z--7-->Y, X--2-->Y.  do(X) cuts Z→X, so total effect X→Y = 2 (backdoor excluded).
+        CausalDSL m = new CausalDSL();
+        m.executeScript("""
+            DEFINE MODEL Fork {
+              VARIABLE Z MEAN 0 NOISE 1
+              VARIABLE X MEAN 0 NOISE 1
+              VARIABLE Y MEAN 0 NOISE 1
+              DAG { Z -> X WEIGHT 5   Z -> Y WEIGHT 7   X -> Y WEIGHT 2 }
+            }
+            """);
+        InterventionResult eff = (InterventionResult) m.execute("INTERVENE ON X=1 RETURN EFFECT ON Y");
+        assertEquals(2.0, eff.totalEffect(), 1e-9);
+        // do(X=3): μ(Y)=7·μ(Z)+2·3 = 0+6 = 6; Var(Y)=7²·Var(Z)+σ²_Y = 49+1 = 50 (X fixed ⇒ no cross-term)
+        InterventionResult dist = (InterventionResult) m.execute("INTERVENE ON X=3 RETURN DISTRIBUTION OF Y");
+        assertEquals(6.0, dist.expectation(), 1e-9);
+        assertEquals(50.0, dist.variance(), 1e-9);
+    }
+
+    @Test
+    void sem_unparameterizedModelStaysStructural() {
+        // The setUp UserRetentionModel declares no weights ⇒ no numerics, structural note preserved.
+        InterventionResult r = (InterventionResult)
+            dsl.execute("INTERVENE ON Treatment=1 RETURN DISTRIBUTION OF Retention30");
+        assertNull(r.expectation());
+        assertNull(r.totalEffect());
+        assertTrue(r.note().contains("parameter layer"));
+    }
+
     // ─── Colliders ───────────────────────────────────────────────────────────
 
     @Test
