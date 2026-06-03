@@ -1,5 +1,6 @@
 package com.example.causal.dsl;
 
+import com.example.causal.dsl.exec.CounterfactualResult;
 import com.example.causal.dsl.exec.IdentificationResult;
 import com.example.causal.dsl.exec.InterventionResult;
 import com.example.causal.dsl.exec.ModelListResult;
@@ -317,6 +318,54 @@ class CausalDSLTest {
         assertNull(r.expectation());
         assertNull(r.totalEffect());
         assertTrue(r.note().contains("parameter layer"));
+    }
+
+    // ─── Counterfactual (linear-Gaussian) ───────────────────────────────────────
+
+    @Test
+    void counterfactual_linearGaussianUnitEffect() {
+        // Chain X→M→Y (β=2,3), total effect 6. Factual Y=10 at X=1; if X had been 3:
+        //   Y_cf = 10 + 6·(3−1) = 22
+        CounterfactualResult r = (CounterfactualResult) chainModel().execute(
+            "COUNTERFACTUAL GIVEN X=1, Y=10 WHAT WOULD Y HAVE BEEN IF X=3");
+        assertEquals(10.0, r.factual(), 1e-9);
+        assertEquals(22.0, r.counterfactual(), 1e-9);
+        assertEquals(12.0, r.difference(), 1e-9);
+    }
+
+    @Test
+    void counterfactual_holdsConfoundersFixed() {
+        // Fork Z→X(5), Z→Y(7), X→Y(2): total effect X→Y = 2 (Z held at its factual value).
+        CausalDSL m = new CausalDSL();
+        m.executeScript("""
+            DEFINE MODEL Fork {
+              VARIABLE Z MEAN 0 NOISE 1
+              VARIABLE X MEAN 0 NOISE 1
+              VARIABLE Y MEAN 0 NOISE 1
+              DAG { Z -> X WEIGHT 5   Z -> Y WEIGHT 7   X -> Y WEIGHT 2 }
+            }
+            """);
+        CounterfactualResult r = (CounterfactualResult) m.execute(
+            "COUNTERFACTUAL GIVEN X=1, Y=5 WHAT WOULD Y HAVE BEEN IF X=4");
+        assertEquals(11.0, r.counterfactual(), 1e-9);   // 5 + 2·(4−1)
+        assertEquals(6.0, r.difference(), 1e-9);
+    }
+
+    @Test
+    void counterfactual_unparameterizedModelIsNotNumeric() {
+        CounterfactualResult r = (CounterfactualResult) dsl.execute(
+            "COUNTERFACTUAL GIVEN Treatment=1, Retention30=1 WHAT WOULD Retention30 HAVE BEEN IF Treatment=0");
+        assertFalse(r.isNumeric());
+        assertTrue(r.note().contains("parameter"));
+    }
+
+    @Test
+    void counterfactual_insufficientEvidence() {
+        // Parameterized, but GIVEN omits the outcome's factual value.
+        CounterfactualResult r = (CounterfactualResult) chainModel().execute(
+            "COUNTERFACTUAL GIVEN X=1 WHAT WOULD Y HAVE BEEN IF X=3");
+        assertFalse(r.isNumeric());
+        assertTrue(r.note().contains("Insufficient evidence"));
     }
 
     // ─── SHOW MODELS ─────────────────────────────────────────────────────────

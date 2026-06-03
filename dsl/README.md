@@ -20,7 +20,7 @@ REPLs, and how programs are executed against Neo4j, see
 5. [Identification](#identification) — `IDENTIFY EFFECT OF … ON …`
 6. [Estimation](#estimation) — `ESTIMATE EFFECT OF … ON …` *(v1 stub)*
 7. [Intervention & context switching](#intervention--context-switching) — `INTERVENE`, `USE MODEL`, `RESET`
-8. [Counterfactual](#counterfactual) *(v1 stub)*
+8. [Counterfactual](#counterfactual) — `COUNTERFACTUAL … WHAT WOULD … HAVE BEEN IF …`
 9. [Inspection](#inspection) — `SHOW MODELS`, `SHOW DAG`, `DESCRIBE VARIABLE`
 10. [Grammar](#grammar)
 11. [Full example](#full-example)
@@ -364,17 +364,36 @@ intervention world. Derived worlds stay registered and remain reachable via
 
 ## Counterfactual
 
-> **v1 parse-only stub** — the AST is built but execution is not implemented.
-> Listed here so the syntax is stable for future work.
-
 ```
 COUNTERFACTUAL [FOR <unit>("<id>")]
     [GIVEN <var> = <value>, ...]
     WHAT WOULD <outcome> HAVE BEEN IF <var> = <value>
 ```
 
-Unit-level counterfactual: given observed factual values (`GIVEN …`), what
-would the outcome have been under the stated intervention.
+Unit-level counterfactual: given the factual world (`GIVEN …`), what would the
+outcome have been under the stated hypothetical. On a
+[linear-Gaussian model](#linear-gaussian-parameters) this is closed-form —
+holding every noise term fixed at its factual value, the outcome is affine in the
+intervened variable:
+
+```
+Y_cf = Y_factual + totalEffect(X → Y) · (x* − X_factual)
+```
+
+so confounders and everything off the `X → Y` paths stay at their factual
+contribution. `GIVEN` must supply the numeric factual values of the intervened
+variable and the outcome. A structural-only model (no declared parameters)
+returns an explanatory note instead of a number.
+
+**Example** (on the parameterized `Chain` model, total effect `X→Y = 6`)
+
+```
+COUNTERFACTUAL GIVEN X = 1, Y = 10 WHAT WOULD Y HAVE BEEN IF X = 3
+// factual Y = 10, counterfactual Y = 22, difference = 12
+```
+
+> **Scope:** the numeric evaluation runs on the **in-memory** executor (same as
+> numeric `INTERVENE`); the Neo4j-backed engine is a plugin exercise.
 
 ---
 
