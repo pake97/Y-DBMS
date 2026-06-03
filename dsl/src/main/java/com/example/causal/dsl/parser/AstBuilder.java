@@ -206,6 +206,10 @@ public class AstBuilder extends CausalDSLBaseVisitor<Object> {
         return new ResetStmt();
     }
 
+    @Override public Object visitShowModelsStmt(CausalDSLParser.ShowModelsStmtContext ctx) {
+        return new ShowModelsStmt();
+    }
+
     // ─── Inspection ───────────────────────────────────────────────────────────
 
     @Override public Object visitShowDagStmt(CausalDSLParser.ShowDagStmtContext ctx) {

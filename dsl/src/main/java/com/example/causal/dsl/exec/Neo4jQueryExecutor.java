@@ -73,6 +73,7 @@ public class Neo4jQueryExecutor implements QueryExecutor {
 
             case UseModelStmt        s -> executeUseModel(s);
             case ResetStmt           s -> executeReset(s);
+            case ShowModelsStmt      s -> ModelListResult.from(registry);
 
             case ShowDagStmt         s -> showDag(s);
             case DescribeVariableStmt s -> describeVariable(s);

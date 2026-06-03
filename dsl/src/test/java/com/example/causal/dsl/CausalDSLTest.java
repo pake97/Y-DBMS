@@ -2,6 +2,7 @@ package com.example.causal.dsl;
 
 import com.example.causal.dsl.exec.IdentificationResult;
 import com.example.causal.dsl.exec.InterventionResult;
+import com.example.causal.dsl.exec.ModelListResult;
 import com.example.causal.dsl.exec.QueryResult;
 import com.example.causal.dsl.exec.VariableSetResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -316,6 +317,46 @@ class CausalDSLTest {
         assertNull(r.expectation());
         assertNull(r.totalEffect());
         assertTrue(r.note().contains("parameter layer"));
+    }
+
+    // ─── SHOW MODELS ─────────────────────────────────────────────────────────
+
+    @Test
+    void showModels_listsBaseModelAsActive() {
+        ModelListResult r = (ModelListResult) dsl.execute("SHOW MODELS");
+        assertEquals(1, r.models().size());
+        ModelListResult.Entry base = r.models().get(0);
+        assertEquals("UserRetentionModel", base.name());
+        assertTrue(base.active());
+        assertFalse(base.derived());
+        assertEquals("UserRetentionModel", r.activeModel());
+    }
+
+    @Test
+    void showModels_listsDerivedWorldAfterIntervene() {
+        dsl.execute("INTERVENE ON Treatment=1 RETURN EFFECT ON Retention30");
+        ModelListResult r = (ModelListResult) dsl.execute("SHOW MODELS");
+        assertEquals(2, r.models().size());
+        assertEquals("UserRetentionModel_do_Treatment_1", r.activeModel());
+
+        ModelListResult.Entry derived = r.models().stream()
+            .filter(e -> e.name().equals("UserRetentionModel_do_Treatment_1")).findFirst().orElseThrow();
+        assertTrue(derived.active());
+        assertTrue(derived.derived());
+
+        ModelListResult.Entry base = r.models().stream()
+            .filter(e -> e.name().equals("UserRetentionModel")).findFirst().orElseThrow();
+        assertFalse(base.active());
+        assertFalse(base.derived());
+    }
+
+    @Test
+    void showModels_activeFollowsReset() {
+        dsl.execute("INTERVENE ON Treatment=1 RETURN EFFECT ON Retention30");
+        dsl.execute("RESET");
+        ModelListResult r = (ModelListResult) dsl.execute("SHOW MODELS");
+        assertEquals("UserRetentionModel", r.activeModel());   // back to base; derived world still listed
+        assertEquals(2, r.models().size());
     }
 
     // ─── Colliders ───────────────────────────────────────────────────────────

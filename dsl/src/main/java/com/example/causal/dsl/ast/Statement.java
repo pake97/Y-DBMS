@@ -21,5 +21,6 @@ public sealed interface Statement permits
     CounterfactualStmt,
     UseModelStmt,
     ResetStmt,
+    ShowModelsStmt,
     ShowDagStmt,
     DescribeVariableStmt {}

@@ -38,6 +38,16 @@ public class ModelRegistry {
         return currentModelName != null && derivedModels.contains(currentModelName);
     }
 
+    /** True if the named model is a derived intervention world. */
+    public boolean isDerived(String name) {
+        return derivedModels.contains(name);
+    }
+
+    /** Name of the active graph, or empty when none is set. */
+    public Optional<String> currentModelName() {
+        return Optional.ofNullable(currentModelName);
+    }
+
     /** Switch the active graph to a registered model (base or derived). */
     public void useModel(String name) {
         if (!models.containsKey(name)) {
