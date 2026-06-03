@@ -4,7 +4,6 @@ import com.example.causal.dsl.ast.*;
 import com.example.causal.dsl.model.*;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * In-memory executor: stores DAGs in a ModelRegistry and runs structural
@@ -38,7 +37,7 @@ public class InMemoryQueryExecutor implements QueryExecutor {
             case ConfoundersOfStmt    s -> structural(s);
             case BackdoorPathsStmt    s -> structural(s);
             case IdentifyStmt        s -> structural(s);
-            case EstimateStmt        s -> executeEstimate(s);
+            case EstimateStmt        s -> EstimateEvaluator.evaluate(requireCurrentModel(), s);
             case InterveneStmt       s -> executeIntervene(s);
             case CounterfactualStmt  s -> CounterfactualEvaluator.evaluate(requireCurrentModel(), s);
             case UseModelStmt        s -> executeUseModel(s);
@@ -129,33 +128,6 @@ public class InMemoryQueryExecutor implements QueryExecutor {
         registry.reset();
         return new TextResult("active model: "
             + registry.currentModel().map(CausalModel::name).orElse("(none)"));
-    }
-
-    // ─── Estimation ───────────────────────────────────────────────────────────
-
-    private QueryResult executeEstimate(EstimateStmt s) {
-        // For v1: validate the adjustment set structurally, then stub the estimation.
-        CausalModel model = requireCurrentModel();
-        String t = s.treatment();
-        String o = s.outcome();
-        Set<String> descTreatment = model.descendants(t);
-
-        List<String> invalid = s.adjustFor().stream()
-            .filter(v -> descTreatment.contains(v))
-            .collect(Collectors.toList());
-        if (!invalid.isEmpty()) {
-            return new TextResult("ERROR: adjustment set contains descendants of " + t + ": " + invalid
-                + ". Conditioning on descendants of treatment opens collider bias.");
-        }
-
-        String estimator = s.estimator() != null ? s.estimator() : "regression";
-        String adjustStr = s.adjustFor().isEmpty() ? "(none)" : String.join(", ", s.adjustFor());
-        return new TextResult(
-            "ESTIMATE EFFECT OF " + t + " ON " + o + "\n"
-            + "  adjust for: " + adjustStr + "\n"
-            + "  estimator:  " + estimator + "\n"
-            + "  [estimation requires ObservationBinding execution — not yet implemented in v1]"
-        );
     }
 
     // ─── Inspection ───────────────────────────────────────────────────────────

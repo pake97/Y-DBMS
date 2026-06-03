@@ -6,5 +6,6 @@ public sealed interface QueryResult permits
     IdentificationResult,
     InterventionResult,
     CounterfactualResult,
+    EstimateResult,
     ModelListResult,
     TextResult {}

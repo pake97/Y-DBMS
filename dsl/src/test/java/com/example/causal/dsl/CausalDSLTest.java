@@ -1,6 +1,7 @@
 package com.example.causal.dsl;
 
 import com.example.causal.dsl.exec.CounterfactualResult;
+import com.example.causal.dsl.exec.EstimateResult;
 import com.example.causal.dsl.exec.IdentificationResult;
 import com.example.causal.dsl.exec.InterventionResult;
 import com.example.causal.dsl.exec.ModelListResult;
@@ -174,6 +175,23 @@ class CausalDSLTest {
         QueryResult r = dsl.execute(
             "ESTIMATE EFFECT OF Treatment ON Retention30 ADJUST FOR [Age, PriorUsage] USING aipw");
         assertTrue(r.toString().contains("aipw"));
+    }
+
+    @Test
+    void estimate_semImpliedEffectWhenParameterized() {
+        // Chain X→M→Y (β=2,3): SEM-implied total effect = 6.
+        EstimateResult r = (EstimateResult) chainModel().execute("ESTIMATE EFFECT OF X ON Y");
+        assertTrue(r.isNumeric());
+        assertEquals(6.0, r.effect(), 1e-9);
+    }
+
+    @Test
+    void estimate_unparameterizedDefersToExternal() {
+        // No declared coefficients → no number; estimation-from-data is out of scope (external).
+        EstimateResult r = (EstimateResult) dsl.execute(
+            "ESTIMATE EFFECT OF Treatment ON Retention30 ADJUST FOR [Age, PriorUsage]");
+        assertFalse(r.isNumeric());
+        assertTrue(r.note().contains("supplied externally"));
     }
 
     // ─── Intervention (the do-operator) ─────────────────────────────────────────

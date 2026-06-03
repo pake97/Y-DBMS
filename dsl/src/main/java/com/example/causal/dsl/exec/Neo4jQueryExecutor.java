@@ -66,8 +66,8 @@ public class Neo4jQueryExecutor implements QueryExecutor {
                 "BACKDOOR PATHS BETWEEN " + s.from() + " AND " + s.to(), translator.backdoorPaths(s.from(), s.to())));
 
             case IdentifyStmt        s -> structural(s, () -> identify(s));
-            case EstimateStmt        s -> new TextResult(
-                "ESTIMATE against Neo4j not yet implemented — requires OBSERVED AS execution.");
+            case EstimateStmt        s -> EstimateEvaluator.evaluate(
+                registry.isCurrentDerived() ? registry.currentModel().orElseThrow() : hydrateCurrentGraph(), s);
             case InterveneStmt       s -> executeIntervene(s);
             case CounterfactualStmt  s -> CounterfactualEvaluator.evaluate(
                 registry.isCurrentDerived() ? registry.currentModel().orElseThrow() : hydrateCurrentGraph(), s);
