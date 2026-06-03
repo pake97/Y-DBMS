@@ -11,26 +11,32 @@ import java.util.Set;
  * Path-based structural queries over a {@link CompiledCausalGraph}:
  * mediators, colliders, confounders, and backdoor-path variables.
  *
- * <h2>Student A implementation surface (Tier 1)</h2>
- * Each method below is stubbed with a TODO and the expected semantics.
- * The DSL depends on these via {@link com.example.causal.api.CausalGraphRuntime};
- * implementing them unblocks {@code MEDIATORS / COLLIDERS / CONFOUNDERS /
- * BACKDOOR PATHS} in the DSL. These methods can be written today against
- * the existing DFS-based {@link ReachabilityIndex} — no bitset work required.
- * See {@link com.example.causal.runtime.compile.CompiledCausalGraph} for the
- * full tiered plan.
+ * <h2>Status: implemented (Tier 1 reference example)</h2>
+ * All four methods below are implemented and covered by {@code PathAnalyzerTest}.
+ * They are the worked example for the two Tier 1 algorithms still left as an
+ * exercise — {@code isDSeparated} and {@code candidateAdjustmentSet} in
+ * {@link com.example.causal.runtime.DefaultCausalGraphRuntime}. Both follow the
+ * same shape used here: take variable ids, lean on {@link ReachabilityIndex} for
+ * ancestor/descendant sets, return a {@code Set<String>} (or a result record).
+ *
+ * <p>The DSL reaches these via {@link com.example.causal.api.CausalGraphRuntime},
+ * which is what powers {@code MEDIATORS / COLLIDERS / CONFOUNDERS / BACKDOOR
+ * PATHS}. No bitset work is involved — see
+ * {@link com.example.causal.runtime.compile.CompiledCausalGraph} for the full
+ * tiered plan and where the dense layout would change these.
  *
  * <h2>Implementation notes</h2>
  * <ul>
  *   <li>All methods work on variable ids (strings) — callers wrap results in
  *       {@code VariableRef} at the API boundary.</li>
- *   <li>Prefer reusing the existing {@link ReachabilityIndex} where possible
- *       (ancestors / descendants / hasDirectedPath).</li>
- *   <li>For a reference implementation (pure Java, same algorithms, no bitsets),
- *       see {@code dsl/model/CausalModel.java} in the DSL module — treat it as a
- *       correctness oracle, not a performance target.</li>
- *   <li>Write unit tests under {@code plugin/src/test/java/.../runtime/} in the
- *       same style as {@code TopologicalSorterTest} — pure Java, no Neo4j.</li>
+ *   <li>They reuse the existing {@link ReachabilityIndex} for ancestors /
+ *       descendants / hasDirectedPath rather than re-walking the graph.</li>
+ *   <li>For an independent reference (pure Java, same algorithms, no bitsets),
+ *       see {@code dsl/model/CausalModel.java} in the DSL module — a correctness
+ *       oracle, not a performance target.</li>
+ *   <li>Tests live in {@code plugin/src/test/java/.../runtime/algorithms/
+ *       PathAnalyzerTest} — pure Java, no Neo4j, the style to copy for the
+ *       remaining Tier 1 work.</li>
  * </ul>
  */
 public final class PathAnalyzer {
