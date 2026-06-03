@@ -113,6 +113,25 @@ graph). Port it; your numbers must match. Concrete checks from `CausalDSLTest`:
 **Done when:** the engine reproduces those numbers and the DSL's Neo4j path returns
 them for numeric `INTERVENE … RETURN DISTRIBUTION/EFFECT/EXPECTATION`.
 
+### 4b. counterfactual inference — `runtime/algorithms/CounterfactualInference.java`
+Throws `UnsupportedOperationException`. Builds on #4 (and its parameter schema).
+
+Linear-Gaussian unit counterfactual (`WHAT WOULD Y HAVE BEEN IF X = x*`, given the
+factual world): holding the noise fixed, `Y` is affine in `X`, so
+
+```
+Y_cf = Y_factual + totalEffect(X→Y) · (x* − X_factual)
+```
+
+— reuse `LinearGaussianInference.totalEffect`. (This is Pearl's
+abduction→action→prediction collapsed for a linear system.)
+
+**Reference oracle:** `dsl/src/main/java/com/example/causal/dsl/exec/CounterfactualEvaluator.java`.
+Worked check: chain `X→M→Y` (β = 2, 3), `GIVEN X=1, Y=10`, `IF X=3` ⇒ `Y_cf = 10 + 6·(3−1) = 22`.
+
+**Done when:** the DSL's Neo4j path answers `COUNTERFACTUAL` numerically against a
+parameterized live graph, matching the oracle.
+
 ---
 
 ## Tier 2 — performance (optional, after correctness)

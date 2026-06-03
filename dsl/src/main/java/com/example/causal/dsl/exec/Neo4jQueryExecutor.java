@@ -69,7 +69,8 @@ public class Neo4jQueryExecutor implements QueryExecutor {
             case EstimateStmt        s -> new TextResult(
                 "ESTIMATE against Neo4j not yet implemented — requires OBSERVED AS execution.");
             case InterveneStmt       s -> executeIntervene(s);
-            case CounterfactualStmt  s -> new TextResult("COUNTERFACTUAL not yet implemented in v1");
+            case CounterfactualStmt  s -> CounterfactualEvaluator.evaluate(
+                registry.isCurrentDerived() ? registry.currentModel().orElseThrow() : hydrateCurrentGraph(), s);
 
             case UseModelStmt        s -> executeUseModel(s);
             case ResetStmt           s -> executeReset(s);
