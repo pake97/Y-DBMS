@@ -18,7 +18,7 @@ REPLs, and how programs are executed against Neo4j, see
 3. [Linear-Gaussian parameters](#linear-gaussian-parameters) — `WEIGHT`, `MEAN`, `NOISE`
 4. [Structural queries](#structural-queries) — parents, children, ancestors, descendants, mediators, colliders, confounders, backdoor
 5. [Identification](#identification) — `IDENTIFY EFFECT OF … ON …`
-6. [Estimation](#estimation) — `ESTIMATE EFFECT OF … ON …` *(v1 stub)*
+6. [Estimation](#estimation) — `ESTIMATE EFFECT OF … ON …`
 7. [Intervention & context switching](#intervention--context-switching) — `INTERVENE`, `USE MODEL`, `RESET`
 8. [Counterfactual](#counterfactual) — `COUNTERFACTUAL … WHAT WOULD … HAVE BEEN IF …`
 9. [Inspection](#inspection) — `SHOW MODELS`, `SHOW DAG`, `DESCRIBE VARIABLE`
@@ -271,19 +271,29 @@ ESTIMATE EFFECT OF <treatment> ON <outcome>
     [USING <estimator>]
 ```
 
-Estimates the average causal effect from observational data. `ADJUST FOR`
-specifies the adjustment set; `USING` picks an estimator identifier
-(`aipw`, `ipw`, `g_formula`, …).
+Reports the causal effect of treatment on outcome. `ADJUST FOR` specifies the
+adjustment set (validated structurally — sets containing descendants of the
+treatment are rejected); `USING` records an estimator identifier (`aipw`, `ipw`,
+`g_formula`, …).
 
-> **v1 status:** the statement parses and validates the adjustment set
-> (rejecting sets that contain descendants of the treatment), but numeric
-> estimation is not wired yet — it requires executing the `OBSERVED AS`
-> Cypher bindings. Calling it on the Neo4j backend returns a placeholder.
+The value returned depends on whether the model is
+[parameterized](#linear-gaussian-parameters):
 
-**Example**
+- **Linear-Gaussian model** → the **SEM-implied** total effect (arithmetic over
+  the given coefficients): `effect = totalEffect(treatment → outcome)`.
+- **Structural-only model** → no number; the result notes that a numeric estimate
+  must be supplied externally.
+
+> **Scope (DB, not ML):** this is a database extension, not an ML system. We do
+> **not** fit estimators from data. Model parameters are *given as input* (via
+> `WEIGHT`/`MEAN`/`NOISE`); a future external ETL performs any data-driven
+> estimation and writes results back through this DSL.
+
+**Example** (parameterized `Chain` model, `X→M→Y` with β = 2, 3)
 
 ```
-ESTIMATE EFFECT OF Treatment ON Retention30 ADJUST FOR [Age, PriorUsage] USING aipw
+ESTIMATE EFFECT OF X ON Y
+// effect: 6.0  (SEM-implied total effect)
 ```
 
 **Validation error example**
