@@ -124,6 +124,13 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     public DSeparationResult isDSeparated(Set<VariableRef> x, Set<VariableRef> y, Set<VariableRef> z) {
         requireSnapshot();
         // TODO(student, tier 1): implement d-separation.
+        //
+        // Model this on PathAnalyzer: add a class (e.g. DSeparation) under
+        // runtime/algorithms, construct it from the snapshot, and delegate here.
+        // Building blocks already available:
+        //   - graph.parentsOf(id) / graph.childrenOf(id) / graph.topoOrder()
+        //   - new ReachabilityIndex(snapshot).ancestors(id) / descendants(id)
+        //
         // Two options — pick one:
         //   (a) Bayes Ball on the DAG directly. Send balls from X, track which
         //       reach Y under conditioning set Z. No moral graph needed; works
@@ -131,6 +138,9 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
         //   (b) Moral-graph reachability: build the moral graph of An(X ∪ Y ∪ Z),
         //       remove nodes outside that ancestor set, check reachability.
         // Recommendation: (a). Fewer moving parts and no spouse_set needed.
+        //
+        // Return DSeparationResult.separated(explanation) when X ⟂ Y | Z, and
+        // DSeparationResult.connected(explanation) when an active path remains.
         return DSeparationResult.unimplemented();
     }
 
@@ -138,19 +148,28 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     public AdjustmentCandidateResult candidateAdjustmentSet(VariableRef treatment, VariableRef outcome) {
         requireSnapshot();
         // TODO(student, tier 1): implement the backdoor criterion.
-        // A set Z satisfies it relative to (treatment, outcome) when:
-        //   1. No node in Z is a descendant of treatment.
-        //   2. Z blocks every backdoor path from treatment to outcome
-        //      (paths that start with an arrow into treatment).
-        // Depends on (1) — use isDSeparated to check blocking on the graph with
-        // outgoing edges from treatment removed.
+        // Do isDSeparated first — this builds on it.
+        //
+        // A set Z satisfies the backdoor criterion relative to (treatment, outcome):
+        //   1. No node in Z is a descendant of treatment
+        //      (ReachabilityIndex.descendants(treatment)).
+        //   2. Z blocks every backdoor path from treatment to outcome — i.e.
+        //      treatment ⟂ outcome | Z in the graph with treatment's *outgoing*
+        //      edges removed. Reuse isDSeparated on that mutilated graph.
+        //
+        // Candidate-set search: a common starting point is the parents of the
+        // treatment, or subsets of the non-descendant variables; collect every Z
+        // that satisfies (1) and (2) into candidateSets.
+        //
+        // Return new AdjustmentCandidateResult(exists, candidateSets, explanation)
+        // — adjustmentSetExists is true iff at least one valid Z was found.
         return AdjustmentCandidateResult.unimplemented();
     }
 
     // -------------------------------------------------------------------------
-    // Path-based structural queries — delegate to PathAnalyzer
-    // TODO(student, tier 1): implement PathAnalyzer.{mediators,colliders,
-    // confounders,backdoorVariables}; no changes needed below once those land.
+    // Path-based structural queries — delegate to PathAnalyzer (implemented).
+    // These are the worked Tier 1 example; isDSeparated / candidateAdjustmentSet
+    // above follow the same delegation-to-an-algorithm-class shape.
     // -------------------------------------------------------------------------
 
     @Override
