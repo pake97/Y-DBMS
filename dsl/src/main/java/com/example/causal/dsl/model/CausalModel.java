@@ -15,6 +15,8 @@ public class CausalModel {
     private final Map<String, CausalVariable> variables = new LinkedHashMap<>();
     private final Map<String, Set<String>> parents  = new HashMap<>();
     private final Map<String, Set<String>> children = new HashMap<>();
+    /** Variables fixed by intervention: var -> value of do(var = value). Empty for a base model. */
+    private final Map<String, String> fixedValues = new LinkedHashMap<>();
 
     public CausalModel(String name) {
         this.name = name;
@@ -42,6 +44,57 @@ public class CausalModel {
 
     public Optional<CausalVariable> variable(String name) {
         return Optional.ofNullable(variables.get(name));
+    }
+
+    // ─── Intervention (the do-operator) ─────────────────────────────────────────
+
+    /** Variables fixed by intervention in this graph: {@code var -> value}. Empty for a base model. */
+    public Map<String, String> fixedValues() {
+        return Collections.unmodifiableMap(fixedValues);
+    }
+
+    /** True if this graph is the result of one or more interventions. */
+    public boolean isIntervened() {
+        return !fixedValues.isEmpty();
+    }
+
+    /**
+     * Deterministic, ID-safe name for the world produced by {@code do(var = value)},
+     * e.g. {@code UserRetentionModel_do_Treatment_1}. ID-safe so it round-trips
+     * through {@code USE MODEL <name>}.
+     */
+    public static String derivedName(String base, String var, String value) {
+        return base + "_do_" + var + "_" + value.replaceAll("[^A-Za-z0-9]", "");
+    }
+
+    /** Deep copy of this graph under a new name, preserving variables, edges and fixed values. */
+    public CausalModel copy(String newName) {
+        CausalModel c = new CausalModel(newName);
+        for (CausalVariable v : variables.values()) c.addVariable(v);
+        for (Map.Entry<String, Set<String>> e : children.entrySet())
+            for (String to : e.getValue()) c.addEdge(e.getKey(), to);
+        c.fixedValues.putAll(this.fixedValues);
+        return c;
+    }
+
+    /**
+     * Apply the do-operator {@code do(var = value)}: return a new graph (named
+     * {@code newName}) in which every edge <em>into</em> {@code var} is removed
+     * and {@code var} is recorded as fixed to {@code value}. The original graph
+     * is left untouched.
+     *
+     * <p>Surgery cuts only incoming edges, so {@code var}'s outgoing edges — and
+     * therefore every directed path <em>from</em> {@code var} — are preserved.
+     */
+    public CausalModel intervene(String var, String value, String newName) {
+        CausalModel c = copy(newName);
+        for (String parent : c.parents.getOrDefault(var, Set.of())) {
+            Set<String> parentChildren = c.children.get(parent);
+            if (parentChildren != null) parentChildren.remove(var);
+        }
+        c.parents.put(var, new LinkedHashSet<>());
+        c.fixedValues.put(var, value);
+        return c;
     }
 
     // ─── Structural primitives ────────────────────────────────────────────────

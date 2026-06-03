@@ -194,6 +194,16 @@ public class AstBuilder extends CausalDSLBaseVisitor<Object> {
         );
     }
 
+    // ─── Context switching ─────────────────────────────────────────────────────
+
+    @Override public Object visitUseModelStmt(CausalDSLParser.UseModelStmtContext ctx) {
+        return new UseModelStmt(ctx.name.getText());
+    }
+
+    @Override public Object visitResetStmt(CausalDSLParser.ResetStmtContext ctx) {
+        return new ResetStmt();
+    }
+
     // ─── Inspection ───────────────────────────────────────────────────────────
 
     @Override public Object visitShowDagStmt(CausalDSLParser.ShowDagStmtContext ctx) {

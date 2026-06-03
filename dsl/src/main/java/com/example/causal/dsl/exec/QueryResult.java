@@ -4,4 +4,5 @@ package com.example.causal.dsl.exec;
 public sealed interface QueryResult permits
     VariableSetResult,
     IdentificationResult,
+    InterventionResult,
     TextResult {}

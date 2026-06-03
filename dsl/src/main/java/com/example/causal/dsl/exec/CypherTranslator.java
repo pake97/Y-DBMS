@@ -67,8 +67,10 @@ public final class CypherTranslator {
             case DescribeVariableStmt s -> List.of(describeVariable(s.name()));
 
             case EstimateStmt       s -> List.of();  // requires OBSERVED AS execution — not wired yet
-            case InterveneStmt      s -> List.of();
+            case InterveneStmt      s -> List.of();  // do-operator handled DSL-side (derived world), no Cypher
             case CounterfactualStmt s -> List.of();
+            case UseModelStmt       s -> List.of();  // context switch — no Cypher
+            case ResetStmt          s -> List.of();
         };
     }
 

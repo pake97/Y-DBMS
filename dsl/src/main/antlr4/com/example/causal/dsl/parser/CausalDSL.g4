@@ -19,6 +19,8 @@ statement
     | estimateStmt
     | interveneStmt
     | counterfactualStmt
+    | useModelStmt
+    | resetStmt
     | showDagStmt
     | describeVariableStmt
     ;
@@ -109,6 +111,16 @@ counterfactualStmt
 
 conditionList : assignment (COMMA assignment)* ;
 
+// ─── Context switching ──────────────────────────────────────────────────────────
+
+// Switch the active graph to a named model (a base model or a derived
+// intervention world, e.g.  USE MODEL UserRetentionModel_do_Treatment_1).
+useModelStmt : USE MODEL name=ID ;
+
+// Reset the active graph back to the base (original) model, discarding the
+// active intervention world. Derived worlds remain registered and addressable.
+resetStmt    : RESET ;
+
 // ─── Inspection ───────────────────────────────────────────────────────────────
 
 showDagStmt          : SHOW DAG name=ID? ;
@@ -171,6 +183,8 @@ HAVE          : 'HAVE' ;
 BEEN          : 'BEEN' ;
 IF            : 'IF' ;
 GIVEN         : 'GIVEN' ;
+USE           : 'USE' ;
+RESET         : 'RESET' ;
 SHOW          : 'SHOW' ;
 DESCRIBE      : 'DESCRIBE' ;
 
