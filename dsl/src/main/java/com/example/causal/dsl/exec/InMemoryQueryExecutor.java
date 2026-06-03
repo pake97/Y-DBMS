@@ -4,7 +4,6 @@ import com.example.causal.dsl.ast.*;
 import com.example.causal.dsl.model.*;
 
 import java.util.*;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -30,18 +29,20 @@ public class InMemoryQueryExecutor implements QueryExecutor {
             case DefineVariableStmt  s -> executeDefineVariable(s);
             case DefineModelStmt     s -> executeDefineModel(s);
             case DefineDagStmt       s -> executeDefineDag(s);
-            case CausesOfStmt        s -> structural("CAUSES OF " + s.var(),      m -> m.parents(s.var()));
-            case EffectsOfStmt       s -> structural("EFFECTS OF " + s.var(),     m -> m.children(s.var()));
-            case AncestorsOfStmt     s -> structural("ANCESTORS OF " + s.var(),   m -> m.ancestors(s.var()));
-            case DescendantsOfStmt   s -> structural("DESCENDANTS OF " + s.var(), m -> m.descendants(s.var()));
-            case MediatorsBetweenStmt s -> structural("MEDIATORS BETWEEN " + s.from() + " AND " + s.to(), m -> m.mediators(s.from(), s.to()));
-            case CollidersBetweenStmt s -> structural("COLLIDERS BETWEEN " + s.from() + " AND " + s.to(), m -> m.colliders(s.from(), s.to()));
-            case ConfoundersOfStmt    s -> structural("CONFOUNDERS OF " + s.x() + " AND " + s.y(), m -> m.confounders(s.x(), s.y()));
-            case BackdoorPathsStmt    s -> structural("BACKDOOR PATHS BETWEEN " + s.from() + " AND " + s.to(), m -> m.backdoorVars(s.from(), s.to()));
-            case IdentifyStmt        s -> executeIdentify(s);
+            case CausesOfStmt        s -> structural(s);
+            case EffectsOfStmt       s -> structural(s);
+            case AncestorsOfStmt     s -> structural(s);
+            case DescendantsOfStmt   s -> structural(s);
+            case MediatorsBetweenStmt s -> structural(s);
+            case CollidersBetweenStmt s -> structural(s);
+            case ConfoundersOfStmt    s -> structural(s);
+            case BackdoorPathsStmt    s -> structural(s);
+            case IdentifyStmt        s -> structural(s);
             case EstimateStmt        s -> executeEstimate(s);
-            case InterveneStmt       s -> new TextResult("INTERVENE not yet implemented in v1");
+            case InterveneStmt       s -> executeIntervene(s);
             case CounterfactualStmt  s -> new TextResult("COUNTERFACTUAL not yet implemented in v1");
+            case UseModelStmt        s -> executeUseModel(s);
+            case ResetStmt           s -> executeReset(s);
             case ShowDagStmt         s -> executeShowDag(s);
             case DescribeVariableStmt s -> executeDescribeVariable(s);
         };
@@ -87,58 +88,37 @@ public class InMemoryQueryExecutor implements QueryExecutor {
         return new TextResult("defined DAG: " + s.name() + " (" + s.edges().size() + " edges)");
     }
 
-    // ─── Structural queries ───────────────────────────────────────────────────
+    // ─── Structural queries + identification ────────────────────────────────────
 
-    private QueryResult structural(String label, Function<CausalModel, Set<String>> fn) {
-        CausalModel model = requireCurrentModel();
-        return new VariableSetResult(label, fn.apply(model));
+    /** All structural queries and IDENTIFY run against the active graph via the shared evaluator. */
+    private QueryResult structural(Statement s) {
+        return StructuralEvaluator.evaluate(requireCurrentModel(), s);
     }
 
-    // ─── Identification ───────────────────────────────────────────────────────
+    // ─── Intervention (the do-operator) ─────────────────────────────────────────
 
-    private QueryResult executeIdentify(IdentifyStmt s) {
-        CausalModel model = requireCurrentModel();
-        String t = s.treatment();
-        String o = s.outcome();
+    private QueryResult executeIntervene(InterveneStmt s) {
+        CausalModel source = s.modelRef() != null
+            ? registry.model(s.modelRef())
+                .orElseThrow(() -> new IllegalArgumentException("Unknown model: " + s.modelRef()))
+            : requireCurrentModel();
+        String derivedName = CausalModel.derivedName(
+            source.name(), s.intervention().variable(), s.intervention().value());
+        CausalModel gPrime = source.intervene(
+            s.intervention().variable(), s.intervention().value(), derivedName);
+        registry.registerDerived(gPrime);   // G′ becomes the active graph
+        return StructuralEvaluator.evaluate(gPrime, s);
+    }
 
-        // Backdoor criterion: find adjustment sets that block all backdoor paths.
-        // Minimal valid set = confounders (common causes) minus descendants of treatment.
-        Set<String> descTreatment = model.descendants(t);
-        Set<String> backdoor = model.backdoorVars(t, o);
-        Set<String> confounders = model.confounders(t, o);
-        confounders.removeAll(descTreatment);
+    private QueryResult executeUseModel(UseModelStmt s) {
+        registry.useModel(s.modelName());
+        return new TextResult("active model: " + s.modelName());
+    }
 
-        // Also consider: parents of treatment that cause outcome (direct confounding).
-        Set<String> directConfounders = new HashSet<>(model.parents(t));
-        directConfounders.retainAll(model.ancestors(o));
-        directConfounders.addAll(confounders);
-        directConfounders.removeAll(descTreatment);
-
-        boolean hasBackdoor = !backdoor.isEmpty();
-        boolean identifiable;
-        String method;
-        List<Set<String>> adjustmentSets;
-
-        if (!hasBackdoor) {
-            identifiable = true;
-            method = "no backdoor paths — no adjustment required";
-            adjustmentSets = List.of(Set.of());
-        } else if (!directConfounders.isEmpty()) {
-            identifiable = true;
-            method = "backdoor adjustment";
-            adjustmentSets = List.of(Set.copyOf(directConfounders));
-        } else {
-            // Backdoor paths exist but no observed adjustment set found
-            identifiable = false;
-            method = "not identifiable via backdoor criterion with observed variables";
-            adjustmentSets = List.of();
-        }
-
-        String explanation = hasBackdoor
-            ? "Backdoor variables: " + backdoor
-            : "No backdoor paths from " + t + " to " + o;
-
-        return new IdentificationResult(t, o, identifiable, method, adjustmentSets, explanation);
+    private QueryResult executeReset(ResetStmt s) {
+        registry.reset();
+        return new TextResult("active model: "
+            + registry.currentModel().map(CausalModel::name).orElse("(none)"));
     }
 
     // ─── Estimation ───────────────────────────────────────────────────────────

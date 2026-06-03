@@ -2,14 +2,15 @@ package com.example.causal.dsl.exec;
 
 import com.example.causal.dsl.ast.*;
 import com.example.causal.dsl.exec.CypherTranslator.CypherQuery;
+import com.example.causal.dsl.model.CausalModel;
 import com.example.causal.dsl.model.CausalVariable;
 import com.example.causal.dsl.model.ModelRegistry;
 import org.neo4j.driver.Driver;
 import org.neo4j.driver.Record;
 import org.neo4j.driver.Session;
-import org.neo4j.driver.Value;
 
 import java.util.*;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -51,24 +52,27 @@ public class Neo4jQueryExecutor implements QueryExecutor {
             case DefineModelStmt     s -> defineModel(s);
             case DefineDagStmt       s -> defineDag(s);
 
-            case CausesOfStmt        s -> readVars("CAUSES OF " + s.var(),      translator.causesOf(s.var()));
-            case EffectsOfStmt       s -> readVars("EFFECTS OF " + s.var(),     translator.effectsOf(s.var()));
-            case AncestorsOfStmt     s -> readVars("ANCESTORS OF " + s.var(),   translator.ancestorsOf(s.var()));
-            case DescendantsOfStmt   s -> readVars("DESCENDANTS OF " + s.var(), translator.descendantsOf(s.var()));
-            case MediatorsBetweenStmt s -> readVars(
-                "MEDIATORS BETWEEN " + s.from() + " AND " + s.to(), translator.mediators(s.from(), s.to()));
-            case CollidersBetweenStmt s -> readVars(
-                "COLLIDERS BETWEEN " + s.from() + " AND " + s.to(), translator.colliders(s.from(), s.to()));
-            case ConfoundersOfStmt    s -> readVars(
-                "CONFOUNDERS OF " + s.x() + " AND " + s.y(), translator.confounders(s.x(), s.y()));
-            case BackdoorPathsStmt    s -> readVars(
-                "BACKDOOR PATHS BETWEEN " + s.from() + " AND " + s.to(), translator.backdoorPaths(s.from(), s.to()));
+            case CausesOfStmt        s -> structural(s, () -> readVars("CAUSES OF " + s.var(),      translator.causesOf(s.var())));
+            case EffectsOfStmt       s -> structural(s, () -> readVars("EFFECTS OF " + s.var(),     translator.effectsOf(s.var())));
+            case AncestorsOfStmt     s -> structural(s, () -> readVars("ANCESTORS OF " + s.var(),   translator.ancestorsOf(s.var())));
+            case DescendantsOfStmt   s -> structural(s, () -> readVars("DESCENDANTS OF " + s.var(), translator.descendantsOf(s.var())));
+            case MediatorsBetweenStmt s -> structural(s, () -> readVars(
+                "MEDIATORS BETWEEN " + s.from() + " AND " + s.to(), translator.mediators(s.from(), s.to())));
+            case CollidersBetweenStmt s -> structural(s, () -> readVars(
+                "COLLIDERS BETWEEN " + s.from() + " AND " + s.to(), translator.colliders(s.from(), s.to())));
+            case ConfoundersOfStmt    s -> structural(s, () -> readVars(
+                "CONFOUNDERS OF " + s.x() + " AND " + s.y(), translator.confounders(s.x(), s.y())));
+            case BackdoorPathsStmt    s -> structural(s, () -> readVars(
+                "BACKDOOR PATHS BETWEEN " + s.from() + " AND " + s.to(), translator.backdoorPaths(s.from(), s.to())));
 
-            case IdentifyStmt        s -> identify(s);
+            case IdentifyStmt        s -> structural(s, () -> identify(s));
             case EstimateStmt        s -> new TextResult(
                 "ESTIMATE against Neo4j not yet implemented — requires OBSERVED AS execution.");
-            case InterveneStmt       s -> new TextResult("INTERVENE not yet implemented in v1");
+            case InterveneStmt       s -> executeIntervene(s);
             case CounterfactualStmt  s -> new TextResult("COUNTERFACTUAL not yet implemented in v1");
+
+            case UseModelStmt        s -> executeUseModel(s);
+            case ResetStmt           s -> executeReset(s);
 
             case ShowDagStmt         s -> showDag(s);
             case DescribeVariableStmt s -> describeVariable(s);
@@ -130,6 +134,71 @@ public class Neo4jQueryExecutor implements QueryExecutor {
                 exists ? "backdoor adjustment" : "not identifiable via backdoor",
                 sets, explanation);
         }
+    }
+
+    // ─── Intervention & context switching ───────────────────────────────────
+
+    /**
+     * Dispatch a structural query. While the active graph is a derived
+     * intervention world it lives only DSL-side, so evaluate it in-memory; while
+     * it is the base graph, delegate to the plugin against live Neo4j ({@code liveBranch}).
+     */
+    private QueryResult structural(Statement s, Supplier<QueryResult> liveBranch) {
+        if (registry.isCurrentDerived()) {
+            return StructuralEvaluator.evaluate(registry.currentModel().orElseThrow(), s);
+        }
+        return liveBranch.get();
+    }
+
+    private QueryResult executeIntervene(InterveneStmt s) {
+        // Source world: an explicit FROM MODEL, the active derived world, or a
+        // fresh hydration of the persisted base graph.
+        CausalModel source;
+        if (s.modelRef() != null) {
+            source = registry.model(s.modelRef())
+                .orElseThrow(() -> new IllegalArgumentException("Unknown model: " + s.modelRef()));
+        } else if (registry.isCurrentDerived()) {
+            source = registry.currentModel().orElseThrow();
+        } else {
+            source = hydrateCurrentGraph();
+        }
+        String derivedName = CausalModel.derivedName(
+            source.name(), s.intervention().variable(), s.intervention().value());
+        CausalModel gPrime = source.intervene(
+            s.intervention().variable(), s.intervention().value(), derivedName);
+        registry.registerDerived(gPrime);   // G′ becomes the active graph
+        return StructuralEvaluator.evaluate(gPrime, s);
+    }
+
+    private QueryResult executeUseModel(UseModelStmt s) {
+        registry.useModel(s.modelName());
+        return new TextResult("active model: " + s.modelName());
+    }
+
+    private QueryResult executeReset(ResetStmt s) {
+        registry.reset();
+        return new TextResult("active model: live Neo4j graph");
+    }
+
+    /**
+     * Load the persisted graph from Neo4j into a {@link CausalModel} — the same
+     * two queries {@link #showDag} uses (all {@code :Variable} nodes + active
+     * {@code :CAUSES} edges). DSL-side metadata (unit/role/type) is recovered
+     * from the registry when present.
+     */
+    private CausalModel hydrateCurrentGraph() {
+        CausalModel model = new CausalModel("neo4j");
+        try (Session session = openSession()) {
+            session.run("MATCH (v:Variable) RETURN v.id AS id ORDER BY id").stream()
+                .map(r -> r.get("id").asString())
+                .forEach(id -> model.addVariable(
+                    registry.resolveVariable(id).orElse(new CausalVariable(id, null, null, null, null))));
+            session.run("MATCH (a:Variable)-[r:CAUSES]->(b:Variable) WHERE r.active = true " +
+                        "RETURN a.id AS from, b.id AS to")
+                .stream()
+                .forEach(r -> model.addEdge(r.get("from").asString(), r.get("to").asString()));
+        }
+        return model;
     }
 
     // ─── Inspection (DSL-side, does not hit Neo4j) ───────────────────────────

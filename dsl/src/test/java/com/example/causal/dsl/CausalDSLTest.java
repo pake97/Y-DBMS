@@ -1,6 +1,7 @@
 package com.example.causal.dsl;
 
 import com.example.causal.dsl.exec.IdentificationResult;
+import com.example.causal.dsl.exec.InterventionResult;
 import com.example.causal.dsl.exec.QueryResult;
 import com.example.causal.dsl.exec.VariableSetResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -171,6 +172,73 @@ class CausalDSLTest {
         QueryResult r = dsl.execute(
             "ESTIMATE EFFECT OF Treatment ON Retention30 ADJUST FOR [Age, PriorUsage] USING aipw");
         assertTrue(r.toString().contains("aipw"));
+    }
+
+    // ─── Intervention (the do-operator) ─────────────────────────────────────────
+
+    @Test
+    void intervene_effectReachesOutcome() {
+        InterventionResult r = (InterventionResult)
+            dsl.execute("INTERVENE ON Treatment=1 RETURN EFFECT ON Retention30");
+        assertTrue(r.affectsTarget(), "do(Treatment) should reach Retention30");
+        assertTrue(r.pathway().contains("Engagement"), "pathway should include the mediator; got: " + r.pathway());
+        assertEquals("UserRetentionModel_do_Treatment_1", r.derivedModel());
+    }
+
+    @Test
+    void intervene_cutsIncomingEdgesButKeepsOutgoing() {
+        // do(Treatment) makes the derived world the active graph: Treatment's
+        // parents are gone, but its effects are untouched.
+        dsl.execute("INTERVENE ON Treatment=1 RETURN EFFECT ON Retention30");
+        VariableSetResult causes = (VariableSetResult) dsl.execute("CAUSES OF Treatment");
+        assertEquals(Set.of(), causes.variables(), "incoming edges to Treatment should be cut");
+        VariableSetResult effects = (VariableSetResult) dsl.execute("EFFECTS OF Treatment");
+        assertEquals(Set.of("Engagement", "Retention30"), effects.variables(), "outgoing edges survive");
+    }
+
+    @Test
+    void intervene_doesNotMutateBaseGraph() {
+        dsl.execute("INTERVENE ON Treatment=1 RETURN EFFECT ON Retention30");
+        dsl.execute("RESET");
+        VariableSetResult causes = (VariableSetResult) dsl.execute("CAUSES OF Treatment");
+        assertEquals(Set.of("Age", "PriorUsage"), causes.variables(), "base graph must be intact after RESET");
+    }
+
+    @Test
+    void intervene_effectDoesNotReachUpstream() {
+        InterventionResult r = (InterventionResult)
+            dsl.execute("INTERVENE ON Retention30=1 RETURN EFFECT ON Treatment");
+        assertFalse(r.affectsTarget(), "do(Retention30) cannot affect its upstream Treatment");
+        assertTrue(r.pathway().isEmpty());
+    }
+
+    @Test
+    void intervene_distributionIsStructuralWithNote() {
+        InterventionResult r = (InterventionResult)
+            dsl.execute("INTERVENE ON Treatment=1 RETURN DISTRIBUTION OF Retention30");
+        assertEquals("DISTRIBUTION", r.returnType());
+        assertTrue(r.note().contains("parameter layer"), "should flag numeric values as deferred");
+    }
+
+    @Test
+    void intervene_compareToReportsStructuralContrast() {
+        InterventionResult r = (InterventionResult)
+            dsl.execute("INTERVENE ON Treatment=1 COMPARE TO Treatment=0 RETURN EFFECT ON Retention30");
+        assertNotNull(r.compareNote());
+        assertTrue(r.compareNote().contains("identical causal structure"));
+    }
+
+    @Test
+    void useModel_switchesActiveGraphAndReset() {
+        dsl.execute("INTERVENE ON Treatment=1 RETURN EFFECT ON Retention30");
+        // Switch back to the base by name, then to the derived world again.
+        dsl.execute("USE MODEL UserRetentionModel");
+        VariableSetResult base = (VariableSetResult) dsl.execute("CAUSES OF Treatment");
+        assertEquals(Set.of("Age", "PriorUsage"), base.variables());
+
+        dsl.execute("USE MODEL UserRetentionModel_do_Treatment_1");
+        VariableSetResult derived = (VariableSetResult) dsl.execute("CAUSES OF Treatment");
+        assertEquals(Set.of(), derived.variables());
     }
 
     // ─── Colliders ───────────────────────────────────────────────────────────

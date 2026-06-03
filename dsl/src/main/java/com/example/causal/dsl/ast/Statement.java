@@ -19,5 +19,7 @@ public sealed interface Statement permits
     EstimateStmt,
     InterveneStmt,
     CounterfactualStmt,
+    UseModelStmt,
+    ResetStmt,
     ShowDagStmt,
     DescribeVariableStmt {}
