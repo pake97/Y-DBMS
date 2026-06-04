@@ -75,10 +75,11 @@ DEFINE CAUSAL VARIABLE <name>
 Registers a single variable.
 
 - `FOR UNIT <unit>` — the entity each observation is keyed by (e.g. `User`, `Patient`).
-  Used by `ESTIMATE` to join observational data.
-- `OBSERVED AS "<cypher>"` — a Cypher subquery that returns the observed
-  values for this variable. Must yield one row per unit. **Stored but not yet
-  executed** (see [Estimation](#estimation)).
+- `OBSERVED AS "<cypher>"` — a Cypher subquery that returns the observed values for
+  this variable (one row per unit). **Stored as metadata; the DSL does not execute
+  it.** Data-driven estimation is performed by an external ETL (this is a DB
+  extension, not an ML system — see [Estimation](#estimation)), which writes the
+  resulting parameters back via `WEIGHT`/`MEAN`/`NOISE`.
 - `TYPE` — one of `binary`, `continuous`, `categorical`, `event`, `latent`.
   `latent` marks a variable that is not directly observed; all others are observed.
 - `ROLE` — one of `treatment`, `outcome`, `covariate`, `mediator`, `collider`,
@@ -553,4 +554,25 @@ CONFOUNDERS OF Treatment AND Retention30
 
 IDENTIFY EFFECT OF Treatment ON Retention30 RETURN ADJUSTMENT SETS
 ESTIMATE  EFFECT OF Treatment ON Retention30 ADJUST FOR [Age, PriorUsage] USING aipw
+```
+
+### Quantitative example (linear-Gaussian)
+
+With declared parameters, interventions, counterfactuals, and estimation return
+real numbers, and intervention worlds become navigable:
+
+```
+DEFINE MODEL Chain {
+    VARIABLE X MEAN 0 NOISE 1
+    VARIABLE M MEAN 0 NOISE 1
+    VARIABLE Y MEAN 0 NOISE 1
+    DAG { X -> M WEIGHT 2   M -> Y WEIGHT 3 }
+}
+
+ESTIMATE EFFECT OF X ON Y                       // SEM-implied total effect = 6
+COUNTERFACTUAL GIVEN X = 1, Y = 10 WHAT WOULD Y HAVE BEEN IF X = 3   // Y_cf = 22
+INTERVENE ON X = 4 RETURN EXPECTATION OF Y       // E[Y | do(X=4)] = 24; derives & activates Chain_do_X_4
+INTERVENE ON X = 1 RETURN DISTRIBUTION OF Y      // mean 6, variance 10; activates Chain_do_X_1
+SHOW MODELS                                      // Chain, Chain_do_X_4, * Chain_do_X_1 (active)
+RESET                                            // back to Chain
 ```

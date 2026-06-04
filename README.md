@@ -5,9 +5,24 @@ A Neo4j-backed toolkit for causal inference. Two Maven modules:
 | Module | What it is |
 |---|---|
 | [`plugin/`](plugin/) | Neo4j procedures/functions. Compiles a causal DAG stored in Neo4j into an in-memory representation and exposes structural queries (`causal.ancestors`, `causal.adjustmentCandidate`, …) as Cypher-callable procedures. |
-| [`dsl/`](dsl/) | A small causal-inference DSL (`DEFINE CAUSAL DAG`, `IDENTIFY EFFECT OF`, …) that either runs in-process against an in-memory model or translates to Cypher calls against the plugin. Full language reference: **[`dsl/README.md`](dsl/README.md)**. |
+| [`dsl/`](dsl/) | A causal-inference DSL (`DEFINE CAUSAL DAG`, `IDENTIFY EFFECT OF`, `INTERVENE ON …`, `COUNTERFACTUAL …`) that either runs in-process against an in-memory model or translates to Cypher calls against the plugin. Full language reference: **[`dsl/README.md`](dsl/README.md)**. |
 
 The DSL depends only on the plugin's `com.example.causal.api.*` package. Everything under `runtime.*` / `procedures.*` is a plugin implementation detail.
+
+## What the DSL does
+
+- **Schema** — declare variables and a DAG (`DEFINE CAUSAL VARIABLE / DAG / MODEL`), optionally with linear-Gaussian parameters (`WEIGHT` on edges, `MEAN` / `NOISE` on variables).
+- **Structural queries** — parents, children, ancestors, descendants, mediators, colliders, confounders, backdoor variables.
+- **Identification** — `IDENTIFY EFFECT OF … ON …` (backdoor criterion, adjustment sets).
+- **Intervention** — `INTERVENE ON x = v` is the do-operator: graph surgery producing a **named derived world** that becomes the active graph; `USE MODEL` / `RESET` / `SHOW MODELS` navigate worlds. `RETURN DISTRIBUTION / EFFECT / EXPECTATION` is structural by default and **numeric** on a parameterized (linear-Gaussian) model.
+- **Counterfactual** — `COUNTERFACTUAL … WHAT WOULD Y HAVE BEEN IF X = x*` (closed-form on a linear-Gaussian model).
+- **Estimation** — `ESTIMATE EFFECT OF … ON …` returns the SEM-implied total effect.
+
+> **Boundary — this is a database, not an ML system.** Anything ML (training/testing,
+> *fitting* parameters from data) is out of scope; a future external ETL performs that
+> and writes results back *through* this DSL. Model parameters are **given as input**
+> (`WEIGHT`/`MEAN`/`NOISE`); the DSL/plugin only do arithmetic, graph surgery, and
+> identification over what is supplied.
 
 ---
 
@@ -42,7 +57,7 @@ dsl/
     CypherDryRunRepl  ← prints the Cypher a statement WOULD emit (no execution)
 
 dev/
-  seed-dag.cypher     ← COVID-19 DAG (25 vars, 76 edges)
+  seed-dag.cypher     ← COVID-19 DAG (25 vars, 78 edges)
   seed.sh             ← loads seed-dag.cypher into local Neo4j
   example.causal      ← end-to-end DSL walkthrough
 ```
@@ -101,6 +116,21 @@ dsl.executeScript("""
         Treatment  -> Retention30
     }
     IDENTIFY EFFECT OF Treatment ON Retention30 RETURN ADJUSTMENT SETS
+""").forEach(System.out::println);
+```
+
+With linear-Gaussian parameters, interventions and counterfactuals return numbers:
+
+```java
+dsl.executeScript("""
+    DEFINE MODEL Chain {
+        VARIABLE X MEAN 0 NOISE 1
+        VARIABLE M MEAN 0 NOISE 1
+        VARIABLE Y MEAN 0 NOISE 1
+        DAG { X -> M WEIGHT 2   M -> Y WEIGHT 3 }
+    }
+    INTERVENE ON X = 4 RETURN EXPECTATION OF Y          // E[Y | do(X=4)] = 24
+    COUNTERFACTUAL GIVEN X = 1, Y = 10 WHAT WOULD Y HAVE BEEN IF X = 3   // Y_cf = 22
 """).forEach(System.out::println);
 ```
 
@@ -194,14 +224,14 @@ JAR into the `plugins/` directory, and restarts Neo4j in daemon mode.
 ./dev/seed.sh
 ```
 
-Waits until Neo4j is ready, then loads 25 variables and 76 causal edges from
+Waits until Neo4j is ready, then loads 25 variables and 78 causal edges from
 `dev/seed-dag.cypher`. Safe to re-run — it clears existing data first.
 
 ### Query from Neo4j Browser or cypher-shell
 
 ```cypher
 // Compile the in-memory snapshot
-CALL causal.compile() YIELD size RETURN size;
+CALL causal.compile() YIELD variableCount RETURN variableCount;
 
 // Structural queries (pass :Variable nodes; procedures yield nodes)
 MATCH (cases:Variable {id: 'reported_cases'})
@@ -281,10 +311,23 @@ key used by `VariableRef`.
   `InMemoryQueryExecutor` evaluates against a pure-Java `CausalModel`; a
   `Neo4jQueryExecutor` translates via `CypherTranslator` and runs through the
   Bolt driver. Same AST, pluggable backend.
+- **In-memory engines = reference oracle.** `StructuralEvaluator`,
+  `LinearGaussianSEM`, `CounterfactualEvaluator`, and `EstimateEvaluator` compute
+  the answers in pure Java. They are self-contained *and* serve as the correctness
+  oracle for the equivalent plugin algorithms (see `plugin/EXERCISES.md`).
+- **Intervention worlds.** `INTERVENE` derives a graph via surgery
+  (`CausalModel.intervene`), registers it in `ModelRegistry` under an ID-safe name,
+  and makes it the active graph; `USE MODEL` / `RESET` switch the active world.
+  Numeric answers come from the linear-Gaussian engine when parameters are present;
+  otherwise the answer is structural.
 - **DSL-only metadata** (unit, role, `OBSERVED AS` binding) is held in the
   DSL's `ModelRegistry` — the plugin's schema does not carry it.
 - **`CypherDryRunRepl`** exists specifically so you can inspect what the
   translator emits without running it.
+- **Cross-module contract.** Procedure names and `YIELD` column names are shared
+  constants in `com.example.causal.api` (`ProcedureNames`, `ResultColumns`), so the
+  plugin's `@Procedure` annotations and the DSL's `CypherTranslator` cannot drift;
+  `ProcedureContractTest` enforces it.
 
 ---
 
@@ -310,41 +353,36 @@ tx.commit();
 
 ---
 
-## Open work
+## Status & remaining work
 
-Structured as tiers: **Tier 1 is required** for the plugin to answer every
-DSL query end-to-end; Tier 2 is performance; Tier 3 is ergonomics / optional
-caches.
+**DSL — feature-complete** (within the database boundary). Every statement is
+implemented and tested: schema (`DEFINE …`, incl. linear-Gaussian parameters),
+structural queries, `IDENTIFY`, `INTERVENE` (+ `COMPARE TO`, numeric on a
+parameterized model), `USE MODEL` / `RESET` / `SHOW MODELS`, `COUNTERFACTUAL`, and
+`ESTIMATE` (SEM-implied). The in-memory engines are the reference oracle.
 
-### Tier 1 — required for feature completeness
+**Plugin — the algorithm work is a student exercise.** The structural traversal
+(`parents/children/ancestors/descendants/hasDirectedPath`) and `PathAnalyzer`
+(`mediators/colliders/confounders/backdoorVariables`) are **implemented**. The
+identification and quantitative algorithms are stubbed placeholders for the
+student to fill in — the authoritative brief is **[`plugin/EXERCISES.md`](plugin/EXERCISES.md)**:
 
-| Location | Description |
-|---|---|
-| `plugin/runtime/algorithms/PathAnalyzer` | Implement `mediators`, `colliders`, `confounders`, `backdoorVariables`. Unblocks `MEDIATORS / COLLIDERS / CONFOUNDERS / BACKDOOR` in the DSL. Can be written today against the existing DFS-based `ReachabilityIndex` — no bitset work required. |
-| `plugin/runtime/DefaultCausalGraphRuntime.isDSeparated` | Bayes Ball on the DAG directly. Unblocks `causal.dsep`. |
-| `plugin/runtime/DefaultCausalGraphRuntime.candidateAdjustmentSet` | Backdoor criterion (depends on d-separation). Unblocks `causal.adjustmentCandidate` and the DSL's `IDENTIFY EFFECT OF`. |
-| `plugin/lifecycle/CausalGraphChangeListener` | Extend `beforeCommit` + `afterCommit` so creating/deleting `:Variable` nodes or `:CAUSES` edges incrementally updates the compiled snapshot (dense adjacency, topo layer, ancestor/descendant bitsets) instead of the current fallback — a full `invalidate()`. Also: reject topology-breaking writes (e.g. cycle-creating edges) in `beforeCommit`. See TODOs in that file for the concrete hook points. |
-| `dsl/exec/Neo4jQueryExecutor` | `ESTIMATE` needs `OBSERVED AS` execution + estimator dispatch (currently returns a placeholder). |
+| Tier | Plugin work | Unblocks |
+|---|---|---|
+| 1 | `isDSeparated` (Bayes Ball); `candidateAdjustmentSet` (backdoor criterion) — *runtime method bodies only; procedures/DTOs already wired* | `causal.dsep`, `causal.adjustmentCandidate`, the disabled `IDENTIFY` E2E test |
+| 1 | `CausalGraphChangeListener` — incremental snapshot updates + cycle validation (today: full `invalidate()`) | live-graph maintenance |
+| 2 | `LinearGaussianInference` + parameter schema/loader + a new `api`/DTO/procedure contract; `CounterfactualInference` | numeric `INTERVENE` / `COUNTERFACTUAL` / `ESTIMATE` against a live Neo4j |
+| 2 | Performance: dense `int[][]` layout + bitset `ReachabilityIndex` + cached index; `CausalFunctions.topoOrder` | speed (behaviour-preserving) |
 
-### Tier 2 — performance refactor
+Each plugin algorithm has a reference oracle in the DSL (`CausalModel`,
+`LinearGaussianSEM`, `CounterfactualEvaluator`) — implement to match its numbers.
 
-| Location | Description |
-|---|---|
-| `plugin/runtime/compile/CompiledCausalGraph` | Replace the `Map<String, Set<String>>` adjacency with a dense `int[][]` layout + `int[] topoOrder` + `int[] topoLayer`. Everything downstream (reachability, path queries) benefits. |
-| `plugin/runtime/compile/CompiledCausalGraph` | Pre-compute `long[][] ancestorBits` / `descendantBits` in reverse topological order. Fill from the dense layout. |
-| `plugin/runtime/algorithms/ReachabilityIndex` | Switch `ancestors` / `descendants` to O(n/64) bitset lookups reading from the snapshot. |
-| `plugin/runtime/DefaultCausalGraphRuntime` | Cache a single `ReachabilityIndex` built at compile time, instead of allocating per query. |
-| `plugin/runtime/compile/CompiledCausalGraph.topoIndex` | Replace the `List.indexOf` scan with an O(1) map lookup. |
+### Explicitly out of scope (external ML)
 
-### Tier 3 — optional ergonomics / lazy caches
-
-| Location | Description |
-|---|---|
-| `plugin/runtime/compile/CompiledCausalGraph` | Lazy `markovBlanket(v)` = `parents ∪ children ∪ parents_of_children`. One-liner on top of Tier 2 bitsets. |
-| `plugin/runtime/compile/CompiledCausalGraph` | Lazy `forbiddenAdjustmentSet(t, y)` = descendants of `t` on any causal path to `y`. Used by the DSL's `ESTIMATE` validator. |
-| `plugin/runtime/DefaultCausalGraphRuntime` | Lazy pair-index cache: `Map<(treatment, outcome), PairFacts>` with `hasDirectedPath / hasBackdoorPath / mediatorsBitset / minimalAdjustmentSets`. Only add if profiling shows repeat queries on the same pairs. |
-| `plugin/procedures/CausalFunctions.topoOrder` | Expose `CompiledCausalGraph.topoIndex` through `CausalGraphRuntime`. |
-| `dsl/exec/Neo4jQueryExecutor` | `INTERVENE` / `COUNTERFACTUAL` — v1 parse-only stubs; implementations are a separate workstream. |
+Estimation *from data* — executing `OBSERVED AS` bindings and fitting an estimator
+(regression / IPW / AIPW) — is **not** built here. This is a DB extension, not an
+ML system; a future external ETL performs data-driven estimation and inserts
+results back through this DSL. Parameters are supplied via `WEIGHT` / `MEAN` / `NOISE`.
 
 ### Not in scope for v1
 
