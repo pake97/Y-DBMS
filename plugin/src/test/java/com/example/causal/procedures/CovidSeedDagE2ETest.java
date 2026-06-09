@@ -106,7 +106,7 @@ class CovidSeedDagE2ETest {
         SeedDagSupport.compile(db);
         try (Transaction tx = db.beginTx()) {
             Result result = tx.execute(
-                "RETURN causal.hasDirectedPath('interventions', 'reported_cases') AS connected");
+                "MATCH (i:Variable {id: 'interventions'}), (r:Variable {id: 'reported_cases'}) RETURN causal.hasDirectedPath(i, r) AS connected");
             assertEquals(Boolean.TRUE, result.next().get("connected"));
         }
     }

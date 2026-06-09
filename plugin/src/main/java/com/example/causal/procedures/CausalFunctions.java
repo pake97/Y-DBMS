@@ -5,6 +5,8 @@ import com.example.causal.api.VariableRef;
 import com.example.causal.runtime.RuntimeRegistry;
 import org.neo4j.procedure.Description;
 import org.neo4j.procedure.Name;
+import org.neo4j.graphdb.Node;
+
 import org.neo4j.procedure.UserFunction;
 
 /**
@@ -29,14 +31,12 @@ public class CausalFunctions {
         "Requires causal.compile() to have been called first."
     )
     public boolean hasDirectedPath(
-            @Name("from") String from,
-            @Name("to")   String to
+            @Name("from") Node from,
+            @Name("to")   Node to
     ) {
         CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
-        VariableRef x = runtime.resolveVariable(from)
-                .orElseThrow(() -> new IllegalArgumentException("Unknown variable: " + from));
-        VariableRef y = runtime.resolveVariable(to)
-                .orElseThrow(() -> new IllegalArgumentException("Unknown variable: " + to));
+        VariableRef x = ProcedureVariables.resolve(runtime, from).orElseThrow(() -> new IllegalArgumentException("unknown variable: " + from));
+        VariableRef y = ProcedureVariables.resolve(runtime, to).orElseThrow(() -> new IllegalArgumentException("unknown variable: " + to));
         return runtime.hasDirectedPath(x, y);
     }
 
