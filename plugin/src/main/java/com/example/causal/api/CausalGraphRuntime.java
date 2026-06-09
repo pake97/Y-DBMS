@@ -91,6 +91,10 @@ public interface CausalGraphRuntime {
      * Find valid adjustment sets for identifying the causal effect of
      * {@code treatment} on {@code outcome} from observational data.
      *
+     * <p>When multiple minimal candidate sets exist, implementations should
+     * return all of them in deterministic order based on graph traversal
+     * (for example, topological-combination order).
+     *
      * @param treatment the intervention variable
      * @param outcome   the response variable
      */

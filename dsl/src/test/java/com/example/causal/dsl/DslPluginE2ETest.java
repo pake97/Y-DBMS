@@ -10,7 +10,6 @@ import com.example.causal.procedures.CausalProcedures;
 import com.example.causal.runtime.RuntimeRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.neo4j.driver.Driver;
@@ -149,11 +148,6 @@ class DslPluginE2ETest {
         assertTrue(r.method().contains("no backdoor"), "do() removes backdoor paths; got: " + r.method());
     }
 
-    @Disabled("""
-        Plugin-side identification is not implemented yet: \
-        DefaultCausalGraphRuntime.candidateAdjustmentSet (and isDSeparated) return \
-        AdjustmentCandidateResult.unimplemented() (tier-1 TODO). IDENTIFY therefore works \
-        in-memory but not against the plugin. Re-enable once the backdoor criterion lands.""")
     @Test
     void identify_returnsAdjustmentSetViaPlugin() {
         IdentificationResult r = (IdentificationResult)

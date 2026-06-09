@@ -122,48 +122,239 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
 
     @Override
     public DSeparationResult isDSeparated(Set<VariableRef> x, Set<VariableRef> y, Set<VariableRef> z) {
-        requireSnapshot();
-        // TODO(student, tier 1): implement d-separation.
-        //
-        // Model this on PathAnalyzer: add a class (e.g. DSeparation) under
-        // runtime/algorithms, construct it from the snapshot, and delegate here.
-        // Building blocks already available:
-        //   - graph.parentsOf(id) / graph.childrenOf(id) / graph.topoOrder()
-        //   - new ReachabilityIndex(snapshot).ancestors(id) / descendants(id)
-        //
-        // Two options — pick one:
-        //   (a) Bayes Ball on the DAG directly. Send balls from X, track which
-        //       reach Y under conditioning set Z. No moral graph needed; works
-        //       with today's forward/reverse adjacency.
-        //   (b) Moral-graph reachability: build the moral graph of An(X ∪ Y ∪ Z),
-        //       remove nodes outside that ancestor set, check reachability.
-        // Recommendation: (a). Fewer moving parts and no spouse_set needed.
-        //
-        // Return DSeparationResult.separated(explanation) when X ⟂ Y | Z, and
-        // DSeparationResult.connected(explanation) when an active path remains.
-        return DSeparationResult.unimplemented();
+        CompiledCausalGraph g = requireSnapshot();
+
+        Set<String> xIds = toIds(x);
+        Set<String> yIds = toIds(y);
+        Set<String> zIds = toIds(z);
+
+        return bayesBallDSeparated(
+                g,
+                xIds,
+                yIds,
+                zIds,
+                Set.of() // don't cut any outgoing edges from treatment (default d-separation behavior)
+        );
     }
 
     @Override
     public AdjustmentCandidateResult candidateAdjustmentSet(VariableRef treatment, VariableRef outcome) {
-        requireSnapshot();
-        // TODO(student, tier 1): implement the backdoor criterion.
-        // Do isDSeparated first — this builds on it.
+        CompiledCausalGraph g = requireSnapshot();
+        if (treatment == null || outcome == null) {
+            throw new IllegalArgumentException("`treatment` and `outcome` must be non-null");
+        }
+
+        String treatmentId = treatment.id();
+        String outcomeId = outcome.id();
+
+        if (treatmentId.equals(outcomeId)) {
+            return new AdjustmentCandidateResult(
+                    true,
+                    List.of(Set.of()),
+                    "`treatment` equals `outcome`; empty adjustment set is sufficient"
+            );
+        }
+
+        if (isBackdoorBlocked(g, treatmentId, outcomeId, Set.of())) {
+            return new AdjustmentCandidateResult(
+                    true,
+                    List.of(Set.of()),
+                    "empty set blocks all backdoor paths"
+            );
+        }
+
+        List<String> eligibleIds = eligibleAdjustmentIds(g, treatmentId, outcomeId);
+        for (int size = 1; size <= eligibleIds.size(); size++) {
+            List<Set<VariableRef>> minimalCandidates = new ArrayList<>();
+            for (Set<String> candidateIds : combinationsOfSize(eligibleIds, size)) {
+                if (isBackdoorBlocked(g, treatmentId, outcomeId, candidateIds)) {
+                    minimalCandidates.add(toRefs(candidateIds));
+                }
+            }
+
+            if (!minimalCandidates.isEmpty()) {
+                return new AdjustmentCandidateResult(
+                        true,
+                        Collections.unmodifiableList(minimalCandidates),
+                        "found " + minimalCandidates.size() + " minimal backdoor adjustment set(s)"
+                );
+            }
+        }
+
+        return new AdjustmentCandidateResult(
+                false,
+                List.of(),
+                "no valid adjustment set satisfies the backdoor criterion"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // private/ internal helper methods
+    // main Bayes Ball algorithm implementation, getting node IDs and Refs
+    // -------------------------------------------------------------------------
+
+    private Set<VariableRef> toRefs(Set<String> ids) {
+        Set<VariableRef> result = new LinkedHashSet<>();
+        for (String id : ids) result.add(new VariableRef(id));
+        return Collections.unmodifiableSet(result);
+    }
+
+    private Set<String> toIds(Set<VariableRef> refs) {
+        if (refs == null || refs.isEmpty()) return Set.of();
+        Set<String> ids = new LinkedHashSet<>();
+        for (VariableRef v : refs) ids.add(v.id());
+        return ids;
+    }
+
+    private List<String> eligibleAdjustmentIds(
+            CompiledCausalGraph g,
+            String treatmentId,
+            String outcomeId
+    ) {
+        Set<String> descendantsOfTreatment = new ReachabilityIndex(g).descendants(treatmentId);
+        List<String> eligibleIds = new ArrayList<>();
+        for (String id : g.topoOrder()) {
+            if (id.equals(treatmentId) || id.equals(outcomeId)) continue;
+            // If the node is a descendant of the treatment, it is not eligible for adjustment (since it would block active causal paths in case of chain and open collider paths)
+            if (descendantsOfTreatment.contains(id)) continue;
+            eligibleIds.add(id);
+        }
+        return eligibleIds;
+    }
+
+    private List<Set<String>> combinationsOfSize(List<String> values, int size) {
+        if (size <= 0 || size > values.size()) return List.of();
+        List<Set<String>> combinations = new ArrayList<>();
+        buildCombinations(values, size, 0, new ArrayList<>(), combinations);
+        return combinations;
+    }
+
+    private void buildCombinations(
+            List<String> values,
+            int targetSize,
+            int startIndex,
+            List<String> current,
+            List<Set<String>> sink
+    ) {
+        if (current.size() == targetSize) {
+            sink.add(new LinkedHashSet<>(current));
+            return;
+        }
+
+        int remainingNeeded = targetSize - current.size();
+        int maxStart = values.size() - remainingNeeded;
+        for (int i = startIndex; i <= maxStart; i++) {
+            current.add(values.get(i));
+            buildCombinations(values, targetSize, i + 1, current, sink);
+            current.remove(current.size() - 1);
+        }
+    }
+
+    /**
+     * Returns true if {@code conditionedOn} blocks all backdoor paths from
+     * {@code treatmentId} to {@code outcomeId}. Outgoing edges from
+     * {@code treatmentId} are cut so causal paths are not traversed.
+     */
+    private boolean isBackdoorBlocked(
+            CompiledCausalGraph g,
+            String treatmentId,
+            String outcomeId,
+            Set<String> conditionedOn
+    ) {
+        return bayesBallDSeparated(
+                g,
+                Set.of(treatmentId),
+                Set.of(outcomeId),
+                conditionedOn,
+                Set.of(treatmentId)   // cut outgoing edges so causal paths are not traversed
+        ).separated();
+    }
+
+    /**
+    * Returns a DSeparationResult object that tests if the variable sets X and Y are d-separated given Z. 
+    *
+    * @param  g the compiled causal graph
+    * @param  xIds the set of variable IDs for the first variable set
+    * @param  yIds the set of variable IDs for the second variable set
+    * @param  zIds the set of variable IDs for the conditioning set (observed variables)
+    * @param  nodesWithCutOutgoingEdges the set of variable IDs for the nodes with cut outgoing edges
+    * @return      the DSeparationResult object
+    */
+    private DSeparationResult bayesBallDSeparated(
+            CompiledCausalGraph g,
+            Set<String> xIds,
+            Set<String> yIds,
+            Set<String> zIds,
+            Set<String> nodesWithCutOutgoingEdges
+    ) {
+        // Vacuous cases: in standard definitions X and Y are disjoint/non-empty,
+        // but we handle empty sets defensively.
+        if (xIds.isEmpty() || yIds.isEmpty()) {
+            return DSeparationResult.separated("empty `x` or `y` => vacuously d-separated");
+        }
+
+        // If endpoints overlap, there is a length-0 path connecting them.
+        for (String id : xIds) {
+            if (yIds.contains(id)) {
+                return DSeparationResult.connected("`x` and `y` overlap at `" + id + "`");
+            }
+        }
+
+        // Bayes ball (approach a): traverse on the original DAG directly.
         //
-        // A set Z satisfies the backdoor criterion relative to (treatment, outcome):
-        //   1. No node in Z is a descendant of treatment
-        //      (ReachabilityIndex.descendants(treatment)).
-        //   2. Z blocks every backdoor path from treatment to outcome — i.e.
-        //      treatment ⟂ outcome | Z in the graph with treatment's *outgoing*
-        //      edges removed. Reuse isDSeparated on that mutilated graph.
-        //
-        // Candidate-set search: a common starting point is the parents of the
-        // treatment, or subsets of the non-descendant variables; collect every Z
-        // that satisfies (1) and (2) into candidateSets.
-        //
-        // Return new AdjustmentCandidateResult(exists, candidateSets, explanation)
-        // — adjustmentSetExists is true iff at least one valid Z was found.
-        return AdjustmentCandidateResult.unimplemented();
+        // We represent where the ball came from when entering the current node:
+        //   - FROM_PARENT: entered from a parent into this node
+        //   - FROM_CHILD: entered from a child into this node
+        enum Dir { FROM_CHILD, FROM_PARENT }
+        record State(String nodeId, Dir dir) {}
+
+        Deque<State> queue = new ArrayDeque<>();
+        Set<State> visited = new HashSet<>();
+
+        for (String start : xIds) {
+            queue.add(new State(start, Dir.FROM_PARENT));
+            queue.add(new State(start, Dir.FROM_CHILD));
+        }
+
+        while (!queue.isEmpty()) {
+            State cur = queue.poll();
+            if (!visited.add(cur)) continue;
+
+            if (yIds.contains(cur.nodeId())) {
+                return DSeparationResult.connected(
+                        "found an active path reaching `" + cur.nodeId() + "`"
+                );
+            }
+
+            boolean observed = zIds.contains(cur.nodeId());
+
+            if (observed) {
+                if (cur.dir() == Dir.FROM_PARENT) {
+                    for (String p : g.parentsOf(cur.nodeId())) {
+                        queue.add(new State(p, Dir.FROM_CHILD));
+                    }
+                }
+            } else {
+                if (cur.dir() == Dir.FROM_PARENT) {
+                    for (String c : g.childrenOf(cur.nodeId())) {
+                        if (!nodesWithCutOutgoingEdges.contains(cur.nodeId())) {
+                            queue.add(new State(c, Dir.FROM_PARENT));
+                        }
+                    }
+                } else {
+                    for (String p : g.parentsOf(cur.nodeId())) {
+                        queue.add(new State(p, Dir.FROM_CHILD));
+                    }
+                    for (String c : g.childrenOf(cur.nodeId())) {
+                        if (!nodesWithCutOutgoingEdges.contains(cur.nodeId())) {
+                            queue.add(new State(c, Dir.FROM_PARENT));
+                        }
+                    }
+                }
+            }
+        }
+
+        return DSeparationResult.separated("no active path connects `x` to `y` given `z`");
     }
 
     // -------------------------------------------------------------------------
@@ -190,12 +381,6 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     @Override
     public Set<VariableRef> backdoorVariables(VariableRef treatment, VariableRef outcome) {
         return toRefs(new PathAnalyzer(requireSnapshot()).backdoorVariables(treatment.id(), outcome.id()));
-    }
-
-    private static Set<VariableRef> toRefs(Set<String> ids) {
-        Set<VariableRef> result = new LinkedHashSet<>();
-        for (String id : ids) result.add(new VariableRef(id));
-        return Collections.unmodifiableSet(result);
     }
 
     // -------------------------------------------------------------------------
