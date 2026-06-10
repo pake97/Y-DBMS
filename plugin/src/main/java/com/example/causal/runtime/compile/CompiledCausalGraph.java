@@ -101,23 +101,35 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     private final Map<String, Set<String>> reverseAdj;     // TODO(student, tier 2): → int[][] reverseAdj
     private final List<String> topoOrder;                  // TODO(student, tier 2): → int[] topoOrder
 
+    // ── Linear-Gaussian SEM parameters ───────────────────────────────────────
+    /** Edge coefficients β, keyed child → (parent → β). Immutable deep copy. */
+    private final Map<String, Map<String, Double>> edgeWeights;
+    /** True when at least one SEM parameter differs from the default. */
+    private final boolean parameterized;
+
     // TODO(student, tier 2): add alongside the dense layout
     // private final int[]    topoLayer;       // layer per node (0 = source)
     // private final long[][] ancestorBits;    // ancestorBits[i] = bitset of ancestors of i
     // private final long[][] descendantBits;  // descendantBits[i] = bitset of descendants of i
 
+    /**
+     * Full constructor including linear-Gaussian SEM edge weights.
+     */
     CompiledCausalGraph(
             Map<String, Variable> variableById,
             Map<String, Set<String>> forwardAdj,
             Map<String, Set<String>> reverseAdj,
             List<String> topoOrder,
+            Map<String, Map<String, Double>> edgeWeights,
             Instant compiledAt
     ) {
         this.variableById = Collections.unmodifiableMap(new LinkedHashMap<>(variableById));
         this.forwardAdj   = Collections.unmodifiableMap(deepCopy(forwardAdj));
         this.reverseAdj   = Collections.unmodifiableMap(deepCopy(reverseAdj));
         this.topoOrder    = Collections.unmodifiableList(new ArrayList<>(topoOrder));
+        this.edgeWeights  = Collections.unmodifiableMap(deepCopyWeights(edgeWeights));
         this.compiledAt   = compiledAt;
+        this.parameterized = computeParameterized();
     }
 
     // -------------------------------------------------------------------------
@@ -165,6 +177,45 @@ public final class CompiledCausalGraph implements GraphSnapshot {
      */
     public int topoIndex(String id) {
         return topoOrder.indexOf(id);
+    }
+
+    // -------------------------------------------------------------------------
+    // Linear-Gaussian SEM accessors
+    // -------------------------------------------------------------------------
+
+    /**
+     * Edge coefficient β for edge {@code from → to}.
+     * Returns {@link Variable#DEFAULT_WEIGHT 1.0} when the weight was not
+     * declared in Neo4j (the identity coefficient).
+     */
+    public double weight(String from, String to) {
+        return edgeWeights.getOrDefault(to, Map.of()).getOrDefault(from, Variable.DEFAULT_WEIGHT);
+    }
+
+    /**
+     * Intercept μ₀ (structural-equation constant) for the variable with the given id.
+     * Returns {@link Variable#DEFAULT_INTERCEPT 0.0} when not declared.
+     */
+    public double intercept(String id) {
+        Variable v = variableById.get(id);
+        return v != null ? v.intercept() : Variable.DEFAULT_INTERCEPT;
+    }
+
+    /**
+     * Noise variance σ² for the variable with the given id.
+     * Returns {@link Variable#DEFAULT_NOISE_VARIANCE 1.0} when not declared.
+     */
+    public double noiseVariance(String id) {
+        Variable v = variableById.get(id);
+        return v != null ? v.noiseVariance() : Variable.DEFAULT_NOISE_VARIANCE;
+    }
+
+    /**
+     * True if any SEM parameter (weight, intercept, or noise) was explicitly set
+     * to a non-default value. When false, the graph is structural-only.
+     */
+    public boolean isParameterized() {
+        return parameterized;
     }
 
     // -------------------------------------------------------------------------
@@ -225,6 +276,25 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         //     for (int i = 0; i < size(); i++)
         //         sb.append(String.format("%n  [%2d] %s", i, Long.toBinaryString(ancestorBits[i][0])));
 
+        // ── Linear-Gaussian SEM parameters (when present) ────────────
+        if (parameterized) {
+            sb.append("\n\n── SEM parameters (linear-Gaussian) ────────────────────────");
+            sb.append("\n  Per-variable (intercept μ₀, noise σ²):");
+            for (String id : topoOrder) {
+                Variable v = variableById.get(id);
+                sb.append(String.format("%n    %-30s  intercept=%.4f  noise=%.4f",
+                        id, v.intercept(), v.noiseVariance()));
+            }
+            sb.append("\n  Edge weights (from → to : β):");
+            for (String to : topoOrder) {
+                Map<String, Double> byParent = edgeWeights.getOrDefault(to, Map.of());
+                for (String from : parentsOf(to)) {
+                    double w = byParent.getOrDefault(from, 1.0);
+                    sb.append(String.format("%n    %-15s → %-15s  β=%.4f", from, to, w));
+                }
+            }
+        }
+
         sb.append("\n────────────────────────────────────────────────────────────\n");
         LOG.info(sb.toString());
     }
@@ -237,5 +307,31 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             copy.put(e.getKey(), Collections.unmodifiableSet(new LinkedHashSet<>(e.getValue())));
         }
         return copy;
+    }
+
+    /** Deep-copy edge weight maps into an immutable structure. */
+    private static Map<String, Map<String, Double>> deepCopyWeights(Map<String, Map<String, Double>> src) {
+        Map<String, Map<String, Double>> copy = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, Double>> e : src.entrySet()) {
+            copy.put(e.getKey(), Collections.unmodifiableMap(new LinkedHashMap<>(e.getValue())));
+        }
+        return copy;
+    }
+
+    /**
+     * Check whether any SEM parameter deviates from its default, indicating
+     * the graph was loaded with explicit linear-Gaussian parameters.
+     */
+    private boolean computeParameterized() {
+        for (Map<String, Double> byParent : edgeWeights.values()) {
+            for (double w : byParent.values()) {
+                if (w != Variable.DEFAULT_WEIGHT) return true;
+            }
+        }
+        for (Variable v : variableById.values()) {
+            if (v.intercept() != Variable.DEFAULT_INTERCEPT) return true;
+            if (v.noiseVariance() != Variable.DEFAULT_NOISE_VARIANCE) return true;
+        }
+        return false;
     }
 }

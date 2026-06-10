@@ -54,8 +54,12 @@ public final class GraphLoader {
                 String name = (String) node.getProperty("name", id);
                 boolean observed = (boolean) node.getProperty("observed", true);
                 boolean latent   = (boolean) node.getProperty("latent", false);
+                double intercept = ((Number) node.getProperty("intercept",
+                        Variable.DEFAULT_INTERCEPT)).doubleValue();
+                double noise     = ((Number) node.getProperty("noise",
+                        Variable.DEFAULT_NOISE_VARIANCE)).doubleValue();
 
-                variableById.put(id, Variable.from(id, name, observed, latent));
+                variableById.put(id, Variable.from(id, name, observed, latent, intercept, noise));
                 forwardAdj.putIfAbsent(id, new LinkedHashSet<>());
                 reverseAdj.putIfAbsent(id, new LinkedHashSet<>());
             }
@@ -64,10 +68,12 @@ public final class GraphLoader {
         // --- Pass 2: load active CAUSES relationships via Cypher ---
         // Using Cypher here is intentional: it avoids the need to iterate all
         // relationships and lets Neo4j filter on the 'active' property efficiently.
+        // Also reads the optional 'weight' property (β coefficient) for the SEM.
+        Map<String, Map<String, Double>> edgeWeights = new LinkedHashMap<>();
         Result relResult = tx.execute(
                 "MATCH (a:Variable)-[r:CAUSES]->(b:Variable) " +
                 "WHERE coalesce(r.active, true) = true " +
-                "RETURN a.id AS fromId, b.id AS toId"
+                "RETURN a.id AS fromId, b.id AS toId, coalesce(r.weight, " + Variable.DEFAULT_WEIGHT + ") AS weight"
         );
         while (relResult.hasNext()) {
             Map<String, Object> row = relResult.next();
@@ -75,15 +81,17 @@ public final class GraphLoader {
             String toId   = (String) row.get("toId");
 
             if (variableById.containsKey(fromId) && variableById.containsKey(toId)) {
+                double weight = ((Number) row.get("weight")).doubleValue();
                 forwardAdj.computeIfAbsent(fromId, k -> new LinkedHashSet<>()).add(toId);
                 reverseAdj.computeIfAbsent(toId,   k -> new LinkedHashSet<>()).add(fromId);
+                edgeWeights.computeIfAbsent(toId,  k -> new LinkedHashMap<>()).put(fromId, weight);
             }
         }
 
         List<String> topoOrder = TopologicalSorter.sort(variableById.keySet(), forwardAdj);
 
         return new CompiledCausalGraph(
-                variableById, forwardAdj, reverseAdj, topoOrder, Instant.now()
+                variableById, forwardAdj, reverseAdj, topoOrder, edgeWeights, Instant.now()
         );
     }
 }
