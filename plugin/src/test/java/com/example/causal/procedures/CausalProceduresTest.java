@@ -173,6 +173,22 @@ class CausalProceduresTest {
     }
 
     @Test
+    void linearGaussianInferenceReturnsResult() {
+        try (Transaction tx = db.beginTx()) {
+            tx.execute("MATCH (n) SET n.noiseVariance = 1.0");
+            tx.execute("MATCH ()-[r:CAUSES]->() SET r.weight = 2.0");
+            tx.commit();
+        }
+        compile();
+        try (Transaction tx = db.beginTx()) {
+            Result result = tx.execute(
+                    "MATCH (a:Variable {id: 'A'}), (c:Variable {id: 'C'}) " +
+                    "CALL causal.linearGaussianInference(a, c, {A: 1.0}) YIELD means, variances, totalEffect RETURN totalEffect");
+            assertNotNull(result.next().get("totalEffect"));
+        }
+    }
+
+    @Test
     void rejectsNonVariableNode() {
         compile();
         try (Transaction tx = db.beginTx()) {

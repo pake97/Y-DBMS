@@ -36,4 +36,6 @@ public final class ProcedureNames {
     public static final String COLLIDERS            = "causal.colliders";
     public static final String CONFOUNDERS          = "causal.confounders";
     public static final String BACKDOOR_VARIABLES   = "causal.backdoorVariables";
+
+    public static final String LINEAR_GAUSSIAN_INFERENCE = "causal.linearGaussianInference";
 }

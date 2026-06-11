@@ -194,7 +194,7 @@ style of `CausalProceduresTest` (embedded Neo4j).
 - [x] #2 `candidateAdjustmentSet` implemented; `identify_returnsAdjustmentSetViaPlugin` re-enabled & green
 - [ ] #3 `CausalGraphChangeListener` incremental update + cycle validation
 - [x] #4 SEM: schema+loader, engine (means/variances/totalEffect), api+DTO+procedure, unit + integration tests matching the oracle
-- [ ] #4b counterfactual engine + unit test matching the oracle
+- [x] #4b counterfactual engine + unit test matching the oracle
 - [ ] #5–7 performance (optional): all existing tests stay green
 - [ ] full reactor `mvn test` green
 

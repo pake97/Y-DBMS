@@ -6,6 +6,7 @@ import com.example.causal.dto.AdjustmentRecord;
 import com.example.causal.dto.DSeparationRecord;
 import com.example.causal.dto.SnapshotRecord;
 import com.example.causal.dto.VariableNodeRecord;
+import com.example.causal.dto.LinearGaussianRecord;
 import org.junit.jupiter.api.Test;
 import org.neo4j.procedure.Procedure;
 
@@ -60,7 +61,8 @@ class ProcedureContractTest {
         Set<String> declared = constantValues(ResultColumns.class);
         for (Class<?> dto : new Class<?>[]{
                 SnapshotRecord.class, VariableNodeRecord.class,
-                AdjustmentRecord.class, DSeparationRecord.class}) {
+                AdjustmentRecord.class, DSeparationRecord.class,
+                LinearGaussianRecord.class}) {
             for (String column : outputColumns(dto)) {
                 assertTrue(declared.contains(column),
                         dto.getSimpleName() + " exposes YIELD column '" + column +
@@ -74,7 +76,8 @@ class ProcedureContractTest {
         Set<String> dtoFields = new LinkedHashSet<>();
         for (Class<?> dto : new Class<?>[]{
                 SnapshotRecord.class, VariableNodeRecord.class,
-                AdjustmentRecord.class, DSeparationRecord.class}) {
+                AdjustmentRecord.class, DSeparationRecord.class,
+                LinearGaussianRecord.class}) {
             dtoFields.addAll(outputColumns(dto));
         }
         for (String constant : constantValues(ResultColumns.class)) {
