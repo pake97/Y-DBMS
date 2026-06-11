@@ -2,51 +2,27 @@ package com.example.causal.runtime.algorithms;
 
 import com.example.causal.runtime.compile.CompiledCausalGraph;
 
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Plugin-side <strong>linear-Gaussian SEM inference</strong> over the persisted,
  * compiled causal graph.
  *
- * <h2>Status: Tier 2 student exercise — NOT yet implemented</h2>
- * Every method below throws {@link UnsupportedOperationException}. This class has
- * no callers yet; it is a placeholder marking where the plugin's quantitative
- * runtime goes. Implementing it (and the contract around it) lets the DSL's
- * {@code Neo4jQueryExecutor} answer numeric {@code INTERVENE … RETURN
- * DISTRIBUTION/EFFECT/EXPECTATION} against the live graph instead of only the
- * in-memory path.
+ * <p>Each variable follows the structural equation
+ * {@code V = intercept_V + Σ_{P∈parents(V)} β_{P→V}·P + ε_V},
+ * {@code ε_V ~ N(0, σ²_V)}.
+ *
+ * <p>The do-operator {@code do(X=x)} fixes μ(X)=x, Var(X)=0, and conceptually
+ * removes X's incoming edges. In practice, an intervened variable simply has
+ * its parents skipped and noise set to zero, so the general recursion handles
+ * it with no special case beyond the initial check.
  *
  * <h2>Reference oracle</h2>
- * The DSL already ships a complete, tested reference implementation:
  * {@code dsl/src/main/java/com/example/causal/dsl/exec/LinearGaussianSEM.java}
- * (with cases in {@code CausalDSLTest}). Treat it as the correctness oracle —
- * the same closed-form math, just over the plugin's {@link CompiledCausalGraph}
- * instead of the DSL's {@code CausalModel}. Each variable is
- * {@code V = intercept_V + Σ_{P∈parents(V)} β_{P→V}·P + ε_V}, {@code ε_V ~ N(0, σ²_V)}.
+ * — this implementation mirrors its math exactly over the plugin's
+ * {@link CompiledCausalGraph} instead of the DSL's {@code CausalModel}.
  *
- * <h2>Suggested steps</h2>
- * <ol>
- *   <li><b>Schema + loader.</b> The compiled graph carries no parameters today.
- *       Decide where they live — e.g. {@code :Variable {intercept, noise}} and
- *       {@code :CAUSES {weight}} — and load them in {@code GraphLoader} into
- *       {@link CompiledCausalGraph} (add accessors mirroring {@code parentsOf}).</li>
- *   <li><b>Engine.</b> Implement the three methods below. Means propagate in
- *       {@code topoOrder()}; variances via the incremental covariance recursion
- *       {@code Cov(V,U)=Σ β·Cov(P,U)}, {@code Var(V)=ΣΣ β·β·Cov(P,Q)+σ²_V};
- *       total effect via a unit-impulse propagation (∂x=1). See the oracle.</li>
- *   <li><b>Contract + procedures.</b> Design the {@code api.*} surface (a
- *       {@code CausalGraphRuntime} method + DTO + {@code ProcedureNames} entry)
- *       and a {@code causal.*} procedure so the DSL can call this over Bolt.
- *       This is yours to shape — keep it on the {@code com.example.causal.api}
- *       boundary the DSL depends on.</li>
- *   <li><b>Do-operator.</b> An intervention {@code do(X=x)} fixes μ(X)=x and
- *       Var(X)=0 and removes X's incoming edges. Reuse the structural surgery;
- *       in the oracle, a fixed variable simply has empty parents and zero noise,
- *       so the general recursion yields the interventional answer for free.</li>
- * </ol>
- *
- * @see PathAnalyzer the completed Tier 1 worked example to model this on
+ * @see PathAnalyzer the completed Tier 1 worked example this is modelled on
  */
 public final class LinearGaussianInference {
 
@@ -58,35 +34,107 @@ public final class LinearGaussianInference {
 
     /**
      * Interventional means {@code E[V | do(doValues)]} for every variable id.
-     * TODO(student, tier 2): implement — propagate in {@code graph.topoOrder()}.
+     *
+     * <p>Propagates in topological order. For each variable:
+     * <ul>
+     *   <li>If intervened: μ(V) = doValues.get(V)</li>
+     *   <li>Otherwise: μ(V) = intercept_V + Σ_{P∈parents(V)} β_{P→V} · μ(P)</li>
+     * </ul>
      */
     public Map<String, Double> interventionalMeans(Map<String, Double> doValues) {
-        throw new UnsupportedOperationException(
-            "TODO(student, tier 2): linear-Gaussian means — see dsl LinearGaussianSEM oracle");
+        Map<String, Double> mu = new HashMap<>();
+        for (String v : graph.topoOrder()) {
+            if (doValues.containsKey(v)) {
+                mu.put(v, doValues.get(v));
+                continue;
+            }
+            double m = graph.intercept(v);
+            for (String p : graph.parentsOf(v)) {
+                m += graph.weight(p, v) * mu.get(p);
+            }
+            mu.put(v, m);
+        }
+        return mu;
     }
 
     /**
      * Marginal variances {@code Var[V | do(doValues)]}; intervened variables are
-     * deterministic (0).
-     * TODO(student, tier 2): implement the incremental covariance recursion.
+     * deterministic (variance 0).
+     *
+     * <p>Uses the incremental covariance recursion in topological order:
+     * <ul>
+     *   <li>{@code Cov(V, U) = Σ_{P∈parents(V)} β_{P→V} · Cov(P, U)}</li>
+     *   <li>{@code Var(V) = Σ_P Σ_Q β_{P→V} · β_{Q→V} · Cov(P, Q) + σ²_V}</li>
+     *   <li>Intervened variables: Var(V) = 0</li>
+     * </ul>
      */
     public Map<String, Double> interventionalVariances(Map<String, Double> doValues) {
-        throw new UnsupportedOperationException(
-            "TODO(student, tier 2): linear-Gaussian variances — see dsl LinearGaussianSEM oracle");
+        List<String> topo = graph.topoOrder();
+        // cov[v][u] = Cov(v, u); built incrementally in topo order
+        Map<String, Map<String, Double>> cov = new HashMap<>();
+
+        for (String v : topo) {
+            Map<String, Double> covV = new HashMap<>();
+            cov.put(v, covV);
+            boolean intervened = doValues.containsKey(v);
+            // An intervened variable has no effective parents — it is fixed and
+            // independent of everything, so Cov(V, U)=0 for all U and Var(V)=0.
+            Set<String> pv = intervened ? Set.of() : graph.parentsOf(v);
+
+            for (String u : topo) {
+                if (u.equals(v)) {
+                    // Var(V) = σ²_V + Σ_P Σ_Q β_P · β_Q · Cov(P, Q)
+                    double var = intervened ? 0.0 : graph.noiseVariance(v);
+                    for (String p : pv) {
+                        for (String q : pv) {
+                            var += graph.weight(p, v) * graph.weight(q, v) * cov.get(p).get(q);
+                        }
+                    }
+                    covV.put(v, var);
+                    break; // v is the last processed node; everything after is unknown
+                }
+                // Cov(V, U) = Σ_{P∈parents(V)} β_{P→V} · Cov(P, U)
+                double c = 0.0;
+                for (String p : pv) {
+                    c += graph.weight(p, v) * cov.get(p).get(u);
+                }
+                covV.put(u, c);
+                cov.get(u).put(v, c); // keep the matrix symmetric
+            }
+        }
+
+        // Extract diagonal (marginal variances)
+        Map<String, Double> var = new HashMap<>();
+        for (String v : topo) {
+            var.put(v, cov.get(v).get(v));
+        }
+        return var;
     }
 
     /**
      * Total causal effect of {@code treatment} on {@code outcome} — the sum over
-     * directed paths of the product of edge coefficients.
-     * TODO(student, tier 2): implement via unit-impulse propagation (∂treatment=1).
+     * all directed paths of the product of edge coefficients.
+     *
+     * <p>Computed via unit-impulse propagation (no path enumeration):
+     * <ul>
+     *   <li>∂treatment = 1</li>
+     *   <li>∂V = Σ_{P∈parents(V)} β_{P→V} · ∂P  (for V ≠ treatment)</li>
+     *   <li>Result = ∂outcome</li>
+     * </ul>
      */
     public double totalEffect(String treatment, String outcome) {
-        throw new UnsupportedOperationException(
-            "TODO(student, tier 2): linear-Gaussian total effect — see dsl LinearGaussianSEM oracle");
-    }
-
-    @SuppressWarnings("unused") // referenced once the methods above are implemented
-    private Set<String> parentsOf(String id) {
-        return graph.parentsOf(id);
+        Map<String, Double> d = new HashMap<>();
+        for (String v : graph.topoOrder()) {
+            if (v.equals(treatment)) {
+                d.put(v, 1.0);
+                continue;
+            }
+            double s = 0.0;
+            for (String p : graph.parentsOf(v)) {
+                s += graph.weight(p, v) * d.getOrDefault(p, 0.0);
+            }
+            d.put(v, s);
+        }
+        return d.getOrDefault(outcome, 0.0);
     }
 }

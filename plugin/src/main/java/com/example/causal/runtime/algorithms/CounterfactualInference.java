@@ -8,32 +8,20 @@ import java.util.Map;
  * Plugin-side <strong>linear-Gaussian counterfactual inference</strong> over the
  * persisted, compiled causal graph.
  *
- * <h2>Status: Tier 2 student exercise — NOT yet implemented</h2>
- * The method below throws {@link UnsupportedOperationException}. This class has no
- * callers yet; it marks where the plugin's counterfactual engine goes, so the
- * DSL's {@code Neo4jQueryExecutor} can answer {@code COUNTERFACTUAL} against the
- * live graph instead of only the in-memory path.
- *
- * <h2>Reference oracle</h2>
- * The DSL ships a complete, tested implementation:
- * {@code dsl/src/main/java/com/example/causal/dsl/exec/CounterfactualEvaluator.java}
- * (with cases in {@code CausalDSLTest}). Match its numbers.
- *
  * <h2>The math (Pearl's three steps, linear-Gaussian)</h2>
  * Given factual evidence and a hypothetical {@code do(X = x*)}:
  * <ol>
  *   <li><b>Abduction</b> — recover the exogenous noise from the factual world.</li>
- *   <li><b>Action</b> — graph surgery {@code do(X = x*)} (reuse the structural surgery).</li>
+ *   <li><b>Action</b> — graph surgery {@code do(X = x*)}.</li>
  *   <li><b>Prediction</b> — re-propagate holding the abducted noise fixed.</li>
  * </ol>
- * For a linear-Gaussian SEM this collapses to a one-liner — holding the noise
- * fixed, {@code Y} is affine in {@code X}:
+ * For a linear-Gaussian SEM this collapses to:
  * <pre>  Y_cf = Y_factual + totalEffect(X→Y) · (x* − X_factual)</pre>
- * so it reuses {@link LinearGaussianInference#totalEffect} once that lands. Depends
- * on the same parameter schema/loader work described in {@link LinearGaussianInference}.
+ *
+ * <h2>Reference oracle</h2>
+ * {@code dsl/src/main/java/com/example/causal/dsl/exec/CounterfactualEvaluator.java}
  *
  * @see LinearGaussianInference the SEM engine this builds on
- * @see PathAnalyzer the completed Tier 1 worked example to model this on
  */
 public final class CounterfactualInference {
 
@@ -46,21 +34,37 @@ public final class CounterfactualInference {
     /**
      * Counterfactual value of {@code outcome} under {@code do(interventionVar = counterfactualValue)},
      * given the factual values of the relevant variables.
-     * TODO(student, tier 2): implement — see the linear-Gaussian one-liner above
-     * and the {@code CounterfactualEvaluator} oracle in the DSL module.
      *
-     * @param factualValues observed (factual) values keyed by variable id, incl. the outcome and X
+     * <p>Uses the linear-Gaussian identity:
+     * {@code Y_cf = Y_factual + totalEffect(X→Y) · (x* − X_factual)}.
+     *
+     * @param interventionVar     the variable being hypothetically intervened on
+     * @param counterfactualValue the hypothetical value x*
+     * @param outcome             the variable whose counterfactual value is queried
+     * @param factualValues       observed (factual) values keyed by variable id,
+     *                            must include both {@code interventionVar} and {@code outcome}
+     * @return the counterfactual value Y_cf
+     * @throws IllegalArgumentException if factual values are missing for
+     *                                  {@code interventionVar} or {@code outcome}
      */
     public double counterfactual(String interventionVar,
                                  double counterfactualValue,
                                  String outcome,
                                  Map<String, Double> factualValues) {
-        throw new UnsupportedOperationException(
-            "TODO(student, tier 2): linear-Gaussian counterfactual — see dsl CounterfactualEvaluator oracle");
-    }
+        if (!factualValues.containsKey(interventionVar)) {
+            throw new IllegalArgumentException(
+                    "Factual value required for intervention variable: " + interventionVar);
+        }
+        if (!factualValues.containsKey(outcome)) {
+            throw new IllegalArgumentException(
+                    "Factual value required for outcome variable: " + outcome);
+        }
 
-    @SuppressWarnings("unused") // used once implemented
-    private CompiledCausalGraph graph() {
-        return graph;
+        double xFactual = factualValues.get(interventionVar);
+        double yFactual = factualValues.get(outcome);
+
+        double effect = new LinearGaussianInference(graph).totalEffect(interventionVar, outcome);
+
+        return yFactual + effect * (counterfactualValue - xFactual);
     }
 }
