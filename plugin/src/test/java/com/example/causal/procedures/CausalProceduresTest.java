@@ -10,6 +10,7 @@ import org.neo4j.harness.Neo4jBuilders;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -175,7 +176,7 @@ class CausalProceduresTest {
     @Test
     void linearGaussianInferenceReturnsResult() {
         try (Transaction tx = db.beginTx()) {
-            tx.execute("MATCH (n) SET n.noiseVariance = 1.0");
+            tx.execute("MATCH (n) SET n.noise = 1.0");
             tx.execute("MATCH ()-[r:CAUSES]->() SET r.weight = 2.0");
             tx.commit();
         }
@@ -183,8 +184,12 @@ class CausalProceduresTest {
         try (Transaction tx = db.beginTx()) {
             Result result = tx.execute(
                     "MATCH (a:Variable {id: 'A'}), (c:Variable {id: 'C'}) " +
-                    "CALL causal.linearGaussianInference(a, c, {A: 1.0}) YIELD means, variances, totalEffect RETURN totalEffect");
-            assertNotNull(result.next().get("totalEffect"));
+                    "CALL causal.linearGaussianInference(a, c, {A: 1.0}) YIELD means, variances, totalEffect RETURN means, variances, totalEffect");
+            Map<String, Object> row = result.next();
+
+            assertEquals(6.0, (Double) row.get("totalEffect"), 1e-5);
+            assertEquals(Map.of("A", 1.0, "B", 2.0, "C", 6.0), row.get("means"));
+            assertEquals(Map.of("A", 0.0, "B", 1.0, "C", 5.0), row.get("variances"));
         }
     }
 

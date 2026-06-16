@@ -391,6 +391,8 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     public LinearGaussianRecord linearGaussianInference(VariableRef treatment, VariableRef outcome, Map<VariableRef, Double> doValues) {
         CompiledCausalGraph g = requireSnapshot();
         if (!g.isParameterized()) {
+            // Note: An identity-coefficient SEM (where explicitly all β=1, intercept=0, noise=1)
+            // will currently be rejected here, as we rely on value deviation to detect parameterization.
             throw new IllegalStateException("Graph is not parameterized. Ensure linear-Gaussian parameters are set on nodes/edges.");
         }
 
