@@ -79,6 +79,16 @@ Version pins live in the root [`pom.xml`](pom.xml) (`neo4j.version`,
 
 ---
 
+### Generating Synthetic Data
+
+If you want to regenerate the synthetic CSV test datasets with different configurations or sample sizes, you can run the `synthetic.py` script. It includes [PEP 723 inline script metadata](https://peps.python.org/pep-0723/), so it can be executed instantly with [uv](https://github.com/astral-sh/uv) (which will automatically fetch `pandas`, `dowhy`, and `networkx` into a temporary environment without touching your system Python):
+
+```bash
+cd dev/
+uv run synthetic.py
+```
+
+
 ## Build
 
 ```bash
@@ -94,6 +104,15 @@ mvn test -pl dsl
 mvn test -pl plugin -Dtest=TopologicalSorterTest     # pure Java, fast
 mvn test -pl plugin -Dtest=CausalProceduresTest      # embedded Neo4j, ~2 min
 mvn test -pl dsl    -Dtest=CausalDSLTest
+
+# run synthetic data tests (default config 1, 1K samples)
+mvn test -pl plugin -Dtest=SyntheticAlgorithmE2ETest
+
+# run synthetic data tests with specific configuration and size
+mvn test -pl plugin -Dtest=SyntheticAlgorithmE2ETest -Dtest.configId=3 -Dtest.sampleSize=100K
+
+# run all non-synthetic tests (to skip heavy CSV loading)
+mvn test -Dgroups="!synthetic"
 ```
 
 ---

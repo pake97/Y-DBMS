@@ -45,6 +45,7 @@
                 <directory>${project.basedir}/../dev</directory>
                 <includes>
                     <include>seed-dag.cypher</include>
+                    <include>*.csv</include>
                 </includes>
             </testResource>
         </testResources>

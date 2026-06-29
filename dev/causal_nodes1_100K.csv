@@ -1,0 +1,11 @@
+nodeId,name,label
+y,y,Outcome
+W0,W0,Confounder
+W1,W1,Confounder
+W2,W2,Confounder
+W3,W3,Confounder
+Z0,Z0,Instrument
+Z1,Z1,Instrument
+FD0,FD0,Variable
+v0,v0,Treatment
+X0,X0,Variable
