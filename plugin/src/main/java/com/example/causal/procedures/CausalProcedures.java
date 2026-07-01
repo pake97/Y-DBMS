@@ -234,6 +234,40 @@ public class CausalProcedures {
     }
 
     // =========================================================================
+    // causal.linearGaussianInference(treatment, outcome, doValues)
+    // =========================================================================
+
+    // doValuesMap is Map<String, Double> instead of Map<Node, Double>
+    // cypher only allows map keys as literals
+    @Procedure(name = ProcedureNames.LINEAR_GAUSSIAN_INFERENCE, mode = Mode.READ)
+    @Description(
+        "Run linear-Gaussian inference over the parameterized causal graph. " +
+        "Returns interventional means, variances, and total effect." +
+        "Use Variable node ID direclty (without quotes) in the doValues map."
+    )
+    public Stream<LinearGaussianRecord> linearGaussianInference(
+            @Name("treatment") Node treatment,
+            @Name("outcome")   Node outcome,
+            @Name(value = "doValues", defaultValue = "{}") Map<String, Double> doValuesMap
+    ) {
+        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        VariableRef t = ProcedureVariables.requireResolved(runtime, treatment, "treatment");
+        VariableRef o = ProcedureVariables.requireResolved(runtime, outcome, "outcome");
+
+        Map<VariableRef, Double> doValues = new HashMap<>();
+        for (Map.Entry<String, Double> entry : doValuesMap.entrySet()) {
+            Optional<VariableRef> ref = runtime.resolveVariable(entry.getKey());
+            if (ref.isPresent()) {
+                doValues.put(ref.get(), entry.getValue());
+            } else {
+                throw new IllegalArgumentException("Unknown variable in doValues: " + entry.getKey());
+            }
+        }
+
+        return Stream.of(runtime.linearGaussianInference(t, o, doValues));
+    }
+
+    // =========================================================================
     // causal.inspectSnapshot()
     // =========================================================================
 

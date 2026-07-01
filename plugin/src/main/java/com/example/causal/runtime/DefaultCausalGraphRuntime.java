@@ -1,10 +1,12 @@
 package com.example.causal.runtime;
 
 import com.example.causal.api.*;
+import com.example.causal.runtime.algorithms.LinearGaussianInference;
 import com.example.causal.runtime.algorithms.PathAnalyzer;
 import com.example.causal.runtime.algorithms.ReachabilityIndex;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
 import com.example.causal.runtime.compile.GraphLoader;
+import com.example.causal.dto.LinearGaussianRecord;
 
 import java.util.*;
 
@@ -384,6 +386,31 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     }
 
     // -------------------------------------------------------------------------
+
+    @Override
+    public LinearGaussianRecord linearGaussianInference(VariableRef treatment, VariableRef outcome, Map<VariableRef, Double> doValues) {
+        CompiledCausalGraph g = requireSnapshot();
+        if (!g.isParameterized()) {
+            // Note: An identity-coefficient SEM (where explicitly all β=1, intercept=0, noise=1)
+            // will currently be rejected here, as we rely on value deviation to detect parameterization.
+            throw new IllegalStateException("Graph is not parameterized. Ensure linear-Gaussian parameters are set on nodes/edges.");
+        }
+
+        LinearGaussianInference engine = new LinearGaussianInference(g);
+
+        Map<String, Double> stringDoValues = new HashMap<>();
+        if (doValues != null) {
+            for (Map.Entry<VariableRef, Double> e : doValues.entrySet()) {
+                stringDoValues.put(e.getKey().id(), e.getValue());
+            }
+        }
+
+        Map<String, Double> means = engine.interventionalMeans(stringDoValues);
+        Map<String, Double> variances = engine.interventionalVariances(stringDoValues);
+        Double totalEffect = engine.totalEffect(treatment.id(), outcome.id());
+
+        return new LinearGaussianRecord(means, variances, totalEffect);
+    }
 
     @Override
     public GraphSnapshot currentSnapshot() {

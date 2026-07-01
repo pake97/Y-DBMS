@@ -1,7 +1,10 @@
 package com.example.causal.api;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+
+import com.example.causal.dto.LinearGaussianRecord;
 
 /**
  * Primary contract between the DSL/planner layer and the Neo4j runtime backend.
@@ -137,6 +140,17 @@ public interface CausalGraphRuntime {
      * <p>Used by the DSL to answer {@code BACKDOOR PATHS BETWEEN T AND Y}.
      */
     Set<VariableRef> backdoorVariables(VariableRef treatment, VariableRef outcome);
+
+    /**
+     * Run linear-Gaussian inference over the compiled causal graph.
+     * Returns interventional means, variances, and the total effect of treatment
+     * on outcome given the interventions in {@code doValues}.
+     *
+     * @param treatment the intervention variable
+     * @param outcome   the response variable
+     * @param doValues  map of variables fixed by intervention
+     */
+    LinearGaussianRecord linearGaussianInference(VariableRef treatment, VariableRef outcome, Map<VariableRef, Double> doValues);
 
     /**
      * Return the current compiled snapshot, or {@code null} if {@link #compile}

@@ -31,4 +31,9 @@ public final class ResultColumns {
 
     // DSeparationRecord — causal.dsep
     public static final String SEPARATED             = "separated";
+
+    // LinearGaussianRecord — causal.linearGaussianInference
+    public static final String MEANS                 = "means";
+    public static final String VARIANCES             = "variances";
+    public static final String TOTAL_EFFECT          = "totalEffect";
 }
