@@ -6,6 +6,7 @@ import com.example.causal.dsl.ast.*;
 import com.example.causal.dsl.model.VariableType;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -78,8 +79,7 @@ public final class CypherTranslator {
     private List<CypherQuery> translateDefineModel(DefineModelStmt s) {
         List<CypherQuery> out = new ArrayList<>();
         for (VariableDecl vd : s.variables()) {
-            out.add(defineVariable(new DefineVariableStmt(
-                vd.name(), vd.unit(), vd.binding(), vd.type(), vd.role())));
+            out.add(defineVariable(vd));
         }
         out.add(defineDag(s.edges()));
         out.add(compile());
@@ -92,35 +92,66 @@ public final class CypherTranslator {
      * DEFINE CAUSAL VARIABLE → MERGE a :Variable node.
      * Extended DSL metadata (unit, role, binding) is NOT persisted here —
      * it's kept in the DSL-side registry. Only fields the plugin schema
-     * requires are written.
+     * requires are written. A standalone variable carries no linear-Gaussian
+     * parameters (those are only declarable inside a DEFINE MODEL block).
      */
     public CypherQuery defineVariable(DefineVariableStmt s) {
-        boolean latent = s.type() == VariableType.LATENT;
+        return variableMerge(s.name(), s.type() == VariableType.LATENT, null, null);
+    }
+
+    /**
+     * A DEFINE MODEL variable declaration → MERGE a :Variable node, persisting
+     * the linear-Gaussian parameters ({@code intercept} μ₀, {@code noise} σ²)
+     * the plugin's SEM engine reads. Undeclared parameters are written as null
+     * (removing the property) so the plugin falls back to its defaults.
+     */
+    public CypherQuery defineVariable(VariableDecl vd) {
+        return variableMerge(vd.name(), vd.type() == VariableType.LATENT, vd.mean(), vd.noise());
+    }
+
+    /**
+     * Shared MERGE for a :Variable node. {@code intercept}/{@code noise} may be
+     * null (undeclared) — setting a property to null removes it, so the plugin's
+     * GraphLoader reads its default (intercept 0.0, noise variance 1.0).
+     */
+    private CypherQuery variableMerge(String name, boolean latent, Double intercept, Double noise) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("id", name);
+        params.put("name", name);
+        params.put("observed", !latent);
+        params.put("latent", latent);
+        params.put("intercept", intercept);   // null → property removed → plugin default
+        params.put("noise", noise);
         return CypherQuery.write(
             "MERGE (v:Variable {id: $id}) " +
-            "ON CREATE SET v.name = $name, v.observed = $observed, v.latent = $latent " +
-            "ON MATCH  SET v.name = $name, v.observed = $observed, v.latent = $latent",
-            Map.of(
-                "id", s.name(),
-                "name", s.name(),
-                "observed", !latent,
-                "latent", latent
-            )
+            "SET v.name = $name, v.observed = $observed, v.latent = $latent, " +
+            "    v.intercept = $intercept, v.noise = $noise",
+            params
         );
     }
 
     /**
      * DEFINE CAUSAL DAG Model { A -> B  B -> C } → MERGE edges.
      * Returns a batch Cypher that creates all edges in one query via UNWIND.
+     * The linear-Gaussian coefficient β is persisted as the {@code weight}
+     * property (null → removed → plugin default 1.0), which the plugin's
+     * GraphLoader reads via {@code coalesce(r.weight, 1.0)}.
      */
     public CypherQuery defineDag(List<DagEdge> edges) {
-        List<Map<String, String>> edgeMaps = new ArrayList<>();
-        for (DagEdge e : edges) edgeMaps.add(Map.of("from", e.from(), "to", e.to()));
+        List<Map<String, Object>> edgeMaps = new ArrayList<>();
+        for (DagEdge e : edges) {
+            Map<String, Object> m = new HashMap<>();
+            m.put("from", e.from());
+            m.put("to", e.to());
+            m.put("weight", e.weight());   // null when no WEIGHT clause was declared
+            edgeMaps.add(m);
+        }
         return CypherQuery.write(
             "UNWIND $edges AS e " +
             "MERGE (a:Variable {id: e.from}) ON CREATE SET a.name = e.from, a.observed = true, a.latent = false " +
             "MERGE (b:Variable {id: e.to})   ON CREATE SET b.name = e.to,   b.observed = true, b.latent = false " +
-            "MERGE (a)-[r:CAUSES]->(b) ON CREATE SET r.active = true",
+            "MERGE (a)-[r:CAUSES]->(b) ON CREATE SET r.active = true " +
+            "SET r.weight = e.weight",
             Map.of("edges", edgeMaps)
         );
     }
@@ -156,6 +187,28 @@ public final class CypherTranslator {
             "RETURN " + cols,
             Map.of("t", treatment, "o", outcome),
             null // multi-column — handled specially
+        );
+    }
+
+    // ─── Quantitative layer (linear-Gaussian SEM) ───────────────────────────
+
+    /**
+     * INTERVENE numerics → {@code causal.linearGaussianInference}. Returns the
+     * interventional means/variances (keyed by variable id) and the total effect
+     * of {@code treatment} on {@code outcome} under {@code do(doValues)}.
+     *
+     * <p>The procedure requires the persisted graph to carry linear-Gaussian
+     * parameters; callers must only invoke this against a parameterized graph.
+     */
+    public CypherQuery linearGaussianInference(String treatment, String outcome, Map<String, Double> doValues) {
+        String cols = ResultColumns.MEANS + ", " + ResultColumns.VARIANCES + ", " + ResultColumns.TOTAL_EFFECT;
+        return CypherQuery.read(
+            "MATCH (t:Variable {id: $t}), (o:Variable {id: $o}) " +
+            "CALL " + ProcedureNames.LINEAR_GAUSSIAN_INFERENCE + "(t, o, $doValues) " +
+            "YIELD " + cols + " " +
+            "RETURN " + cols,
+            Map.of("t", treatment, "o", outcome, "doValues", doValues),
+            null // multi-column — read explicitly by the executor
         );
     }
 

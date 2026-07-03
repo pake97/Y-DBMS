@@ -1,5 +1,6 @@
 package com.example.causal.dsl.exec;
 
+import com.example.causal.api.ResultColumns;
 import com.example.causal.dsl.ast.*;
 import com.example.causal.dsl.exec.CypherTranslator.CypherQuery;
 import com.example.causal.dsl.model.CausalModel;
@@ -92,8 +93,7 @@ public class Neo4jQueryExecutor implements QueryExecutor {
 
     private QueryResult defineModel(DefineModelStmt s) {
         for (VariableDecl vd : s.variables()) {
-            runWrite(translator.defineVariable(new DefineVariableStmt(
-                vd.name(), vd.unit(), vd.binding(), vd.type(), vd.role())));
+            runWrite(translator.defineVariable(vd));   // persists intercept/noise too
             registry.registerStandaloneVariable(new CausalVariable(
                 vd.name(), vd.unit(), vd.binding(), vd.type(), vd.role()));
         }
@@ -156,6 +156,7 @@ public class Neo4jQueryExecutor implements QueryExecutor {
         // Source world: an explicit FROM MODEL, the active derived world, or a
         // fresh hydration of the persisted base graph.
         CausalModel source;
+        boolean fromBaseGraph = false;
         if (s.modelRef() != null) {
             source = registry.model(s.modelRef())
                 .orElseThrow(() -> new IllegalArgumentException("Unknown model: " + s.modelRef()));
@@ -163,13 +164,73 @@ public class Neo4jQueryExecutor implements QueryExecutor {
             source = registry.currentModel().orElseThrow();
         } else {
             source = hydrateCurrentGraph();
+            fromBaseGraph = true;
         }
         String derivedName = CausalModel.derivedName(
             source.name(), s.intervention().variable(), s.intervention().value());
         CausalModel gPrime = source.intervene(
             s.intervention().variable(), s.intervention().value(), derivedName);
         registry.registerDerived(gPrime);   // G′ becomes the active graph
+
+        // When intervening on the persisted, parameterized base graph, get the
+        // numeric answer from the plugin's linear-Gaussian engine (the production
+        // path, and the single source of truth). The derived world G′ above still
+        // drives the structural fields and any later query in the derived context.
+        // Derived/FROM-MODEL sources and unparameterized graphs fall back to the
+        // shared in-memory evaluator below.
+        if (fromBaseGraph && source.isParameterized()) {
+            InterventionResult numeric = pluginIntervene(s, gPrime);
+            if (numeric != null) return numeric;
+        }
         return StructuralEvaluator.evaluate(gPrime, s);
+    }
+
+    /**
+     * Numeric INTERVENE answer via {@code causal.linearGaussianInference}. The
+     * structural fields (affects/pathway) come from the derived world {@code gPrime};
+     * the means/variance/total-effect come from the plugin over the base graph
+     * (do(X=x) is applied plugin-side). Returns null when the do-value is not
+     * numeric, so the caller falls back to the structural evaluator.
+     */
+    private InterventionResult pluginIntervene(InterveneStmt s, CausalModel gPrime) {
+        String x = s.intervention().variable();
+        String y = s.returnVar();
+        Double xVal = tryParseDouble(s.intervention().value());
+        if (xVal == null) return null;
+
+        CypherTranslator.CypherQuery q = translator.linearGaussianInference(x, y, Map.of(x, xVal));
+        double expectation;
+        double totalEffect;
+        Double variance = null;
+        try (Session session = openSession()) {
+            Record row = session.run(q.cypher(), q.params()).single();
+            expectation = row.get(ResultColumns.MEANS).get(y).asDouble();
+            totalEffect = row.get(ResultColumns.TOTAL_EFFECT).asDouble();
+            if ("DISTRIBUTION".equals(s.returnType())) {
+                variance = row.get(ResultColumns.VARIANCES).get(y).asDouble();
+            }
+        }
+
+        boolean affects = gPrime.descendants(x).contains(y);
+        Set<String> pathway = affects ? gPrime.mediators(x, y) : Set.of();
+        Double compareDelta = null;
+        String compareNote = null;
+        if (s.compareTo() != null) {
+            double v2 = Double.parseDouble(s.compareTo().value());
+            compareDelta = totalEffect * (xVal - v2);
+            compareNote = "linear-Gaussian: contrast = totalEffect·(v − v₂) = " + compareDelta;
+        }
+        return new InterventionResult(x, s.intervention().value(), y, s.returnType(),
+            affects, pathway, gPrime.name(), null, compareNote,
+            expectation, variance, totalEffect, compareDelta);
+    }
+
+    private static Double tryParseDouble(String text) {
+        try {
+            return Double.parseDouble(text);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private QueryResult executeUseModel(UseModelStmt s) {
@@ -191,14 +252,33 @@ public class Neo4jQueryExecutor implements QueryExecutor {
     private CausalModel hydrateCurrentGraph() {
         CausalModel model = new CausalModel("neo4j");
         try (Session session = openSession()) {
-            session.run("MATCH (v:Variable) RETURN v.id AS id ORDER BY id").stream()
-                .map(r -> r.get("id").asString())
-                .forEach(id -> model.addVariable(
-                    registry.resolveVariable(id).orElse(new CausalVariable(id, null, null, null, null))));
-            session.run("MATCH (a:Variable)-[r:CAUSES]->(b:Variable) WHERE r.active = true " +
-                        "RETURN a.id AS from, b.id AS to")
+            // Load nodes with their linear-Gaussian parameters. Only values that
+            // deviate from the SEM defaults (intercept 0.0, noise 1.0) are set, so
+            // model.isParameterized() matches the plugin's own definition exactly —
+            // a graph is "parameterized" for one iff it is for the other.
+            session.run("MATCH (v:Variable) " +
+                        "RETURN v.id AS id, coalesce(v.intercept, 0.0) AS intercept, " +
+                        "       coalesce(v.noise, 1.0) AS noise ORDER BY id")
                 .stream()
-                .forEach(r -> model.addEdge(r.get("from").asString(), r.get("to").asString()));
+                .forEach(r -> {
+                    String id = r.get("id").asString();
+                    model.addVariable(registry.resolveVariable(id)
+                        .orElse(new CausalVariable(id, null, null, null, null)));
+                    double intercept = r.get("intercept").asDouble();
+                    double noise = r.get("noise").asDouble();
+                    if (intercept != 0.0) model.setIntercept(id, intercept);
+                    if (noise != 1.0)     model.setNoise(id, noise);
+                });
+            session.run("MATCH (a:Variable)-[r:CAUSES]->(b:Variable) WHERE r.active = true " +
+                        "RETURN a.id AS from, b.id AS to, coalesce(r.weight, 1.0) AS weight")
+                .stream()
+                .forEach(r -> {
+                    String from = r.get("from").asString();
+                    String to   = r.get("to").asString();
+                    model.addEdge(from, to);
+                    double weight = r.get("weight").asDouble();
+                    if (weight != 1.0) model.setWeight(from, to, weight);
+                });
         }
         return model;
     }
