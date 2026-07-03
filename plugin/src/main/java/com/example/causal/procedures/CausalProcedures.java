@@ -268,6 +268,37 @@ public class CausalProcedures {
     }
 
     // =========================================================================
+    // causal.counterfactual(interventionVar, counterfactualValue, outcome, factualValues)
+    // =========================================================================
+
+    @Procedure(name = ProcedureNames.COUNTERFACTUAL, mode = Mode.READ)
+    @Description("Linear-Gaussian unit counterfactual: what would `outcome` have been "
+        + "under do(interventionVar = counterfactualValue), given the factual values. "
+        + "Use Variable node IDs (without quotes) as keys in the factualValues map.")
+    public Stream<CounterfactualRecord> counterfactual(
+            @Name("interventionVar") Node interventionVar,
+            @Name("counterfactualValue") double counterfactualValue,
+            @Name("outcome") Node outcome,
+            @Name(value = "factualValues", defaultValue = "{}") Map<String, Double> factualValues
+    ) {
+        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        VariableRef iVar = ProcedureVariables.requireResolved(runtime, interventionVar, "interventionVar");
+        VariableRef oVar = ProcedureVariables.requireResolved(runtime, outcome, "outcome");
+
+        Map<VariableRef, Double> factualValuesRef = new HashMap<>();
+        for (Map.Entry<String, Double> entry : factualValues.entrySet()) {
+            Optional<VariableRef> ref = runtime.resolveVariable(entry.getKey());
+            if (ref.isPresent()) {
+                factualValuesRef.put(ref.get(), entry.getValue());
+            } else {
+                throw new IllegalArgumentException("Unknown variable in factualValues: " + entry.getKey());
+            }
+        }
+
+        return Stream.of(runtime.counterfactual(iVar, counterfactualValue, oVar, factualValuesRef));
+    }
+
+    // =========================================================================
     // causal.inspectSnapshot()
     // =========================================================================
 

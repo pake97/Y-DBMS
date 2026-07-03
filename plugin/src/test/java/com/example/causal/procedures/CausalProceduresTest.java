@@ -194,6 +194,33 @@ class CausalProceduresTest {
     }
 
     @Test
+    void counterfactualReturnsResult() {
+        try (Transaction tx = db.beginTx()) {
+            tx.execute("MATCH (n) SET n.noise = 1.0");
+            tx.execute("MATCH (a {id: 'A'})-[r:CAUSES]->(b {id: 'B'}) SET r.weight = 2.0");
+            tx.execute("MATCH (b {id: 'B'})-[r:CAUSES]->(c {id: 'C'}) SET r.weight = 3.0");
+            // Set A->C weight to 0.0 to effectively make it a chain A->B->C
+            tx.execute("MATCH (a {id: 'A'})-[r:CAUSES]->(c {id: 'C'}) SET r.weight = 0.0");
+            tx.commit();
+        }
+        compile();
+        try (Transaction tx = db.beginTx()) {
+            // A=X, C=Y
+            // chain (β = 2, 3), GIVEN X=1, Y=10, IF X=3 ⇒ Y_cf = 10 + 6·(3−1) = 22
+            Result result = tx.execute(
+                    "MATCH (a:Variable {id: 'A'}), (c:Variable {id: 'C'}) " +
+                    "CALL causal.counterfactual(a, 3.0, c, {A: 1.0, C: 10.0}) " +
+                    "YIELD factual, counterfactual, difference " +
+                    "RETURN factual, counterfactual, difference");
+            Map<String, Object> row = result.next();
+
+            assertEquals(10.0, (Double) row.get("factual"), 1e-5);
+            assertEquals(22.0, (Double) row.get("counterfactual"), 1e-5);
+            assertEquals(12.0, (Double) row.get("difference"), 1e-5);
+        }
+    }
+
+    @Test
     void rejectsNonVariableNode() {
         compile();
         try (Transaction tx = db.beginTx()) {

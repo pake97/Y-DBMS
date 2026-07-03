@@ -4,8 +4,10 @@ import com.example.causal.api.*;
 import com.example.causal.runtime.algorithms.LinearGaussianInference;
 import com.example.causal.runtime.algorithms.PathAnalyzer;
 import com.example.causal.runtime.algorithms.ReachabilityIndex;
+import com.example.causal.runtime.algorithms.CounterfactualInference;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
 import com.example.causal.runtime.compile.GraphLoader;
+import com.example.causal.dto.CounterfactualRecord;
 import com.example.causal.dto.LinearGaussianRecord;
 
 import java.util.*;
@@ -410,6 +412,28 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
         Double totalEffect = engine.totalEffect(treatment.id(), outcome.id());
 
         return new LinearGaussianRecord(means, variances, totalEffect);
+    }
+
+    @Override
+    public CounterfactualRecord counterfactual(VariableRef interventionVar, double counterfactualValue, VariableRef outcome, Map<VariableRef, Double> factualValues) {
+        CompiledCausalGraph g = requireSnapshot();
+        if (!g.isParameterized()) {
+            throw new IllegalStateException("Graph is not parameterized. Ensure linear-Gaussian parameters are set on nodes/edges.");
+        }
+
+        Map<String, Double> factualById = new HashMap<>();
+        if (factualValues != null) {
+            for (Map.Entry<VariableRef, Double> e : factualValues.entrySet()) {
+                factualById.put(e.getKey().id(), e.getValue());
+            }
+        }
+
+        double yCf = new CounterfactualInference(g)
+                .counterfactual(interventionVar.id(), counterfactualValue,
+                        outcome.id(), factualById);
+        double yFactual = factualById.get(outcome.id());
+        
+        return new CounterfactualRecord(yFactual, yCf, yCf - yFactual);
     }
 
     @Override

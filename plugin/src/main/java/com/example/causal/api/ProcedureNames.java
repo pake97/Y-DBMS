@@ -38,4 +38,5 @@ public final class ProcedureNames {
     public static final String BACKDOOR_VARIABLES   = "causal.backdoorVariables";
 
     public static final String LINEAR_GAUSSIAN_INFERENCE = "causal.linearGaussianInference";
+    public static final String COUNTERFACTUAL       = "causal.counterfactual";
 }

@@ -153,6 +153,18 @@ public interface CausalGraphRuntime {
     LinearGaussianRecord linearGaussianInference(VariableRef treatment, VariableRef outcome, Map<VariableRef, Double> doValues);
 
     /**
+     * Compute the counterfactual value of {@code outcome} under hypothetical
+     * intervention {@code interventionVar = counterfactualValue}, given the
+     * factual evidence in {@code factualValues}.
+     *
+     * @param interventionVar     the intervention variable
+     * @param counterfactualValue the hypothetical value
+     * @param outcome             the outcome variable
+     * @param factualValues       observed values for variables
+     */
+    com.example.causal.dto.CounterfactualRecord counterfactual(VariableRef interventionVar, double counterfactualValue, VariableRef outcome, Map<VariableRef, Double> factualValues);
+
+    /**
      * Return the current compiled snapshot, or {@code null} if {@link #compile}
      * has not yet been called (or the snapshot has been invalidated).
      */
