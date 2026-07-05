@@ -36,4 +36,9 @@ public final class ResultColumns {
     public static final String MEANS                 = "means";
     public static final String VARIANCES             = "variances";
     public static final String TOTAL_EFFECT          = "totalEffect";
+
+    // CounterfactualRecord — causal.counterfactual
+    public static final String FACTUAL               = "factual";
+    public static final String COUNTERFACTUAL        = "counterfactual";
+    public static final String DIFFERENCE            = "difference";
 }
