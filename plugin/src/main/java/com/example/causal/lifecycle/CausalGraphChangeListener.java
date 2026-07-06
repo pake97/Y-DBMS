@@ -95,6 +95,8 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         // Added variables: new :Variable nodes with an id property.
         for (Node n : data.createdNodes()) {
             if (n.hasLabel(VARIABLE) && n.hasProperty(PROP_ID)) {
+                String id = String.valueOf(n.getProperty(PROP_ID));
+                LOG.info("Detected new variable via Java API: " + id);
                 batch.addedVariable(String.valueOf(n.getProperty(PROP_ID)));
             }
         }

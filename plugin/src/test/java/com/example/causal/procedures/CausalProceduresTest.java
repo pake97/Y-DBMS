@@ -233,6 +233,26 @@ class CausalProceduresTest {
         }
     }
 
+    @Test
+    void dummyCreateNode() {
+        compile();
+        try (Transaction tx = db.beginTx()) {
+            Result result = tx.execute("CALL causal.inspectSnapshot() YIELD variableCount RETURN variableCount");
+            assertTrue((Long) result.next().get("variableCount") > 0);
+        }
+
+        try (Transaction tx = db.beginTx()) {
+            Node n = tx.createNode(Label.label("Variable"));
+            n.setProperty("id", "Z");
+            tx.commit();
+        }
+
+        try (Transaction tx = db.beginTx()) {
+            Result result = tx.execute("CALL causal.inspectSnapshot() YIELD variableCount RETURN variableCount");
+            assertEquals(0L, result.next().get("variableCount"));
+        }
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================
