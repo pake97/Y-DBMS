@@ -85,7 +85,6 @@ public final class CausalGraphChangeListener implements TransactionEventListener
     // -------------------------------------------------------------------------
     // beforeCommit — observe + diff
     // -------------------------------------------------------------------------
-
     @Override
     public ChangeBatch beforeCommit(TransactionData data, Transaction tx, GraphDatabaseService db) {
         if (!touchesCausalSchema(data)) return ChangeBatch.EMPTY;
@@ -107,6 +106,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
             }
         }
 
+
         // Added CAUSES edges (only those with active = true, matching GraphLoader).
         for (Relationship r : data.createdRelationships()) {
             if (r.isType(CAUSES) && isActive(r)) {
@@ -120,10 +120,11 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         // listener's view of the relationship *before* deletion.
         for (Relationship r : data.deletedRelationships()) {
             if (r.isType(CAUSES)) {
-                // getStartNode/getEndNode still work on deleted rels during commit.
-                String from = String.valueOf(r.getStartNode().getProperty(PROP_ID, null));
-                String to   = String.valueOf(r.getEndNode().getProperty(PROP_ID, null));
-                batch.removedEdge(from, to);
+                String from = getDeletedNodeID(data, r.getStartNode());
+                String to   = getDeletedNodeID(data, r.getEndNode());
+                if (from != null && to != null) {
+                    batch.removedEdge(from, to);
+                }
             }
         }
 
@@ -175,7 +176,6 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         runtime.invalidate();
         LOG.fine(() -> "Invalidated snapshot after transaction: " + summarise(batch));
     }
-
     @Override
     public void afterRollback(TransactionData data, ChangeBatch batch, GraphDatabaseService db) {
         // Nothing to undo — beforeCommit did not mutate the runtime.
@@ -209,6 +209,22 @@ public final class CausalGraphChangeListener implements TransactionEventListener
     private static boolean isDeleted(TransactionData data, Node n) {
         for (Node deleted : data.deletedNodes()) if (deleted.equals(n)) return true;
         return false;
+    }
+
+    private static String getDeletedNodeID(TransactionData data, Node n) {
+        if (isDeleted(data, n)) {
+            for (PropertyEntry<Node> propEntry : data.removedNodeProperties()) {
+                if (propEntry.entity().getId() == n.getId() && PROP_ID.equals(propEntry.key())) {
+                    Object val = propEntry.previouslyCommittedValue();
+                    return val == null ? null : String.valueOf(val);
+                }
+            }
+            return null;
+        } else {
+            // Node still exists, safe to read directly
+            Object val = n.getProperty(PROP_ID, null);
+            return val != null ? String.valueOf(val) : null;
+        }
     }
 
     private static String summarise(ChangeBatch b) {
