@@ -41,12 +41,18 @@
             <version>5.28.1</version>
         </dependency>
 
-        <!-- Embedded Neo4j for DSL→plugin end-to-end tests: Bolt + the causal.* procedures. -->
+        <!--
+          Embedded Neo4j: Bolt + the causal.* procedures in-process.
+          Used by the DSL→plugin end-to-end tests AND by the REPL's `embedded`
+          mode (EmbeddedNeo4jBackend). Kept at `compile` scope so it is on the
+          `exec:java` runtime classpath (whose default scope excludes `provided`
+          and `runtime`). causal4j-dsl is a leaf module — nothing depends on it —
+          so this does not leak transitively anywhere.
+        -->
         <dependency>
             <groupId>org.neo4j.test</groupId>
             <artifactId>neo4j-harness</artifactId>
             <version>${neo4j.version}</version>
-            <scope>test</scope>
         </dependency>
 
         <dependency>
