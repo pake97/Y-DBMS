@@ -107,10 +107,14 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     /** True when at least one SEM parameter differs from the default. */
     private final boolean parameterized;
 
-    // TODO(student, tier 2): add alongside the dense layout
-    // private final int[]    topoLayer;       // layer per node (0 = source)
-    // private final long[][] ancestorBits;    // ancestorBits[i] = bitset of ancestors of i
-    // private final long[][] descendantBits;  // descendantBits[i] = bitset of descendants of i
+    private final Map<String, Integer> nameToIndex;
+    private final Variable[] indexToVar;
+    private final int[][] denseForwardAdj;
+    private final int[][] denseReverseAdj;
+    
+    private final int[] topoLayer;
+    private final long[][] ancestorBits;
+    private final long[][] descendantBits;
 
     /**
      * Full constructor including linear-Gaussian SEM edge weights.
@@ -130,6 +134,71 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         this.edgeWeights  = Collections.unmodifiableMap(deepCopyWeights(edgeWeights));
         this.compiledAt   = compiledAt;
         this.parameterized = computeParameterized();
+
+        int n = this.variableById.size();
+        this.nameToIndex = new HashMap<>();
+        this.indexToVar = new Variable[n];
+        
+        for (int i = 0; i < n; i++) {
+            String id = this.topoOrder.get(i);
+            this.nameToIndex.put(id, i);
+            this.indexToVar[i] = this.variableById.get(id);
+        }
+        
+        // jagged columns, efficient storage of only needed indices
+        this.denseForwardAdj = new int[n][];
+        this.denseReverseAdj = new int[n][];
+        
+        for (int i = 0; i < n; i++) {
+            String id = this.topoOrder.get(i);
+            Set<String> children = this.forwardAdj.getOrDefault(id, Set.of());
+            this.denseForwardAdj[i] = children.stream().mapToInt(this.nameToIndex::get).toArray();
+            
+            Set<String> parents = this.reverseAdj.getOrDefault(id, Set.of());
+            this.denseReverseAdj[i] = parents.stream().mapToInt(this.nameToIndex::get).toArray();
+        }
+        
+        // setup topo layer ordering for all nodes
+        // curr layer = max(parents' layers) + 1
+        this.topoLayer = new int[n];
+        for (int i = 0; i < n; i++) {
+            int maxParentLayer = -1;
+            for (int p : this.denseReverseAdj[i]) {
+                if (this.topoLayer[p] > maxParentLayer) {
+                    maxParentLayer = this.topoLayer[p];
+                }
+            }
+            this.topoLayer[i] = maxParentLayer + 1;
+        }
+        
+        // index <-> bit mapping: not jagged, for efficient logical ops
+        int longsPerNode = (n + 63) / 64;
+        this.ancestorBits = new long[n][longsPerNode];
+        this.descendantBits = new long[n][longsPerNode];
+        
+        for (int i = 0; i < n; i++) {
+            for (int p : this.denseReverseAdj[i]) {
+                // apply the parent's ancestors indices to current node
+                for (int w = 0; w < longsPerNode; w++) {
+                    this.ancestorBits[i][w] |= this.ancestorBits[p][w];
+                }
+                // set current node's parent
+                // 1. Which block (array index) does bit p live in?
+                // find the specific long block of parent ( p / 64 ~ p / 2^64 ~ shift op)
+                // 2. Which specific bit inside that block is it?
+                // p % 64; find location of node's index in block
+                this.ancestorBits[i][p >>> 6] |= (1L << (p & 63));
+            }
+        }
+        
+        for (int i = n - 1; i >= 0; i--) {
+            for (int c : this.denseForwardAdj[i]) {
+                for (int w = 0; w < longsPerNode; w++) {
+                    this.descendantBits[i][w] |= this.descendantBits[c][w];
+                }
+                this.descendantBits[i][c >>> 6] |= (1L << (c & 63));
+            }
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -173,10 +242,21 @@ public final class CompiledCausalGraph implements GraphSnapshot {
 
     /**
      * Topological position of the variable (0 = source), or -1 if unknown.
-     * TODO(student, tier 2): replace with O(1) map lookup once dense layout is in place.
      */
     public int topoIndex(String id) {
-        return topoOrder.indexOf(id);
+        return nameToIndex.getOrDefault(id, -1);
+    }
+
+    public long[] getAncestorBits(int denseIndex) {
+        return ancestorBits[denseIndex];
+    }
+
+    public long[] getDescendantBits(int denseIndex) {
+        return descendantBits[denseIndex];
+    }
+
+    public String idForIndex(int denseIndex) {
+        return indexToVar[denseIndex].id();
     }
 
     // -------------------------------------------------------------------------
@@ -265,16 +345,15 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             sb.append(String.format("%n  %-30s ←  %s", id, parents.isEmpty() ? "(none)" : parents));
         }
 
-        // TODO(student, tier 2): add sections here once you implement the dense
-        // layout + bitsets. Logging them in one place is how you verify correctness
-        // before switching callers over. Suggested:
-        //
-        //   ── Topo layer per node ─────────────────────────────────────
-        //     for (int i = 0; i < size(); i++) sb.append(... topoLayer[i] ...);
-        //
-        //   ── Ancestor bitsets ────────────────────────────────────────
-        //     for (int i = 0; i < size(); i++)
-        //         sb.append(String.format("%n  [%2d] %s", i, Long.toBinaryString(ancestorBits[i][0])));
+        if (variableById.size() <= 64) {
+            sb.append("\n\n── Dense Index & Reachability Bitsets (n<=64) ─────────────");
+            for (int i = 0; i < variableById.size(); i++) {
+                String ancStr = String.format("%" + variableById.size() + "s", Long.toBinaryString(ancestorBits[i][0])).replace(' ', '0');
+                String descStr = String.format("%" + variableById.size() + "s", Long.toBinaryString(descendantBits[i][0])).replace(' ', '0');
+                sb.append(String.format("%n  [%2d] %-20s layer=%d  anc=%s  desc=%s",
+                        i, indexToVar[i].id(), topoLayer[i], ancStr, descStr));
+            }
+        }
 
         // ── Linear-Gaussian SEM parameters (when present) ────────────
         if (parameterized) {

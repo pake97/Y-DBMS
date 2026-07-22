@@ -50,7 +50,27 @@ public final class ReachabilityIndex {
      * Returns an empty set if {@code id} is unknown or has no parents.
      */
     public Set<String> ancestors(String id) {
-        // TODO(student, tier 2): replace with O(n/64) bitset lookup after pre-computation
+        int index = graph.topoIndex(id);
+        if (index < 0) return Collections.emptySet();
+        long[] bits = graph.getAncestorBits(index);
+        if (bits == null) return ancestorsDfs(id); // Fallback if bitsets aren't computed
+        
+        Set<String> result = new LinkedHashSet<>();
+        for (int w = 0; w < bits.length; w++) {
+            long word = bits[w];
+            while (word != 0) {
+                int bit = Long.numberOfTrailingZeros(word);
+                result.add(graph.idForIndex(w * 64 + bit));
+                word &= ~(1L << bit);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * DFS baseline implementation of ancestors, preserved for parity testing.
+     */
+    public Set<String> ancestorsDfs(String id) {
         Set<String> visited = new LinkedHashSet<>();
         Deque<String> stack = new ArrayDeque<>(graph.parentsOf(id));
         while (!stack.isEmpty()) {
@@ -67,7 +87,27 @@ public final class ReachabilityIndex {
      * Returns an empty set if {@code id} is unknown or has no children.
      */
     public Set<String> descendants(String id) {
-        // TODO(student, tier 2): replace with O(n/64) bitset lookup after pre-computation
+        int index = graph.topoIndex(id);
+        if (index < 0) return Collections.emptySet();
+        long[] bits = graph.getDescendantBits(index);
+        if (bits == null) return descendantsDfs(id); // Fallback if bitsets aren't computed
+        
+        Set<String> result = new LinkedHashSet<>();
+        for (int w = 0; w < bits.length; w++) {
+            long word = bits[w];
+            while (word != 0) {
+                int bit = Long.numberOfTrailingZeros(word);
+                result.add(graph.idForIndex(w * 64 + bit));
+                word &= ~(1L << bit);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * DFS baseline implementation of descendants, preserved for parity testing.
+     */
+    public Set<String> descendantsDfs(String id) {
         Set<String> visited = new LinkedHashSet<>();
         Deque<String> stack = new ArrayDeque<>(graph.childrenOf(id));
         while (!stack.isEmpty()) {
