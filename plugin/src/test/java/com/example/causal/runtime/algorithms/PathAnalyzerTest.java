@@ -1,11 +1,7 @@
 package com.example.causal.runtime.algorithms;
 
-import com.example.causal.runtime.compile.CompiledCausalGraph;
-import com.example.causal.runtime.model.Variable;
 import org.junit.jupiter.api.Test;
 import static com.example.causal.testsupport.GraphTestSupport.graphFromEdges;
-import java.lang.reflect.Constructor;
-import java.time.Instant;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

@@ -53,8 +53,7 @@ public final class ReachabilityIndex {
         int index = graph.topoIndex(id);
         if (index < 0) return Collections.emptySet();
         long[] bits = graph.getAncestorBits(index);
-        if (bits == null) return ancestorsDfs(id); // Fallback if bitsets aren't computed
-        
+
         Set<String> result = new LinkedHashSet<>();
         for (int w = 0; w < bits.length; w++) {
             long word = bits[w];
@@ -90,8 +89,7 @@ public final class ReachabilityIndex {
         int index = graph.topoIndex(id);
         if (index < 0) return Collections.emptySet();
         long[] bits = graph.getDescendantBits(index);
-        if (bits == null) return descendantsDfs(id); // Fallback if bitsets aren't computed
-        
+
         Set<String> result = new LinkedHashSet<>();
         for (int w = 0; w < bits.length; w++) {
             long word = bits[w];

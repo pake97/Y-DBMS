@@ -4,10 +4,14 @@ import com.example.causal.runtime.compile.CompiledCausalGraph;
 import com.example.causal.testsupport.GraphTestSupport;
 import com.example.causal.testsupport.GraphTestSupport.GraphInput;
 import org.junit.jupiter.api.Test;
-import java.time.Instant;
 import java.util.*;
 
-public class ReachabilityPerformanceTest {
+/**
+ * Benchmark, not a regression test — excluded from the default surefire run by
+ * the {@code *IT} suffix. Run explicitly with:
+ * {@code mvn test -pl plugin -Dtest=ReachabilityPerformanceIT}
+ */
+public class ReachabilityPerformanceIT {
 
     @Test
     public void testPerformance() {

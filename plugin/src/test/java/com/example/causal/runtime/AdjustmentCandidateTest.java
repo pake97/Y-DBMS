@@ -2,14 +2,10 @@ package com.example.causal.runtime;
 
 import com.example.causal.api.AdjustmentCandidateResult;
 import com.example.causal.api.VariableRef;
-import com.example.causal.runtime.algorithms.TopologicalSorter;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
-import com.example.causal.runtime.model.Variable;
 import org.junit.jupiter.api.Test;
 import static com.example.causal.testsupport.GraphTestSupport.graphFromEdges;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.time.Instant;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

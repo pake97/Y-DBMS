@@ -247,12 +247,14 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         return nameToIndex.getOrDefault(id, -1);
     }
 
+    /** Ancestor bitset of the variable at {@code denseIndex} (defensive copy — the snapshot stays immutable). */
     public long[] getAncestorBits(int denseIndex) {
-        return ancestorBits[denseIndex];
+        return ancestorBits[denseIndex].clone();
     }
 
+    /** Descendant bitset of the variable at {@code denseIndex} (defensive copy — the snapshot stays immutable). */
     public long[] getDescendantBits(int denseIndex) {
-        return descendantBits[denseIndex];
+        return descendantBits[denseIndex].clone();
     }
 
     public String idForIndex(int denseIndex) {

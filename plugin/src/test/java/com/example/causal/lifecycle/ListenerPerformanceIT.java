@@ -1,11 +1,11 @@
 package com.example.causal.lifecycle;
 
-import com.example.causal.api.CausalGraphRuntime;
 import com.example.causal.api.GraphCompileOptions;
 import com.example.causal.api.VariableRef;
 import com.example.causal.runtime.DefaultCausalGraphRuntime;
 import com.example.causal.runtime.RuntimeRegistry;
-import com.example.causal.testsupport.SeedDagSupport;import org.junit.jupiter.api.AfterEach;
+import com.example.causal.testsupport.SeedDagSupport;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -14,13 +14,19 @@ import org.neo4j.graphdb.Node;
 import org.neo4j.graphdb.Transaction;
 import org.neo4j.harness.Neo4j;
 import org.neo4j.harness.Neo4jBuilders;
-import org.neo4j.dbms.api.DatabaseManagementService;
-import org.neo4j.kernel.internal.GraphDatabaseAPI;
-
 
 import java.nio.file.Path;
 import java.util.Set;
 
+/**
+ * Benchmark, not a regression test — excluded from the default surefire run by
+ * the {@code *IT} suffix. Run explicitly with:
+ * {@code mvn test -pl plugin -Dtest=ListenerPerformanceIT}
+ *
+ * <p>{@link CausalGraphChangeListener} is registered automatically by
+ * {@code CausalGraphExtensionFactory} (META-INF/services), so the in-process
+ * harness exercises the real listener on every commit.
+ */
 public class ListenerPerformanceIT {
 
     @TempDir
@@ -28,19 +34,15 @@ public class ListenerPerformanceIT {
 
     private Neo4j neo4j;
     private GraphDatabaseService db;
-    private DatabaseManagementService managementService;
-    private CausalGraphChangeListener listener;
 
     private static final int BASE_GRAPH_SIZE = 2000;
     private static final int WARMUP_ITERATIONS = 5;
     private static final int MEASURE_ITERATIONS = 10;
 
     @BeforeEach
-    void setUp() throws Exception {
+    void setUp() {
         neo4j = Neo4jBuilders.newInProcessBuilder(tempDir).build();
         db = neo4j.defaultDatabaseService();
-        managementService = ((GraphDatabaseAPI) db).getDependencyResolver().resolveDependency(DatabaseManagementService.class);
-        listener = new CausalGraphChangeListener();
     }
 
     @AfterEach
