@@ -1,0 +1,31 @@
+# Mode B on the paper's running example: known COVID-19 DAG + observational
+# data + linear-Gaussian hypothesis -> fitted covid.causal ready for the DSL REPL.
+#
+#   causal4j-pipeline run examples/covid.yaml --dry-run
+#
+# Point data.path at your observational dataset (columns = variable ids used
+# in the DAG file).
+run:
+  name: covid_modeB
+  seed: 42
+data:
+  path: data/covid.csv
+  roles:
+    interventions: treatment
+    reported_cases: outcome
+    covid19_burden: confounder
+  types:
+    interventions: binary
+  latents: [predisposition]
+dag:
+  path: dags/covid.gml            # or: neo4j_uri: bolt://localhost:7687
+model:
+  hypothesis: linear-gaussian
+refute:
+  tests: [ci, gof]
+  on_failure: warn
+emit:
+  model_name: CovidModel
+  unit: Region
+  out: out/covid.causal
+  provenance: true
