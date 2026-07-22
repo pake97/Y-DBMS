@@ -52,8 +52,8 @@ public final class GraphLoader {
                 Node node = nodes.next();
                 String id = (String) node.getProperty("id");
                 String name = (String) node.getProperty("name", id);
-                boolean observed = (boolean) node.getProperty("observed", true);
-                boolean latent   = (boolean) node.getProperty("latent", false);
+                boolean observed = (boolean) node.getProperty("observed", Variable.DEFAULT_OBSERVED);
+                boolean latent   = (boolean) node.getProperty("latent", Variable.DEFAULT_LATENT);
                 double intercept = ((Number) node.getProperty("intercept",
                         Variable.DEFAULT_INTERCEPT)).doubleValue();
                 double noise     = ((Number) node.getProperty("noise",
