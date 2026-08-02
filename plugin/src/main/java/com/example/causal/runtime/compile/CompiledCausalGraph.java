@@ -221,10 +221,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             int v = topoIndex(e.to());
             // If from is new, topoIndex is -1. If to is new, topoIndex is -1.
             // But we assign new variables to the END of the topo order.
-            // If from is new (end) and to is old, that's u > v => invalid sort, fallback!
-            if (u == -1) u = variableById.size() + batch.addedVariables().indexOf(new Variable(e.from(), "", false, false, 0, 0)); // roughly index
-            if (v == -1) v = variableById.size() + batch.addedVariables().indexOf(new Variable(e.to(), "", false, false, 0, 0));
-            // actually easier: if u != -1 and v != -1 and u >= v
+            // if u != -1 and v != -1 and u >= v -> backward edge, fallback.
             // if u == -1 and v != -1, then u (new) >= v (old) -> fallback.
             // if u != -1 and v == -1, then u (old) < v (new) -> OK.
             if ((u != -1 && v != -1 && u >= v) || (u == -1 && v != -1)) {
