@@ -1,7 +1,12 @@
 package com.example.causal.lifecycle;
 
 import com.example.causal.api.CausalGraphRuntime;
+import com.example.causal.api.GraphSnapshot;
+import com.example.causal.runtime.DefaultCausalGraphRuntime;
 import com.example.causal.runtime.RuntimeRegistry;
+import com.example.causal.runtime.algorithms.ReachabilityIndex;
+import com.example.causal.runtime.compile.CompiledCausalGraph;
+import com.example.causal.runtime.model.Variable;
 import org.neo4j.graphdb.GraphDatabaseService;
 import org.neo4j.graphdb.Label;
 import org.neo4j.graphdb.Node;
@@ -13,6 +18,8 @@ import org.neo4j.graphdb.event.PropertyEntry;
 import org.neo4j.graphdb.event.TransactionData;
 import org.neo4j.graphdb.event.TransactionEventListener;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.logging.Logger;
 
 /**
@@ -94,7 +101,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         // Added variables: new :Variable nodes with an id property.
         for (Node n : data.createdNodes()) {
             if (n.hasLabel(VARIABLE) && n.hasProperty(PROP_ID)) {
-                batch.addedVariable(String.valueOf(n.getProperty(PROP_ID)));
+                batch.addedVariable(variableFromNode(n));
             }
         }
 
@@ -105,7 +112,6 @@ public final class CausalGraphChangeListener implements TransactionEventListener
                 batch.removedVariable(String.valueOf(rem.previouslyCommittedValue()));
             }
         }
-
 
         // Added CAUSES edges (only those with active = true, matching GraphLoader).
         for (Relationship r : data.createdRelationships()) {
@@ -128,18 +134,64 @@ public final class CausalGraphChangeListener implements TransactionEventListener
             }
         }
 
-        // TODO(student, tier 1): handle property-change cases:
-        //   - r.active flips false → true  ⇒  treat as an added edge
-        //   - r.active flips true  → false ⇒  treat as a removed edge
-        //   - v.latent flips               ⇒  in-place property update on snapshot
-        // Use data.assignedRelationshipProperties() / data.assignedNodeProperties()
-        // and inspect previouslyCommittedValue() vs value().
+        // Property-change cases for relationships (e.g., flipping r.active)
+        for (PropertyEntry<Relationship> entry : data.assignedRelationshipProperties()) {
+            Relationship r = entry.entity();
+            if (r.isType(CAUSES) && entry.key().equals(PROP_ACTIVE) && !isDeletedRel(data, r) && !isCreatedRel(data, r)) {
+                boolean oldVal = entry.previouslyCommittedValue() instanceof Boolean b ? b : true;
+                boolean newVal = entry.value() instanceof Boolean b ? b : true;
+                
+                String from = (String) r.getStartNode().getProperty(PROP_ID, null);
+                String to = (String) r.getEndNode().getProperty(PROP_ID, null);
+                if (from != null && to != null) {
+                    // Logically treat an activation as an added edge, and a deactivation as a removed edge
+                    if (!oldVal && newVal) {
+                        batch.addedEdge(from, to);
+                    } else if (oldVal && !newVal) {
+                        batch.removedEdge(from, to);
+                    }
+                }
+            }
+        }
 
-        // TODO(student, tier 1): validation. If an added edge would create a
-        // cycle in the resulting DAG, throw here to abort the transaction.
-        // Example: new PathAnalyzer(snapshot).hasDirectedPath(to, from) ⇒ cycle.
+        Set<Node> updatedNodes = new HashSet<>();
+        for (PropertyEntry<Node> entry : data.assignedNodeProperties()) {
+            Node n = entry.entity();
+            if (n.hasLabel(VARIABLE) && !isDeleted(data, n) && !isCreated(data, n)) {
+                if (!entry.key().equals(PROP_ID)) {
+                    updatedNodes.add(n);
+                }
+            }
+        }
+        for (Node n : updatedNodes) {
+            batch.updatedVariable(variableFromNode(n));
+        }
 
-        return batch.build();
+        ChangeBatch builtBatch = batch.build();
+
+        // Validation: Ensure topology invariants are respected before allowing the transaction to commit.
+        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        GraphSnapshot snapshot = runtime.currentSnapshot();
+        if (snapshot instanceof CompiledCausalGraph cg && cg != null && !builtBatch.addedEdges().isEmpty()) {
+            ReachabilityIndex idx = new ReachabilityIndex(cg);
+            for (ChangeBatch.Edge e : builtBatch.addedEdges()) {
+                boolean fromKnown = cg.topoIndex(e.from()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.from()));
+                boolean toKnown = cg.topoIndex(e.to()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.to()));
+                if (!fromKnown) {
+                    throw new IllegalArgumentException("Edge references unknown variable: " + e.from());
+                }
+                if (!toKnown) {
+                    throw new IllegalArgumentException("Edge references unknown variable: " + e.to());
+                }
+
+                // If a path exists from 'to' back to 'from', adding 'from' -> 'to' would create a cycle.
+                if (idx.hasDirectedPath(e.to(), e.from())) {
+                    throw new IllegalArgumentException("Edge from " + e.from() + " to " + e.to() + " creates a cycle.");
+                }
+            }
+        }
+
+        return builtBatch;
     }
 
     // -------------------------------------------------------------------------
@@ -150,31 +202,10 @@ public final class CausalGraphChangeListener implements TransactionEventListener
     public void afterCommit(TransactionData data, ChangeBatch batch, GraphDatabaseService db) {
         if (batch == null || batch.isEmpty()) return;
 
-        // TODO(student, tier 1): replace this with an incremental update.
-        //
-        // Recommended approach:
-        //   1. Add `void applyChange(ChangeBatch batch)` to DefaultCausalGraphRuntime
-        //      (not to the public CausalGraphRuntime API — this is an internal hook).
-        //   2. In that method:
-        //        - For each added variable: allocate a new dense index; extend the
-        //          int[][] adjacency, int[] topoOrder, long[][] ancestor/descendantBits.
-        //        - For each removed variable: free the index; scrub incident edges.
-        //        - For each added edge (u → v): append v to forwardAdj[u], u to
-        //          reverseAdj[v]; update topoLayer[v] if needed; OR-in ancestorBits[u]
-        //          into ancestorBits[v] and descendantBits[v] into descendantBits[u];
-        //          cascade through descendants of v (or ancestors of u) to keep the
-        //          closure consistent.
-        //        - For each removed edge: harder — ancestor/descendant closures
-        //          can shrink in non-local ways. Simplest correct patch is to
-        //          invalidate and let the next query recompile.
-        //   3. Cast RuntimeRegistry.getInstance() to DefaultCausalGraphRuntime and
-        //      call applyChange(batch). Keep the invalidate() fallback for cases
-        //      where the incremental update is not yet implemented.
-        //
-        // Safe default until step 1 lands: blow away the snapshot.
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
-        runtime.invalidate();
-        LOG.fine(() -> "Invalidated snapshot after transaction: " + summarise(batch));
+        DefaultCausalGraphRuntime runtime = (DefaultCausalGraphRuntime) RuntimeRegistry.getInstance();
+        runtime.applyChange(batch);
+        
+        LOG.fine(() -> "Applied batch after transaction: " + summarise(batch));
     }
     @Override
     public void afterRollback(TransactionData data, ChangeBatch batch, GraphDatabaseService db) {
@@ -196,14 +227,39 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         if (data.deletedRelationships().iterator().hasNext()) return true;
         for (LabelEntry l : data.assignedLabels())   if (l.label().equals(VARIABLE)) return true;
         for (LabelEntry l : data.removedLabels())    if (l.label().equals(VARIABLE)) return true;
-        // Property-change paths — enable once the TODOs above consume them.
-        // if (data.assignedRelationshipProperties().iterator().hasNext()) return true;
+        if (data.assignedRelationshipProperties().iterator().hasNext()) return true;
+        if (data.assignedNodeProperties().iterator().hasNext()) return true;
         return false;
     }
 
     private static boolean isActive(Relationship r) {
         Object v = r.getProperty(PROP_ACTIVE, Boolean.TRUE);
         return v instanceof Boolean b ? b : true;
+    }
+
+    private static Variable variableFromNode(Node n) {
+        String id = (String) n.getProperty(PROP_ID);
+        String name = (String) n.getProperty("name", id);
+        boolean observed = (boolean) n.getProperty("observed", Variable.DEFAULT_OBSERVED);
+        boolean latent   = (boolean) n.getProperty("latent", Variable.DEFAULT_LATENT);
+        double intercept = ((Number) n.getProperty("intercept", Variable.DEFAULT_INTERCEPT)).doubleValue();
+        double noise     = ((Number) n.getProperty("noise", Variable.DEFAULT_NOISE_VARIANCE)).doubleValue();
+        return Variable.from(id, name, observed, latent, intercept, noise);
+    }
+
+    private static boolean isCreated(TransactionData data, Node n) {
+        for (Node created : data.createdNodes()) if (created.equals(n)) return true;
+        return false;
+    }
+
+    private static boolean isCreatedRel(TransactionData data, Relationship r) {
+        for (Relationship created : data.createdRelationships()) if (created.equals(r)) return true;
+        return false;
+    }
+
+    private static boolean isDeletedRel(TransactionData data, Relationship r) {
+        for (Relationship deleted : data.deletedRelationships()) if (deleted.equals(r)) return true;
+        return false;
     }
 
     private static boolean isDeleted(TransactionData data, Node n) {
