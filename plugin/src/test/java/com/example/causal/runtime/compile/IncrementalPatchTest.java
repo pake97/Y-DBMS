@@ -72,9 +72,89 @@ class IncrementalPatchTest {
         assertNull(newGraph, "Patch should return null and fallback for topological violations");
     }
 
+    @Test
+    void testMultipleNodesChainedInBatch() {
+        CompiledCausalGraph oldGraph = graphFromEdges(List.of("A->B"));
+        Variable nodeX = Variable.from("X", "X", false, false, 0, 1);
+        Variable nodeY = Variable.from("Y", "Y", false, false, 0, 1);
+        Variable nodeZ = Variable.from("Z", "Z", false, false, 0, 1);
+        
+        ChangeBatch batch = ChangeBatch.builder()
+                .addedVariable(nodeZ)
+                .addedVariable(nodeY)
+                .addedVariable(nodeX) // non-creation order
+                .addedEdge("Y", "Z") // reverse creation order
+                .addedEdge("X", "Y")
+                .addedEdge("B", "X")
+                .build();
+        CompiledCausalGraph newGraph = oldGraph.patch(batch);
+        assertNotNull(newGraph);
+        assertParity(newGraph);
+    }
+
+    @Test
+    void testBatchAppliedTwice() {
+        CompiledCausalGraph oldGraph = graphFromEdges(List.of("A->B"));
+        ChangeBatch batch = ChangeBatch.builder()
+                .addedEdge("A", "C")
+                .build();
+        Variable nodeC = Variable.from("C", "C", false, false, 0, 1);
+        batch = ChangeBatch.builder()
+                .addedVariable(nodeC)
+                .addedEdge("B", "C")
+                .build();
+        
+        CompiledCausalGraph once = oldGraph.patch(batch);
+        assertNotNull(once);
+        CompiledCausalGraph twice = once.patch(batch);
+        assertNotNull(twice, "Applying the same batch twice should not crash");
+        assertParity(twice);
+    }
+
+    @Test
+    void testUpdatedVariables() {
+        CompiledCausalGraph oldGraph = graphFromEdges(List.of("A->B"));
+        // Flip A to latent=true, intercept=5
+        Variable updatedA = Variable.from("A", "A", true, false, 5, 1);
+        ChangeBatch batch = ChangeBatch.builder()
+                .updatedVariable(updatedA)
+                .build();
+        CompiledCausalGraph newGraph = oldGraph.patch(batch);
+        assertNotNull(newGraph);
+        
+        Variable aInGraph = newGraph.findVariable("A").orElseThrow();
+        assertTrue(aInGraph.latent());
+        assertEquals(5, aInGraph.intercept());
+    }
+
+    @Test
+    void testDeactivationFallback() {
+        CompiledCausalGraph oldGraph = graphFromEdges(List.of("A->B"));
+        // Flip A to active=false
+        Variable updatedA = Variable.from("A", "A", false, true, 0, 1);
+        ChangeBatch batch = ChangeBatch.builder()
+                .updatedVariable(updatedA)
+                .build();
+        CompiledCausalGraph newGraph = oldGraph.patch(batch);
+        assertNull(newGraph, "Deactivating a node should return null (fallback)");
+    }
+
     private void assertParity(CompiledCausalGraph graph) {
         ReachabilityIndex index = new ReachabilityIndex(graph);
-        for (String id : graph.topoOrder()) {
+        List<String> topoOrder = graph.topoOrder();
+        
+        // Assert topological order is valid
+        for (String id : topoOrder) {
+            int childIndex = graph.topoIndex(id);
+            for (String parent : graph.parentsOf(id)) {
+                int parentIndex = graph.topoIndex(parent);
+                assertTrue(parentIndex < childIndex, 
+                    "Topological violation: parent " + parent + " (" + parentIndex + 
+                    ") >= child " + id + " (" + childIndex + ")");
+            }
+        }
+        
+        for (String id : topoOrder) {
             Set<String> dfsAncestors = index.ancestorsDfs(id);
             Set<String> bitsetAncestors = index.ancestors(id);
             assertEquals(dfsAncestors, bitsetAncestors, "Ancestors mismatch for " + id);
