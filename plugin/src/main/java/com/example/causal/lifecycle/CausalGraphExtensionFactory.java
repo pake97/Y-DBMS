@@ -32,10 +32,14 @@ public final class CausalGraphExtensionFactory
 
     @Override
     public Lifecycle newInstance(ExtensionContext context, Dependencies dependencies) {
+        String dbName = dependencies.graphDatabaseAPI().databaseName();
+        if ("system".equals(dbName)) {
+            return new org.neo4j.kernel.lifecycle.LifecycleAdapter() {};
+        }
+        
         return new CausalGraphLifecycle(
             dependencies.databaseManagementService(),
-            // dependencies.graphDatabaseAPI().databaseName(),
-            "neo4j",
+            dbName,
             new CausalGraphChangeListener()
         );
     }

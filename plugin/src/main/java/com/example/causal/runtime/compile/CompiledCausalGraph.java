@@ -232,12 +232,16 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     }
 
     private CompiledCausalGraph(CompiledCausalGraph old, ChangeBatch batch) {
+        List<Variable> actualAddedVariables = batch.addedVariables().stream()
+                .filter(v -> !old.variableById.containsKey(v.id()))
+                .toList();
+
         int oldN = old.variableById.size();
-        int newN = oldN + batch.addedVariables().size();
+        int newN = oldN + actualAddedVariables.size();
 
         Map<String, Variable> newVarById = new LinkedHashMap<>(old.variableById);
         for (Variable v : batch.updatedVariables()) newVarById.put(v.id(), v);
-        for (Variable v : batch.addedVariables()) newVarById.put(v.id(), v);
+        for (Variable v : actualAddedVariables) newVarById.put(v.id(), v);
         this.variableById = Collections.unmodifiableMap(newVarById);
 
         this.edgeWeights = old.edgeWeights; // unchanged
@@ -273,7 +277,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         }
 
         for (int i = oldN; i < newN; i++) {
-            Variable v = batch.addedVariables().get(i - oldN);
+            Variable v = actualAddedVariables.get(i - oldN);
             this.nameToIndex.put(v.id(), i);
             this.indexToVar[i] = v;
             this.denseForwardAdj[i] = new int[0];
@@ -295,7 +299,16 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         for (ChangeBatch.Edge e : batch.addedEdges()) {
             int u = this.nameToIndex.get(e.from());
             int v = this.nameToIndex.get(e.to());
-            
+
+            boolean edgeExists = false;
+            for (int child : this.denseForwardAdj[u]) {
+                if (child == v) {
+                    edgeExists = true;
+                    break;
+                }
+            }
+            if (edgeExists) continue;
+
             int[] oldF = this.denseForwardAdj[u];
             int[] newF = Arrays.copyOf(oldF, oldF.length + 1);
             newF[oldF.length] = v;
