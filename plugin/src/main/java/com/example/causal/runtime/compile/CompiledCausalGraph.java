@@ -394,6 +394,14 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         return descendantBits[denseIndex].clone();
     }
 
+    /**
+     * Tests if variable {@code v} is reachable from variable {@code u} in O(1) time
+     * without making a defensive copy of the bitset.
+     */
+    public boolean reaches(int u, int v) {
+        return (descendantBits[u][v >>> 6] & (1L << (v & 63))) != 0;
+    }
+
     public String idForIndex(int denseIndex) {
         return indexToVar[denseIndex].id();
     }
