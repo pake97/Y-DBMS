@@ -3,6 +3,7 @@ package com.example.causal.lifecycle;
 import com.example.causal.api.CausalGraphRuntime;
 import com.example.causal.api.GraphSnapshot;
 import com.example.causal.runtime.DefaultCausalGraphRuntime;
+import com.example.causal.runtime.ChangeBatch;
 import com.example.causal.runtime.RuntimeRegistry;
 import com.example.causal.runtime.algorithms.ReachabilityIndex;
 import com.example.causal.runtime.compile.CompiledCausalGraph;

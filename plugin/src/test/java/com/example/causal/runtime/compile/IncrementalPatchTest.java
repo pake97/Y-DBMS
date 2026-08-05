@@ -1,6 +1,6 @@
 package com.example.causal.runtime.compile;
 
-import com.example.causal.lifecycle.ChangeBatch;
+import com.example.causal.runtime.ChangeBatch;
 import com.example.causal.runtime.algorithms.ReachabilityIndex;
 import com.example.causal.runtime.model.Variable;
 import org.junit.jupiter.api.Test;

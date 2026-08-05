@@ -2,7 +2,7 @@ package com.example.causal.runtime.compile;
 
 import com.example.causal.api.GraphSnapshot;
 import com.example.causal.api.VariableRef;
-import com.example.causal.lifecycle.ChangeBatch;
+import com.example.causal.runtime.ChangeBatch;
 import com.example.causal.runtime.model.Variable;
 
 import java.time.Instant;

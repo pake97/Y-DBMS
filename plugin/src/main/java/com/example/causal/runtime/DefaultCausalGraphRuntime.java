@@ -8,7 +8,7 @@ import com.example.causal.api.GraphSnapshot;
 import com.example.causal.api.VariableRef;
 import com.example.causal.dto.CounterfactualRecord;
 import com.example.causal.dto.LinearGaussianRecord;
-import com.example.causal.lifecycle.ChangeBatch;
+import com.example.causal.runtime.ChangeBatch;
 import com.example.causal.runtime.algorithms.CounterfactualInference;
 import com.example.causal.runtime.algorithms.LinearGaussianInference;
 import com.example.causal.runtime.algorithms.PathAnalyzer;
