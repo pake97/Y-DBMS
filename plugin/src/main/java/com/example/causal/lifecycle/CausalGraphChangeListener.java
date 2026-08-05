@@ -97,6 +97,15 @@ public final class CausalGraphChangeListener implements TransactionEventListener
     public ChangeBatch beforeCommit(TransactionData data, Transaction tx, GraphDatabaseService db) {
         if (!touchesCausalSchema(data)) return ChangeBatch.EMPTY;
 
+        Set<Node> createdNodes = new HashSet<>();
+        data.createdNodes().forEach(createdNodes::add);
+        Set<Node> deletedNodes = new HashSet<>();
+        data.deletedNodes().forEach(deletedNodes::add);
+        Set<Relationship> createdRels = new HashSet<>();
+        data.createdRelationships().forEach(createdRels::add);
+        Set<Relationship> deletedRels = new HashSet<>();
+        data.deletedRelationships().forEach(deletedRels::add);
+
         ChangeBatch.Builder batch = ChangeBatch.builder();
 
         // Added variables: new :Variable nodes with an id property.
@@ -109,7 +118,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         // Removed variables: for deleted nodes we can't call getProperty() on
         // the Node directly — Neo4j exposes the old values via removedNodeProperties.
         for (PropertyEntry<Node> rem : data.removedNodeProperties()) {
-            if (PROP_ID.equals(rem.key()) && isDeleted(data, rem.entity())) {
+            if (PROP_ID.equals(rem.key()) && deletedNodes.contains(rem.entity())) {
                 batch.removedVariable(String.valueOf(rem.previouslyCommittedValue()));
             }
         }
@@ -127,8 +136,8 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         // listener's view of the relationship *before* deletion.
         for (Relationship r : data.deletedRelationships()) {
             if (r.isType(CAUSES)) {
-                String from = getDeletedNodeID(data, r.getStartNode());
-                String to   = getDeletedNodeID(data, r.getEndNode());
+                String from = getDeletedNodeID(data, deletedNodes, r.getStartNode());
+                String to   = getDeletedNodeID(data, deletedNodes, r.getEndNode());
                 if (from != null && to != null) {
                     batch.removedEdge(from, to);
                 }
@@ -138,7 +147,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         // Property-change cases for relationships (e.g., flipping r.active)
         for (PropertyEntry<Relationship> entry : data.assignedRelationshipProperties()) {
             Relationship r = entry.entity();
-            if (r.isType(CAUSES) && entry.key().equals(PROP_ACTIVE) && !isDeletedRel(data, r) && !isCreatedRel(data, r)) {
+            if (r.isType(CAUSES) && entry.key().equals(PROP_ACTIVE) && !deletedRels.contains(r) && !createdRels.contains(r)) {
                 boolean oldVal = entry.previouslyCommittedValue() instanceof Boolean b ? b : true;
                 boolean newVal = entry.value() instanceof Boolean b ? b : true;
                 
@@ -158,7 +167,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         Set<Node> updatedNodes = new HashSet<>();
         for (PropertyEntry<Node> entry : data.assignedNodeProperties()) {
             Node n = entry.entity();
-            if (n.hasLabel(VARIABLE) && !isDeleted(data, n) && !isCreated(data, n)) {
+            if (n.hasLabel(VARIABLE) && !deletedNodes.contains(n) && !createdNodes.contains(n)) {
                 if (!entry.key().equals(PROP_ID)) {
                     updatedNodes.add(n);
                 }
@@ -239,8 +248,12 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         if (data.deletedRelationships().iterator().hasNext()) return true;
         for (LabelEntry l : data.assignedLabels())   if (l.label().equals(VARIABLE)) return true;
         for (LabelEntry l : data.removedLabels())    if (l.label().equals(VARIABLE)) return true;
-        if (data.assignedRelationshipProperties().iterator().hasNext()) return true;
-        if (data.assignedNodeProperties().iterator().hasNext()) return true;
+        for (PropertyEntry<Relationship> entry : data.assignedRelationshipProperties()) {
+            if (entry.entity().isType(CAUSES)) return true;
+        }
+        for (PropertyEntry<Node> entry : data.assignedNodeProperties()) {
+            if (entry.entity().hasLabel(VARIABLE)) return true;
+        }
         return false;
     }
 
@@ -259,30 +272,10 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         return Variable.from(id, name, observed, latent, intercept, noise);
     }
 
-    private static boolean isCreated(TransactionData data, Node n) {
-        for (Node created : data.createdNodes()) if (created.equals(n)) return true;
-        return false;
-    }
-
-    private static boolean isCreatedRel(TransactionData data, Relationship r) {
-        for (Relationship created : data.createdRelationships()) if (created.equals(r)) return true;
-        return false;
-    }
-
-    private static boolean isDeletedRel(TransactionData data, Relationship r) {
-        for (Relationship deleted : data.deletedRelationships()) if (deleted.equals(r)) return true;
-        return false;
-    }
-
-    private static boolean isDeleted(TransactionData data, Node n) {
-        for (Node deleted : data.deletedNodes()) if (deleted.equals(n)) return true;
-        return false;
-    }
-
-    private static String getDeletedNodeID(TransactionData data, Node n) {
-        if (isDeleted(data, n)) {
+    private static String getDeletedNodeID(TransactionData data, Set<Node> deletedNodes, Node n) {
+        if (deletedNodes.contains(n)) {
             for (PropertyEntry<Node> propEntry : data.removedNodeProperties()) {
-                if (propEntry.entity().getId() == n.getId() && PROP_ID.equals(propEntry.key())) {
+                if (propEntry.entity().equals(n) && PROP_ID.equals(propEntry.key())) {
                     Object val = propEntry.previouslyCommittedValue();
                     return val == null ? null : String.valueOf(val);
                 }
