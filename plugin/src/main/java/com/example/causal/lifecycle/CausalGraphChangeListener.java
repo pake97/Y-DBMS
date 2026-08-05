@@ -182,7 +182,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         // Validation: Ensure topology invariants are respected before allowing the transaction to commit.
         CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
         GraphSnapshot snapshot = runtime.currentSnapshot();
-        if (snapshot instanceof CompiledCausalGraph cg && cg != null && !builtBatch.addedEdges().isEmpty()) {
+        if (snapshot instanceof CompiledCausalGraph cg && !builtBatch.addedEdges().isEmpty()) {
             ReachabilityIndex idx = new ReachabilityIndex(cg);
             for (ChangeBatch.Edge e : builtBatch.addedEdges()) {
                 boolean fromKnown = cg.topoIndex(e.from()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.from()));
