@@ -201,11 +201,22 @@ public final class CausalGraphChangeListener implements TransactionEventListener
     @Override
     public void afterCommit(TransactionData data, ChangeBatch batch, GraphDatabaseService db) {
         if (batch == null || batch.isEmpty()) return;
-
-        DefaultCausalGraphRuntime runtime = (DefaultCausalGraphRuntime) RuntimeRegistry.getInstance();
-        runtime.applyChange(batch);
-        
-        LOG.fine(() -> "Applied batch after transaction: " + summarise(batch));
+        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        if (runtime instanceof DefaultCausalGraphRuntime d) {
+            try {
+                if (d.applyChange(batch)) {
+                    LOG.fine(() -> "Applied batch after transaction: " + summarise(batch));
+                } else {
+                    LOG.fine(() -> "Patch failed or unsupported; invalidating snapshot: " + summarise(batch));
+                    runtime.invalidate();
+                }
+            } catch (Exception e) {
+                LOG.log(java.util.logging.Level.WARNING, "Failed to apply incremental update; invalidating snapshot", e);
+                runtime.invalidate();
+            }
+        } else {
+            runtime.invalidate();
+        }
     }
     @Override
     public void afterRollback(TransactionData data, ChangeBatch batch, GraphDatabaseService db) {

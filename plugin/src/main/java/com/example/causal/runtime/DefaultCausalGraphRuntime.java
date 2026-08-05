@@ -76,14 +76,14 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
         snapshot = null;
     }
 
-    public synchronized void applyChange(ChangeBatch batch) {
-        if (snapshot == null) return;
+    public synchronized boolean applyChange(ChangeBatch batch) {
+        if (snapshot == null) return false;
         CompiledCausalGraph next = snapshot.patch(batch);
         if (next == null) {
-            invalidate();
-        } else {
-            snapshot = next;
+            return false;
         }
+        snapshot = next;
+        return true;
     }
 
     // -------------------------------------------------------------------------
