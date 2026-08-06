@@ -219,13 +219,16 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         for (ChangeBatch.Edge e : batch.addedEdges()) {
             int u = topoIndex(e.from());
             int v = topoIndex(e.to());
-            // If from is new, topoIndex is -1. If to is new, topoIndex is -1.
-            // But we assign new variables to the END of the topo order.
-            // if u != -1 and v != -1 and u >= v -> backward edge, fallback.
-            // if u == -1 and v != -1, then u (new) >= v (old) -> fallback.
-            // if u != -1 and v == -1, then u (old) < v (new) -> OK.
-            if ((u != -1 && v != -1 && u >= v) || (u == -1 && v != -1)) {
-                return null; // Topo order violated, fallback
+            // Topo validation rules:
+            // 1. If u and v are old, and u >= v -> invalid backward edge (fallback)
+            // 2. If u is new and v is old -> invalid backward edge (fallback)
+            // 3. If u and v are new -> creation order isn't guaranteed topological (fallback)
+            // 4. If u is old and v is new -> perfectly valid, v will be appended after u
+            
+            // TODO(future): The proper fix is to topologically sort actualAddedVariables 
+            // (against the batch's own edges) before assigning indices. For now, we fallback.
+            if (u == -1 || (u != -1 && v != -1 && u >= v)) {
+                return null; // Topo order violated or unknown, fallback
             }
         }
         return new CompiledCausalGraph(this, batch);
@@ -246,7 +249,6 @@ public final class CompiledCausalGraph implements GraphSnapshot {
 
         this.edgeWeights = old.edgeWeights; // unchanged
         this.compiledAt = Instant.now();
-        
         this.nameToIndex = new HashMap<>(old.nameToIndex);
         this.indexToVar = Arrays.copyOf(old.indexToVar, newN);
         
