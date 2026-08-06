@@ -107,4 +107,25 @@ public class IncrementalListenerCypherTest {
         CompiledCausalGraph snapshot = (CompiledCausalGraph) runtime.currentSnapshot();
         assertNull(snapshot, "Snapshot should be invalidated after deactivation fallback");
     }
+
+    @Test
+    void testBlocker3_CycleDetection() {
+        // Validation should prevent this transaction from committing
+        Exception ex = assertThrows(Exception.class, () -> {
+            try (Transaction tx = db.beginTx()) {
+                tx.execute("CREATE (x:Variable {id: 'X', name: 'X'}), (y:Variable {id: 'Y', name: 'Y'}), (x)-[:CAUSES {active:true}]->(y), (y)-[:CAUSES {active:true}]->(x)");
+                tx.commit(); // This should throw due to cycle validation
+            }
+        });
+        boolean foundCycle = false;
+        Throwable current = ex;
+        while (current != null) {
+            if (current.getMessage() != null && current.getMessage().contains("cycle")) {
+                foundCycle = true;
+                break;
+            }
+            current = current.getCause();
+        }
+        assertTrue(foundCycle, "Exception should mention cycle, but was: " + ex);
+    }
 }

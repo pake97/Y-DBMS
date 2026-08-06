@@ -21,6 +21,12 @@ import org.neo4j.graphdb.event.TransactionEventListener;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.logging.Logger;
 
 /**
@@ -183,7 +189,11 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
         GraphSnapshot snapshot = runtime.currentSnapshot();
         if (snapshot instanceof CompiledCausalGraph cg && !builtBatch.addedEdges().isEmpty()) {
-            ReachabilityIndex idx = new ReachabilityIndex(cg);
+            Map<String, List<String>> addedAdj = new HashMap<>();
+            for (ChangeBatch.Edge e : builtBatch.addedEdges()) {
+                addedAdj.computeIfAbsent(e.from(), k -> new ArrayList<>()).add(e.to());
+            }
+
             for (ChangeBatch.Edge e : builtBatch.addedEdges()) {
                 boolean fromKnown = cg.topoIndex(e.from()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.from()));
                 boolean toKnown = cg.topoIndex(e.to()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.to()));
@@ -194,8 +204,31 @@ public final class CausalGraphChangeListener implements TransactionEventListener
                     throw new IllegalArgumentException("Edge references unknown variable: " + e.to());
                 }
 
-                // If a path exists from 'to' back to 'from', adding 'from' -> 'to' would create a cycle.
-                if (idx.hasDirectedPath(e.to(), e.from())) {
+                // If a path exists from 'to' back to 'from' in the combined graph, we have a cycle.
+                Set<String> visited = new HashSet<>();
+                Deque<String> stack = new ArrayDeque<>();
+                stack.push(e.to());
+                boolean cycle = false;
+                while (!stack.isEmpty()) {
+                    String curr = stack.pop();
+                    if (curr.equals(e.from())) {
+                        cycle = true;
+                        break;
+                    }
+                    if (visited.add(curr)) {
+                        if (cg.topoIndex(curr) != -1) {
+                            for (String child : cg.childrenOf(curr)) {
+                                if (!visited.contains(child)) stack.push(child);
+                            }
+                        }
+                        if (addedAdj.containsKey(curr)) {
+                            for (String child : addedAdj.get(curr)) {
+                                if (!visited.contains(child)) stack.push(child);
+                            }
+                        }
+                    }
+                }
+                if (cycle) {
                     throw new IllegalArgumentException("Edge from " + e.from() + " to " + e.to() + " creates a cycle.");
                 }
             }
