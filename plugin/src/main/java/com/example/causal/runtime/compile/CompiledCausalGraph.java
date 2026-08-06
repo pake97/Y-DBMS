@@ -247,7 +247,29 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         for (Variable v : actualAddedVariables) newVarById.put(v.id(), v);
         this.variableById = Collections.unmodifiableMap(newVarById);
 
-        this.edgeWeights = old.edgeWeights; // unchanged
+        Map<String, Map<String, Double>> newWeights = new HashMap<>(old.edgeWeights);
+        boolean weightsChanged = false;
+        for (ChangeBatch.Edge e : batch.addedEdges()) {
+            Map<String, Double> inner = new HashMap<>(newWeights.getOrDefault(e.to(), Map.of()));
+            if (e.weight() != null) {
+                inner.put(e.from(), e.weight());
+            } else {
+                inner.put(e.from(), Variable.DEFAULT_WEIGHT);
+            }
+            newWeights.put(e.to(), Collections.unmodifiableMap(inner));
+            weightsChanged = true;
+        }
+        for (ChangeBatch.Edge e : batch.updatedEdges()) {
+            Map<String, Double> inner = new HashMap<>(newWeights.getOrDefault(e.to(), Map.of()));
+            if (e.weight() != null) {
+                inner.put(e.from(), e.weight());
+            } else {
+                inner.put(e.from(), Variable.DEFAULT_WEIGHT);
+            }
+            newWeights.put(e.to(), Collections.unmodifiableMap(inner));
+            weightsChanged = true;
+        }
+        this.edgeWeights = weightsChanged ? Collections.unmodifiableMap(newWeights) : old.edgeWeights;
         this.compiledAt = Instant.now();
         this.nameToIndex = new HashMap<>(old.nameToIndex);
         this.indexToVar = Arrays.copyOf(old.indexToVar, newN);

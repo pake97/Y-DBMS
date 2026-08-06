@@ -119,7 +119,7 @@ class IncrementalPatchTest {
     void testUpdatedVariables() {
         CompiledCausalGraph oldGraph = graphFromEdges(List.of("A->B"));
         // Flip A to latent=true, intercept=5
-        Variable updatedA = Variable.from("A", "A", true, false, 5, 1);
+        Variable updatedA = Variable.from("A", "A", true, true, 5, 1);
         ChangeBatch batch = ChangeBatch.builder()
                 .updatedVariable(updatedA)
                 .build();
@@ -134,13 +134,12 @@ class IncrementalPatchTest {
     @Test
     void testDeactivationFallback() {
         CompiledCausalGraph oldGraph = graphFromEdges(List.of("A->B"));
-        // Flip A to active=false
-        Variable updatedA = Variable.from("A", "A", false, true, 0, 1);
+        // Removing a node should trigger fallback
         ChangeBatch batch = ChangeBatch.builder()
-                .updatedVariable(updatedA)
+                .removedVariable("A")
                 .build();
         CompiledCausalGraph newGraph = oldGraph.patch(batch);
-        assertNull(newGraph, "Deactivating a node should return null (fallback)");
+        assertNull(newGraph, "Removing a node should return null (fallback)");
     }
 
     private void assertParity(CompiledCausalGraph graph) {

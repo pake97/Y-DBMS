@@ -134,7 +134,14 @@ public final class CausalGraphChangeListener implements TransactionEventListener
             if (r.isType(CAUSES) && isActive(r)) {
                 String from = (String) r.getStartNode().getProperty(PROP_ID, null);
                 String to   = (String) r.getEndNode().getProperty(PROP_ID, null);
-                if (from != null && to != null) batch.addedEdge(from, to);
+                if (from != null && to != null) {
+                    Double weight = null;
+                    if (r.hasProperty("weight")) {
+                        Object w = r.getProperty("weight");
+                        if (w instanceof Number n) weight = n.doubleValue();
+                    }
+                    batch.addedEdge(from, to, weight);
+                }
             }
         }
 
@@ -150,22 +157,45 @@ public final class CausalGraphChangeListener implements TransactionEventListener
             }
         }
 
-        // Property-change cases for relationships (e.g., flipping r.active)
+        // Property-change cases for relationships (e.g., flipping r.active or changing weight)
         for (PropertyEntry<Relationship> entry : data.assignedRelationshipProperties()) {
             Relationship r = entry.entity();
-            if (r.isType(CAUSES) && entry.key().equals(PROP_ACTIVE) && !deletedRels.contains(r) && !createdRels.contains(r)) {
-                boolean oldVal = entry.previouslyCommittedValue() instanceof Boolean b ? b : true;
-                boolean newVal = entry.value() instanceof Boolean b ? b : true;
-                
+            if (r.isType(CAUSES) && !deletedRels.contains(r) && !createdRels.contains(r)) {
                 String from = (String) r.getStartNode().getProperty(PROP_ID, null);
                 String to = (String) r.getEndNode().getProperty(PROP_ID, null);
-                if (from != null && to != null) {
+                if (from == null || to == null) continue;
+
+                if (entry.key().equals(PROP_ACTIVE)) {
+                    boolean oldVal = entry.previouslyCommittedValue() instanceof Boolean b ? b : true;
+                    boolean newVal = entry.value() instanceof Boolean b ? b : true;
+                    
                     // Logically treat an activation as an added edge, and a deactivation as a removed edge
                     if (!oldVal && newVal) {
-                        batch.addedEdge(from, to);
+                        Double weight = null;
+                        if (r.hasProperty("weight")) {
+                            Object w = r.getProperty("weight");
+                            if (w instanceof Number n) weight = n.doubleValue();
+                        }
+                        batch.addedEdge(from, to, weight);
                     } else if (oldVal && !newVal) {
                         batch.removedEdge(from, to);
                     }
+                } else if (entry.key().equals("weight") && isActive(r)) {
+                    Double weight = null;
+                    if (entry.value() instanceof Number n) weight = n.doubleValue();
+                    batch.updatedEdge(from, to, weight);
+                }
+            }
+        }
+        for (PropertyEntry<Relationship> entry : data.removedRelationshipProperties()) {
+            Relationship r = entry.entity();
+            if (r.isType(CAUSES) && !deletedRels.contains(r)) {
+                String from = (String) r.getStartNode().getProperty(PROP_ID, null);
+                String to = (String) r.getEndNode().getProperty(PROP_ID, null);
+                if (from == null || to == null) continue;
+
+                if (entry.key().equals("weight") && isActive(r)) {
+                    batch.updatedEdge(from, to, null);
                 }
             }
         }
@@ -174,6 +204,14 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         for (PropertyEntry<Node> entry : data.assignedNodeProperties()) {
             Node n = entry.entity();
             if (n.hasLabel(VARIABLE) && !deletedNodes.contains(n) && !createdNodes.contains(n)) {
+                if (!entry.key().equals(PROP_ID)) {
+                    updatedNodes.add(n);
+                }
+            }
+        }
+        for (PropertyEntry<Node> entry : data.removedNodeProperties()) {
+            Node n = entry.entity();
+            if (n.hasLabel(VARIABLE) && !deletedNodes.contains(n)) {
                 if (!entry.key().equals(PROP_ID)) {
                     updatedNodes.add(n);
                 }

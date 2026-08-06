@@ -27,14 +27,15 @@ public record ChangeBatch(
         List<String> removedVariables,
         List<Edge>   addedEdges,
         List<Edge>   removedEdges,
-        List<Variable> updatedVariables
+        List<Variable> updatedVariables,
+        List<Edge>   updatedEdges
 ) {
 
     /** A canonical empty batch — use for transactions that don't touch the causal schema. */
-    public static final ChangeBatch EMPTY = new ChangeBatch(List.of(), List.of(), List.of(), List.of(), List.of());
+    public static final ChangeBatch EMPTY = new ChangeBatch(List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
 
-    /** A directed edge identified by endpoint {@code id} properties. */
-    public record Edge(String from, String to) {}
+    /** A directed edge identified by endpoint {@code id} properties, with an optional weight. */
+    public record Edge(String from, String to, Double weight) {}
 
     /** True if there is nothing for {@link CausalGraphChangeListener#afterCommit} to apply. */
     public boolean isEmpty() {
@@ -42,7 +43,8 @@ public record ChangeBatch(
             && removedVariables.isEmpty()
             && addedEdges.isEmpty()
             && removedEdges.isEmpty()
-            && updatedVariables.isEmpty();
+            && updatedVariables.isEmpty()
+            && updatedEdges.isEmpty();
     }
 
     public static Builder builder() {
@@ -55,12 +57,15 @@ public record ChangeBatch(
         private final List<Edge>   addedEdges       = new ArrayList<>();
         private final List<Edge>   removedEdges     = new ArrayList<>();
         private final List<Variable> updatedVariables = new ArrayList<>();
+        private final List<Edge>   updatedEdges     = new ArrayList<>();
 
         public Builder addedVariable(Variable v)             { addedVariables.add(v); return this; }
         public Builder removedVariable(String id)            { removedVariables.add(id); return this; }
-        public Builder addedEdge(String from, String to)     { addedEdges.add(new Edge(from, to)); return this; }
-        public Builder removedEdge(String from, String to)   { removedEdges.add(new Edge(from, to)); return this; }
+        public Builder addedEdge(String from, String to)     { addedEdges.add(new Edge(from, to, null)); return this; }
+        public Builder addedEdge(String from, String to, Double weight) { addedEdges.add(new Edge(from, to, weight)); return this; }
+        public Builder removedEdge(String from, String to)   { removedEdges.add(new Edge(from, to, null)); return this; }
         public Builder updatedVariable(Variable v)           { updatedVariables.add(v); return this; }
+        public Builder updatedEdge(String from, String to, Double weight) { updatedEdges.add(new Edge(from, to, weight)); return this; }
 
         public ChangeBatch build() {
             return new ChangeBatch(
@@ -68,7 +73,8 @@ public record ChangeBatch(
                 Collections.unmodifiableList(removedVariables),
                 Collections.unmodifiableList(addedEdges),
                 Collections.unmodifiableList(removedEdges),
-                Collections.unmodifiableList(updatedVariables)
+                Collections.unmodifiableList(updatedVariables),
+                Collections.unmodifiableList(updatedEdges)
             );
         }
     }

@@ -128,4 +128,25 @@ public class IncrementalListenerCypherTest {
         }
         assertTrue(foundCycle, "Exception should mention cycle, but was: " + ex);
     }
+
+    @Test
+    void testBlocker4_WeightUpdates() {
+        // Changing a weight property should be patched in-place
+        try (Transaction tx = db.beginTx()) {
+            tx.execute("MATCH ()-[r:CAUSES]->() SET r.weight = 0.9");
+            tx.commit();
+        }
+        CompiledCausalGraph snapshot = (CompiledCausalGraph) runtime.currentSnapshot();
+        assertNotNull(snapshot, "Snapshot should be patched in-place after weight update");
+        assertEquals(0.9, snapshot.weight("A", "B"), 0.0001, "Edge weight should be updated to 0.9");
+
+        // Adding an edge with a weight should also be patched in-place
+        try (Transaction tx = db.beginTx()) {
+            tx.execute("MATCH (a:Variable {id: 'A'}) CREATE (c:Variable {id: 'C'}), (a)-[:CAUSES {active:true, weight:0.7}]->(c)");
+            tx.commit();
+        }
+        CompiledCausalGraph snapshot2 = (CompiledCausalGraph) runtime.currentSnapshot();
+        assertNotNull(snapshot2, "Snapshot should be patched in-place after adding weighted edge");
+        assertEquals(0.7, snapshot2.weight("A", "C"), 0.0001, "New edge weight should be 0.7");
+    }
 }
