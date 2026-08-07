@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 /**
  * Immutable compiled representation of the causal DAG.
@@ -231,13 +232,18 @@ public final class CompiledCausalGraph implements GraphSnapshot {
                 return null; // Topo order violated or unknown, fallback
             }
         }
-        return new CompiledCausalGraph(this, batch);
+        try {
+            return new CompiledCausalGraph(this, batch);
+        } catch (IllegalStateException e) {
+            return null; // Topo or accounting error, fallback to recompile
+        }
     }
 
     private CompiledCausalGraph(CompiledCausalGraph old, ChangeBatch batch) {
         List<Variable> actualAddedVariables = batch.addedVariables().stream()
                 .filter(v -> !old.variableById.containsKey(v.id()))
-                .toList();
+                .collect(Collectors.toMap(Variable::id, v -> v, (a, b) -> b, LinkedHashMap::new))
+                .values().stream().toList();
 
         int oldN = old.variableById.size();
         int newN = oldN + actualAddedVariables.size();
@@ -245,6 +251,10 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         Map<String, Variable> newVarById = new LinkedHashMap<>(old.variableById);
         for (Variable v : batch.updatedVariables()) newVarById.put(v.id(), v);
         for (Variable v : actualAddedVariables) newVarById.put(v.id(), v);
+        
+        if (newVarById.size() != newN) {
+            throw new IllegalStateException("Accounting slip: expected " + newN + " variables but got " + newVarById.size());
+        }
         this.variableById = Collections.unmodifiableMap(newVarById);
 
         Map<String, Map<String, Double>> newWeights = new HashMap<>(old.edgeWeights);
