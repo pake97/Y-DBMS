@@ -232,15 +232,16 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         // Validation: Ensure topology invariants are respected before allowing the transaction to commit.
         CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
         GraphSnapshot snapshot = runtime.currentSnapshot();
-        if (snapshot instanceof CompiledCausalGraph cg && !builtBatch.addedEdges().isEmpty()) {
+        if (!builtBatch.addedEdges().isEmpty()) {
+            CompiledCausalGraph cg = snapshot instanceof CompiledCausalGraph c ? c : null;
             Map<String, List<String>> addedAdj = new HashMap<>();
             for (ChangeBatch.Edge e : builtBatch.addedEdges()) {
                 addedAdj.computeIfAbsent(e.from(), k -> new ArrayList<>()).add(e.to());
             }
 
             for (ChangeBatch.Edge e : builtBatch.addedEdges()) {
-                boolean fromKnown = cg.topoIndex(e.from()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.from()));
-                boolean toKnown = cg.topoIndex(e.to()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.to()));
+                boolean fromKnown = cg == null || cg.topoIndex(e.from()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.from()));
+                boolean toKnown = cg == null || cg.topoIndex(e.to()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.to()));
                 if (!fromKnown) {
                     throw new IllegalArgumentException("Edge references unknown variable: " + e.from());
                 }
@@ -260,7 +261,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
                         break;
                     }
                     if (visited.add(curr)) {
-                        if (cg.topoIndex(curr) != -1) {
+                        if (cg != null && cg.topoIndex(curr) != -1) {
                             for (String child : cg.childrenOf(curr)) {
                                 if (!visited.contains(child)) stack.push(child);
                             }
