@@ -95,6 +95,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
 
     /** Property on {@code :CAUSES} toggling whether the edge is loaded into the snapshot. */
     public static final String PROP_ACTIVE = "active";
+    public static final String PROP_WEIGHT = "weight";
 
     // -------------------------------------------------------------------------
     // beforeCommit — observe + diff
@@ -124,8 +125,10 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         // Removed variables: for deleted nodes we can't call getProperty() on
         // the Node directly — Neo4j exposes the old values via removedNodeProperties.
         for (PropertyEntry<Node> rem : data.removedNodeProperties()) {
-            if (PROP_ID.equals(rem.key()) && deletedNodes.contains(rem.entity())) {
-                batch.removedVariable(String.valueOf(rem.previouslyCommittedValue()));
+            if (PROP_ID.equals(rem.key())) {
+                if (deletedNodes.contains(rem.entity()) || !rem.entity().hasProperty(PROP_ID)) {
+                    batch.removedVariable(String.valueOf(rem.previouslyCommittedValue()));
+                }
             }
         }
 
@@ -136,8 +139,8 @@ public final class CausalGraphChangeListener implements TransactionEventListener
                 String to   = (String) r.getEndNode().getProperty(PROP_ID, null);
                 if (from != null && to != null) {
                     Double weight = null;
-                    if (r.hasProperty("weight")) {
-                        Object w = r.getProperty("weight");
+                    if (r.hasProperty(PROP_WEIGHT)) {
+                        Object w = r.getProperty(PROP_WEIGHT);
                         if (w instanceof Number n) weight = n.doubleValue();
                     }
                     batch.addedEdge(from, to, weight);
@@ -172,15 +175,15 @@ public final class CausalGraphChangeListener implements TransactionEventListener
                     // Logically treat an activation as an added edge, and a deactivation as a removed edge
                     if (!oldVal && newVal) {
                         Double weight = null;
-                        if (r.hasProperty("weight")) {
-                            Object w = r.getProperty("weight");
+                        if (r.hasProperty(PROP_WEIGHT)) {
+                            Object w = r.getProperty(PROP_WEIGHT);
                             if (w instanceof Number n) weight = n.doubleValue();
                         }
                         batch.addedEdge(from, to, weight);
                     } else if (oldVal && !newVal) {
                         batch.removedEdge(from, to);
                     }
-                } else if (entry.key().equals("weight") && isActive(r)) {
+                } else if (entry.key().equals(PROP_WEIGHT) && isActive(r)) {
                     Double weight = null;
                     if (entry.value() instanceof Number n) weight = n.doubleValue();
                     batch.updatedEdge(from, to, weight);
@@ -194,7 +197,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
                 String to = (String) r.getEndNode().getProperty(PROP_ID, null);
                 if (from == null || to == null) continue;
 
-                if (entry.key().equals("weight") && isActive(r)) {
+                if (entry.key().equals(PROP_WEIGHT) && isActive(r)) {
                     batch.updatedEdge(from, to, null);
                 }
             }
@@ -218,7 +221,10 @@ public final class CausalGraphChangeListener implements TransactionEventListener
             }
         }
         for (Node n : updatedNodes) {
-            batch.updatedVariable(variableFromNode(n));
+            Variable v = variableFromNode(n);
+            if (v != null) {
+                batch.updatedVariable(v);
+            }
         }
 
         ChangeBatch builtBatch = batch.build();
@@ -334,7 +340,9 @@ public final class CausalGraphChangeListener implements TransactionEventListener
     }
 
     private static Variable variableFromNode(Node n) {
-        String id = (String) n.getProperty(PROP_ID);
+        Object rawId = n.getProperty(PROP_ID, null);
+        if (rawId == null) return null;
+        String id = String.valueOf(rawId);
         String name = (String) n.getProperty("name", id);
         boolean observed = (boolean) n.getProperty("observed", Variable.DEFAULT_OBSERVED);
         boolean latent   = (boolean) n.getProperty("latent", Variable.DEFAULT_LATENT);
