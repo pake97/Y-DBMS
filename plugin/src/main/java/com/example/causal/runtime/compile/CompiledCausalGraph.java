@@ -260,24 +260,38 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         Map<String, Map<String, Double>> newWeights = new HashMap<>(old.edgeWeights);
         boolean weightsChanged = false;
         for (ChangeBatch.Edge e : batch.addedEdges()) {
-            Map<String, Double> inner = new HashMap<>(newWeights.getOrDefault(e.to(), Map.of()));
             if (e.weight() != null) {
-                inner.put(e.from(), e.weight());
-            } else {
-                inner.put(e.from(), Variable.DEFAULT_WEIGHT);
+                // A null weight on an added edge means "no weight specified" (keep existing β if any).
+                // We only mutate if a weight was explicitly provided.
+                Map<String, Double> inner = new HashMap<>(newWeights.getOrDefault(e.to(), Map.of()));
+                Double oldW = inner.put(e.from(), e.weight());
+                if (oldW == null || !oldW.equals(e.weight())) {
+                    newWeights.put(e.to(), Collections.unmodifiableMap(inner));
+                    weightsChanged = true;
+                }
             }
-            newWeights.put(e.to(), Collections.unmodifiableMap(inner));
-            weightsChanged = true;
         }
         for (ChangeBatch.Edge e : batch.updatedEdges()) {
             Map<String, Double> inner = new HashMap<>(newWeights.getOrDefault(e.to(), Map.of()));
             if (e.weight() != null) {
-                inner.put(e.from(), e.weight());
+                Double oldW = inner.put(e.from(), e.weight());
+                if (oldW == null || !oldW.equals(e.weight())) {
+                    newWeights.put(e.to(), Collections.unmodifiableMap(inner));
+                    weightsChanged = true;
+                }
             } else {
-                inner.put(e.from(), Variable.DEFAULT_WEIGHT);
+                // A null weight on an updated edge means the property was explicitly removed.
+                // Remove it from the map so weight() naturally falls back to DEFAULT_WEIGHT.
+                Double oldW = inner.remove(e.from());
+                if (oldW != null) {
+                    if (inner.isEmpty()) {
+                        newWeights.remove(e.to());
+                    } else {
+                        newWeights.put(e.to(), Collections.unmodifiableMap(inner));
+                    }
+                    weightsChanged = true;
+                }
             }
-            newWeights.put(e.to(), Collections.unmodifiableMap(inner));
-            weightsChanged = true;
         }
         this.edgeWeights = weightsChanged ? Collections.unmodifiableMap(newWeights) : old.edgeWeights;
         this.compiledAt = Instant.now();
