@@ -278,20 +278,29 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         this.denseForwardAdj = new int[newN][];
         this.denseReverseAdj = new int[newN][];
         for (int i = 0; i < oldN; i++) {
-            this.denseForwardAdj[i] = old.denseForwardAdj[i].clone();
-            this.denseReverseAdj[i] = old.denseReverseAdj[i].clone();
+            this.denseForwardAdj[i] = old.denseForwardAdj[i];
+            this.denseReverseAdj[i] = old.denseReverseAdj[i];
         }
 
         this.topoLayer = Arrays.copyOf(old.topoLayer, newN);
 
         int longsPerNode = (newN + 63) / 64;
         int oldLongsPerNode = (oldN + 63) / 64;
-        this.ancestorBits = new long[newN][longsPerNode];
-        this.descendantBits = new long[newN][longsPerNode];
+        this.ancestorBits = new long[newN][];
+        this.descendantBits = new long[newN][];
 
-        for (int i = 0; i < oldN; i++) {
-            System.arraycopy(old.ancestorBits[i], 0, this.ancestorBits[i], 0, oldLongsPerNode);
-            System.arraycopy(old.descendantBits[i], 0, this.descendantBits[i], 0, oldLongsPerNode);
+        if (longsPerNode == oldLongsPerNode) {
+            for (int i = 0; i < oldN; i++) {
+                this.ancestorBits[i] = old.ancestorBits[i];
+                this.descendantBits[i] = old.descendantBits[i];
+            }
+        } else {
+            for (int i = 0; i < oldN; i++) {
+                this.ancestorBits[i] = new long[longsPerNode];
+                this.descendantBits[i] = new long[longsPerNode];
+                System.arraycopy(old.ancestorBits[i], 0, this.ancestorBits[i], 0, oldLongsPerNode);
+                System.arraycopy(old.descendantBits[i], 0, this.descendantBits[i], 0, oldLongsPerNode);
+            }
         }
         for (Variable v : batch.updatedVariables()) {
             Integer idx = this.nameToIndex.get(v.id());
@@ -306,6 +315,8 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             this.indexToVar[i] = v;
             this.denseForwardAdj[i] = new int[0];
             this.denseReverseAdj[i] = new int[0];
+            this.ancestorBits[i] = new long[longsPerNode];
+            this.descendantBits[i] = new long[longsPerNode];
             this.topoLayer[i] = 0;
         }
 
@@ -346,6 +357,12 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             if (v < minV) minV = v;
             if (u > maxU) maxU = u;
 
+            // Seed the ancestor frontier from old.descendantBits[v] and the descendant frontier 
+            // from old.ancestorBits[u]. For any node z whose ancestor set changes, there is a path 
+            // from some added edge's head to z; taking the last added edge on that path (u'->v'), 
+            // the remainder v'->*z uses only committed edges, so z ∈ old.descendants(v') ∪ {v'}, 
+            // and v' is a head, so z gets flagged. This correctly covers multi-edge batches 
+            // and chains through new nodes.
             needsAncestorUpdate[v >>> 6] |= (1L << (v & 63));
             if (v < oldN) {
                 for (int w = 0; w < oldLongsPerNode; w++) {
@@ -365,7 +382,11 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             if ((needsAncestorUpdate[i >>> 6] & (1L << (i & 63))) == 0) continue;
             
             int maxParentLayer = -1;
-            Arrays.fill(this.ancestorBits[i], 0L);
+            if (i < oldN && longsPerNode == oldLongsPerNode) {
+                this.ancestorBits[i] = new long[longsPerNode];
+            } else {
+                Arrays.fill(this.ancestorBits[i], 0L);
+            }
             for (int p : this.denseReverseAdj[i]) {
                 if (this.topoLayer[p] > maxParentLayer) {
                     maxParentLayer = this.topoLayer[p];
@@ -381,7 +402,11 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         for (int i = maxU; i >= 0; i--) {
             if ((needsDescendantUpdate[i >>> 6] & (1L << (i & 63))) == 0) continue;
 
-            Arrays.fill(this.descendantBits[i], 0L);
+            if (i < oldN && longsPerNode == oldLongsPerNode) {
+                this.descendantBits[i] = new long[longsPerNode];
+            } else {
+                Arrays.fill(this.descendantBits[i], 0L);
+            }
             for (int c : this.denseForwardAdj[i]) {
                 for (int w = 0; w < longsPerNode; w++) {
                     this.descendantBits[i][w] |= this.descendantBits[c][w];
