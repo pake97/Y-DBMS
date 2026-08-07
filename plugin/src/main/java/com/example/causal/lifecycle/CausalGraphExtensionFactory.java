@@ -6,6 +6,7 @@ import org.neo4j.kernel.extension.ExtensionType;
 import org.neo4j.kernel.extension.context.ExtensionContext;
 import org.neo4j.kernel.internal.GraphDatabaseAPI;
 import org.neo4j.kernel.lifecycle.Lifecycle;
+import org.neo4j.kernel.lifecycle.LifecycleAdapter;
 
 /**
  * Neo4j boot hook. Discovered via the service-loader entry
@@ -34,7 +35,8 @@ public final class CausalGraphExtensionFactory
     public Lifecycle newInstance(ExtensionContext context, Dependencies dependencies) {
         String dbName = dependencies.graphDatabaseAPI().databaseName();
         if ("system".equals(dbName)) {
-            return new org.neo4j.kernel.lifecycle.LifecycleAdapter() {};
+            // No-op for the system database since it stores internal Neo4j topology, not user data.
+            return new LifecycleAdapter() {};
         }
         
         return new CausalGraphLifecycle(

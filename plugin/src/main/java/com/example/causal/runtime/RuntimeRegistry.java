@@ -13,6 +13,11 @@ import com.example.causal.api.CausalGraphRuntime;
  * <h2>Testing</h2>
  * Call {@link #setInstance} with a test double or {@code null} in {@code @AfterEach}
  * to prevent snapshot state from leaking between integration tests.
+ *
+ * <h2>Single-Database Assumption</h2>
+ * This registry is currently a process-wide singleton. On Enterprise or Aura setups with
+ * multiple user databases, writes to different databases will incorrectly patch this single
+ * shared snapshot. Future work should key this registry by database name.
  */
 public final class RuntimeRegistry {
 
