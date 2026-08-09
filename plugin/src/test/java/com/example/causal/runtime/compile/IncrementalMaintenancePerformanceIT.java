@@ -1,6 +1,6 @@
 package com.example.causal.runtime.compile;
 
-import com.example.causal.lifecycle.ChangeBatch;
+import com.example.causal.runtime.ChangeBatch;
 import com.example.causal.runtime.model.Variable;
 import org.junit.jupiter.api.Test;
 
@@ -31,6 +31,7 @@ public class IncrementalMaintenancePerformanceIT {
             forwardAdj.get("N" + i).add("N" + (i + 1));
             reverseAdj.get("N" + (i + 1)).add("N" + i);
         }
+        
         Random rng = new Random(42);
         for (int i = 0; i < numNodes; i++) {
             for (int j = i + 2; j < numNodes; j++) {
@@ -44,10 +45,12 @@ public class IncrementalMaintenancePerformanceIT {
         CompiledCausalGraph oldGraph = new CompiledCausalGraph(variables, forwardAdj, reverseAdj, topoOrder, edgeWeights, Instant.now());
 
         System.out.println("\n==================================================");
-        System.out.println("BENCHMARK: Full Recompile");
+        System.out.println("BENCHMARK: Incremental patch()");
         System.out.println("Graph size: " + numNodes + " nodes, ~" + (numNodes * numNodes * 0.05) + " edges");
         System.out.println("==================================================");
 
+        int queries = 20000;
+        
         List<ChangeBatch> batches = List.of(
             ChangeBatch.builder().addedEdge("N499", "N501").build(),
             ChangeBatch.builder().addedEdge("N0", "N999").build()
@@ -55,25 +58,25 @@ public class IncrementalMaintenancePerformanceIT {
 
         for (ChangeBatch b : batches) {
             var e = b.addedEdges().get(0);
-            if (forwardAdj.get(e.from()).contains(e.to()))
+            if (oldGraph.childrenOf(e.from()).contains(e.to()))
                 throw new IllegalStateException("benchmark edge already exists: " + e.from() + "->" + e.to());
         }
 
-        int queries = 2000;
-        System.out.println("Warming up...");
+        // Warm up
         for (ChangeBatch batch : batches) {
-            for (int i = 0; i < 100; i++) {
-                new CompiledCausalGraph(variables, forwardAdj, reverseAdj, topoOrder, edgeWeights, Instant.now());
+            for (int i = 0; i < 1000; i++) {
+                oldGraph.patch(batch);
             }
         }
 
         for (ChangeBatch batch : batches) {
             long start = System.nanoTime();
             for (int i = 0; i < queries; i++) {
-                new CompiledCausalGraph(variables, forwardAdj, reverseAdj, topoOrder, edgeWeights, Instant.now());
+                oldGraph.patch(batch);
             }
             long end = System.nanoTime();
             double ms = (end - start) / 1_000_000.0;
+            
             String edgeStr = batch.addedEdges().get(0).from() + "->" + batch.addedEdges().get(0).to();
             System.out.printf("Patch %-10s : %8.2f ms (%7d ops/sec)\n", edgeStr, ms, (int)(queries / (ms / 1000.0)));
         }
