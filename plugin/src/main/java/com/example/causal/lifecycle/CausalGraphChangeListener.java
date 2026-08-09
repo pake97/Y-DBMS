@@ -234,6 +234,12 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         GraphSnapshot snapshot = runtime.currentSnapshot();
         if (!builtBatch.addedEdges().isEmpty()) {
             CompiledCausalGraph cg = snapshot instanceof CompiledCausalGraph c ? c : null;
+            
+            Set<String> removedArcs = new HashSet<>();
+            for (ChangeBatch.Edge r : builtBatch.removedEdges()) {
+                removedArcs.add(r.from() + "\u0000" + r.to());
+            }
+
             Map<String, List<String>> addedAdj = new HashMap<>();
             for (ChangeBatch.Edge e : builtBatch.addedEdges()) {
                 addedAdj.computeIfAbsent(e.from(), k -> new ArrayList<>()).add(e.to());
@@ -263,6 +269,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
                     if (visited.add(curr)) {
                         if (cg != null && cg.topoIndex(curr) != -1) {
                             for (String child : cg.childrenOf(curr)) {
+                                if (removedArcs.contains(curr + "\u0000" + child)) continue;
                                 if (!visited.contains(child)) stack.push(child);
                             }
                         }
