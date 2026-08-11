@@ -149,4 +149,38 @@ public class IncrementalListenerCypherTest {
         assertNotNull(snapshot2, "Snapshot should be patched in-place after adding weighted edge");
         assertEquals(0.7, snapshot2.weight("A", "C"), 0.0001, "New edge weight should be 0.7");
     }
+
+    @Test
+    void testEdgeReversalCommits() {
+        try (Transaction tx = db.beginTx()) {
+            tx.execute("MATCH (a:Variable {id: 'A'})-[r:CAUSES]->(b:Variable {id: 'B'}) DELETE r CREATE (b)-[:CAUSES {active: true}]->(a)");
+            tx.commit();
+        }
+        CompiledCausalGraph snapshot = (CompiledCausalGraph) runtime.currentSnapshot();
+        // Fallback is fine, we just care that the listener didn't abort the transaction.
+        assertNull(snapshot);
+    }
+
+    @Test
+    void testCycleCreatedBeforeAnyCompileIsRejected() {
+        runtime.invalidate();
+        
+        Exception ex = assertThrows(Exception.class, () -> {
+            try (Transaction tx = db.beginTx()) {
+                tx.execute("CREATE (x:Variable {id: 'X'}), (y:Variable {id: 'Y'}), (x)-[:CAUSES {active:true}]->(y), (y)-[:CAUSES {active:true}]->(x)");
+                tx.commit();
+            }
+        });
+        
+        boolean foundCycle = false;
+        Throwable current = ex;
+        while (current != null) {
+            if (current.getMessage() != null && current.getMessage().contains("cycle")) {
+                foundCycle = true;
+                break;
+            }
+            current = current.getCause();
+        }
+        assertTrue(foundCycle, "Should detect cycle even with no existing snapshot");
+    }
 }
