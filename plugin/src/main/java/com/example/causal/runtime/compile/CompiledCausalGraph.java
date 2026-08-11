@@ -300,7 +300,14 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         this.nameToIndex = new HashMap<>(old.nameToIndex);
         this.indexToVar = Arrays.copyOf(old.indexToVar, newN);
         
-        // Deep copy the jagged arrays so we can mutate them
+        // ── ALIASING INVARIANT ──
+        // Rows are shared with the previous snapshot, never mutated. Any row this 
+        // constructor writes to is either freshly allocated (flagged rows below, 
+        // new nodes, or the widening branch) or replaced wholesale by reference 
+        // (Arrays.copyOf on adjacency). Never write into a row you did not allocate!
+        // 
+        // The adjacency arrays below are safe because the added-edge loop later
+        // replaces denseForwardAdj[u] with a copyOf rather than mutating it in place.
         this.denseForwardAdj = new int[newN][];
         this.denseReverseAdj = new int[newN][];
         for (int i = 0; i < oldN; i++) {
@@ -312,10 +319,11 @@ public final class CompiledCausalGraph implements GraphSnapshot {
 
         int longsPerNode = (newN + 63) / 64;
         int oldLongsPerNode = (oldN + 63) / 64;
+        boolean rowsAliased = (longsPerNode == oldLongsPerNode);
         this.ancestorBits = new long[newN][];
         this.descendantBits = new long[newN][];
 
-        if (longsPerNode == oldLongsPerNode) {
+        if (rowsAliased) {
             for (int i = 0; i < oldN; i++) {
                 this.ancestorBits[i] = old.ancestorBits[i];
                 this.descendantBits[i] = old.descendantBits[i];
@@ -408,7 +416,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             if ((needsAncestorUpdate[i >>> 6] & (1L << (i & 63))) == 0) continue;
             
             int maxParentLayer = -1;
-            if (i < oldN && longsPerNode == oldLongsPerNode) {
+            if (rowsAliased && i < oldN) {
                 this.ancestorBits[i] = new long[longsPerNode];
             } else {
                 Arrays.fill(this.ancestorBits[i], 0L);
@@ -428,7 +436,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         for (int i = maxU; i >= 0; i--) {
             if ((needsDescendantUpdate[i >>> 6] & (1L << (i & 63))) == 0) continue;
 
-            if (i < oldN && longsPerNode == oldLongsPerNode) {
+            if (rowsAliased && i < oldN) {
                 this.descendantBits[i] = new long[longsPerNode];
             } else {
                 Arrays.fill(this.descendantBits[i], 0L);
