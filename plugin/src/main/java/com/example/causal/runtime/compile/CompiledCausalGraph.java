@@ -242,6 +242,8 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     private CompiledCausalGraph(CompiledCausalGraph old, ChangeBatch batch) {
         List<Variable> actualAddedVariables = batch.addedVariables().stream()
                 .filter(v -> !old.variableById.containsKey(v.id()))
+                // Note: (a, b) -> b means last-wins. This is arbitrary (createdNodes order isn't specified),
+                // but harmless since the database-level uniqueness constraint blocks parallel nodes anyway.
                 .collect(Collectors.toMap(Variable::id, v -> v, (a, b) -> b, LinkedHashMap::new))
                 .values().stream().toList();
 

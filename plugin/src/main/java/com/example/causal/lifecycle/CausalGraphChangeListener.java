@@ -18,6 +18,7 @@ import org.neo4j.graphdb.event.LabelEntry;
 import org.neo4j.graphdb.event.PropertyEntry;
 import org.neo4j.graphdb.event.TransactionData;
 import org.neo4j.graphdb.event.TransactionEventListener;
+import org.neo4j.graphdb.Direction;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -132,18 +133,52 @@ public final class CausalGraphChangeListener implements TransactionEventListener
             }
         }
 
-        // Added CAUSES edges (only those with active = true, matching GraphLoader).
+        // Added CAUSES edges. Reject parallel edges to enforce strict schema.
+        // TODO: Deferring the "general version" of parallel edge support.
+        // For now, we enforce a strict invariant (at most one CAUSES edge between any pair)
+        // because it is a superset in safety terms. It rejects parallel edges entirely
+        // rather than risking a cycle sneaking past the deleted-relationships mask.
+        // Group by start node to avoid quadratic scanning for large fan-outs.
+        Map<Node, Set<Relationship>> newEdgesBySource = new HashMap<>();
         for (Relationship r : data.createdRelationships()) {
-            if (r.isType(CAUSES) && isActive(r)) {
-                String from = (String) r.getStartNode().getProperty(PROP_ID, null);
-                String to   = (String) r.getEndNode().getProperty(PROP_ID, null);
-                if (from != null && to != null) {
-                    Double weight = null;
-                    if (r.hasProperty(PROP_WEIGHT)) {
-                        Object w = r.getProperty(PROP_WEIGHT);
-                        if (w instanceof Number n) weight = n.doubleValue();
+            if (r.isType(CAUSES)) {
+                newEdgesBySource.computeIfAbsent(r.getStartNode(), k -> new HashSet<>()).add(r);
+            }
+        }
+
+        for (Map.Entry<Node, Set<Relationship>> entry : newEdgesBySource.entrySet()) {
+            Node startNode = entry.getKey();
+            Set<Relationship> newEdges = entry.getValue();
+
+            // Collect all targets of pre-existing CAUSES edges
+            Set<Node> existingTargets = new HashSet<>();
+            for (Relationship r : startNode.getRelationships(Direction.OUTGOING, CAUSES)) {
+                if (!newEdges.contains(r)) {
+                    existingTargets.add(r.getEndNode());
+                }
+            }
+
+            // Verify new edges don't conflict with existing targets or with each other
+            Set<Node> seenTargets = new HashSet<>();
+            for (Relationship r : newEdges) {
+                Node endNode = r.getEndNode();
+                if (existingTargets.contains(endNode) || !seenTargets.add(endNode)) {
+                    String fromId = (String) startNode.getProperty(PROP_ID, "<unknown>");
+                    String toId = (String) endNode.getProperty(PROP_ID, "<unknown>");
+                    throw new IllegalArgumentException("Parallel edges are forbidden. An edge between " + fromId + " and " + toId + " already exists. Use MERGE to update it.");
+                }
+
+                if (isActive(r)) {
+                    String from = (String) startNode.getProperty(PROP_ID, null);
+                    String to   = (String) endNode.getProperty(PROP_ID, null);
+                    if (from != null && to != null) {
+                        Double weight = null;
+                        if (r.hasProperty(PROP_WEIGHT)) {
+                            Object w = r.getProperty(PROP_WEIGHT);
+                            if (w instanceof Number n) weight = n.doubleValue();
+                        }
+                        batch.addedEdge(from, to, weight);
                     }
-                    batch.addedEdge(from, to, weight);
                 }
             }
         }

@@ -72,19 +72,27 @@ public final class GraphLoader {
         Map<String, Map<String, Double>> edgeWeights = new LinkedHashMap<>();
         Result relResult = tx.execute(
                 "MATCH (a:Variable)-[r:CAUSES]->(b:Variable) " +
-                "WHERE coalesce(r.active, true) = true " +
-                "RETURN a.id AS fromId, b.id AS toId, coalesce(r.weight, " + Variable.DEFAULT_WEIGHT + ") AS weight"
+                "RETURN a.id AS fromId, b.id AS toId, coalesce(r.weight, " + Variable.DEFAULT_WEIGHT + ") AS weight, coalesce(r.active, true) AS active"
         );
+        Set<String> seenEdges = new HashSet<>();
         while (relResult.hasNext()) {
             Map<String, Object> row = relResult.next();
             String fromId = (String) row.get("fromId");
             String toId   = (String) row.get("toId");
 
             if (variableById.containsKey(fromId) && variableById.containsKey(toId)) {
-                double weight = ((Number) row.get("weight")).doubleValue();
-                forwardAdj.computeIfAbsent(fromId, k -> new LinkedHashSet<>()).add(toId);
-                reverseAdj.computeIfAbsent(toId,   k -> new LinkedHashSet<>()).add(fromId);
-                edgeWeights.computeIfAbsent(toId,  k -> new LinkedHashMap<>()).put(fromId, weight);
+                String edgeKey = fromId + "\0" + toId;
+                if (!seenEdges.add(edgeKey)) {
+                    throw new IllegalStateException("Parallel CAUSES edges are forbidden. Multiple edges found between " + fromId + " and " + toId);
+                }
+                
+                boolean active = (boolean) row.get("active");
+                if (active) {
+                    double weight = ((Number) row.get("weight")).doubleValue();
+                    forwardAdj.computeIfAbsent(fromId, k -> new LinkedHashSet<>()).add(toId);
+                    reverseAdj.computeIfAbsent(toId,   k -> new LinkedHashSet<>()).add(fromId);
+                    edgeWeights.computeIfAbsent(toId,  k -> new LinkedHashMap<>()).put(fromId, weight);
+                }
             }
         }
 
