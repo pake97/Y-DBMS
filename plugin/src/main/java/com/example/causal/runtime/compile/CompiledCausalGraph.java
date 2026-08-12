@@ -234,7 +234,8 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         }
         try {
             return new CompiledCausalGraph(this, batch);
-        } catch (IllegalStateException e) {
+        } catch (PatchNotApplicable e) {
+            LOG.fine(() -> "patch declined: " + e.getMessage());
             return null; // Topo or accounting error, fallback to recompile
         }
     }
@@ -255,7 +256,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         for (Variable v : actualAddedVariables) newVarById.put(v.id(), v);
         
         if (newVarById.size() != newN) {
-            throw new IllegalStateException("Accounting slip: expected " + newN + " variables but got " + newVarById.size());
+            throw new PatchNotApplicable("Accounting slip: expected " + newN + " variables but got " + newVarById.size());
         }
         this.variableById = Collections.unmodifiableMap(newVarById);
 
@@ -677,5 +678,11 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             if (v.noiseVariance() != Variable.DEFAULT_NOISE_VARIANCE) return true;
         }
         return false;
+    }
+
+    private static final class PatchNotApplicable extends RuntimeException {
+        PatchNotApplicable(String message) {
+            super(message);
+        }
     }
 }
