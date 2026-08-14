@@ -183,4 +183,72 @@ public class IncrementalListenerCypherTest {
         }
         assertTrue(foundCycle, "Should detect cycle even with no existing snapshot");
     }
+
+    // -------------------------------------------------------------------------
+    // Deletion. These start from a *non-empty* database on purpose: beforeCommit
+    // must not call hasLabel() / isType() / getProperty() on an entity the same
+    // transaction deleted, or Neo4j throws EntityNotFoundException and the user's
+    // transaction is aborted. Every deleted-entity guard therefore has to be
+    // evaluated before any accessor on that entity.
+    // -------------------------------------------------------------------------
+
+    @Test
+    void testDetachDeleteVariableDoesNotAbortTransaction() {
+        assertDoesNotThrow(() -> {
+            try (Transaction tx = db.beginTx()) {
+                tx.execute("MATCH (b:Variable {id: 'B'}) DETACH DELETE b");
+                tx.commit();
+            }
+        }, "Deleting a :Variable must not abort the transaction");
+
+        assertNull(runtime.currentSnapshot(),
+                "Removing a variable is a non-local change, so the snapshot should be invalidated");
+    }
+
+    @Test
+    void testDeleteAllVariablesDoesNotAbortTransaction() {
+        // This is the first statement of dev/seed-dag.cypher, so re-seeding a
+        // populated database exercises exactly this path.
+        assertDoesNotThrow(() -> {
+            try (Transaction tx = db.beginTx()) {
+                tx.execute("MATCH (v:Variable) DETACH DELETE v");
+                tx.commit();
+            }
+        }, "Clearing the causal graph must not abort the transaction");
+
+        try (Transaction tx = db.beginTx()) {
+            runtime.compile(new GraphCompileOptions(tx));
+        }
+        assertEquals(0, ((CompiledCausalGraph) runtime.currentSnapshot()).size(),
+                "Recompiling an emptied graph should yield no variables");
+    }
+
+    @Test
+    void testPropertyUpdateThenDeleteInSameTransaction() {
+        assertDoesNotThrow(() -> {
+            try (Transaction tx = db.beginTx()) {
+                tx.execute("MATCH (b:Variable {id: 'B'}) SET b.latent = true WITH b DETACH DELETE b");
+                tx.commit();
+            }
+        }, "A property update followed by a delete in one transaction must not abort it");
+
+        assertNull(runtime.currentSnapshot(), "Snapshot should be invalidated after the variable is removed");
+    }
+
+    @Test
+    void testCreateThenDeleteInSameTransaction() {
+        assertDoesNotThrow(() -> {
+            try (Transaction tx = db.beginTx()) {
+                tx.execute("CREATE (t:Variable {id: 'TMP'}) WITH t DELETE t");
+                tx.commit();
+            }
+        }, "Creating and deleting a variable in one transaction must not abort it");
+
+        try (Transaction tx = db.beginTx()) {
+            runtime.compile(new GraphCompileOptions(tx));
+        }
+        CompiledCausalGraph snapshot = (CompiledCausalGraph) runtime.currentSnapshot();
+        assertEquals(Set.of("A", "B"), Set.copyOf(snapshot.topoOrder()),
+                "The transient variable should leave no trace in the snapshot");
+    }
 }
