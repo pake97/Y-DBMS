@@ -118,7 +118,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
 
         // Added variables: new :Variable nodes with an id property.
         for (Node n : data.createdNodes()) {
-            if (n.hasLabel(VARIABLE) && n.hasProperty(PROP_ID)) {
+            if (!deletedNodes.contains(n) && n.hasLabel(VARIABLE) && n.hasProperty(PROP_ID)) {
                 batch.addedVariable(variableFromNode(n));
             }
         }
@@ -141,7 +141,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         // Group by start node to avoid quadratic scanning for large fan-outs.
         Map<Node, Set<Relationship>> newEdgesBySource = new HashMap<>();
         for (Relationship r : data.createdRelationships()) {
-            if (r.isType(CAUSES)) {
+            if (!deletedRels.contains(r) && r.isType(CAUSES)) {
                 newEdgesBySource.computeIfAbsent(r.getStartNode(), k -> new HashSet<>()).add(r);
             }
         }
@@ -198,7 +198,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         // Property-change cases for relationships (e.g., flipping r.active or changing weight)
         for (PropertyEntry<Relationship> entry : data.assignedRelationshipProperties()) {
             Relationship r = entry.entity();
-            if (r.isType(CAUSES) && !deletedRels.contains(r) && !createdRels.contains(r)) {
+            if (!deletedRels.contains(r) && !createdRels.contains(r) && r.isType(CAUSES)) {
                 String from = (String) r.getStartNode().getProperty(PROP_ID, null);
                 String to = (String) r.getEndNode().getProperty(PROP_ID, null);
                 if (from == null || to == null) continue;
@@ -227,7 +227,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         }
         for (PropertyEntry<Relationship> entry : data.removedRelationshipProperties()) {
             Relationship r = entry.entity();
-            if (r.isType(CAUSES) && !deletedRels.contains(r)) {
+            if (!deletedRels.contains(r) && r.isType(CAUSES)) {
                 String from = (String) r.getStartNode().getProperty(PROP_ID, null);
                 String to = (String) r.getEndNode().getProperty(PROP_ID, null);
                 if (from == null || to == null) continue;
@@ -241,7 +241,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         Set<Node> updatedNodes = new HashSet<>();
         for (PropertyEntry<Node> entry : data.assignedNodeProperties()) {
             Node n = entry.entity();
-            if (n.hasLabel(VARIABLE) && !deletedNodes.contains(n) && !createdNodes.contains(n)) {
+            if (!deletedNodes.contains(n) && !createdNodes.contains(n) && n.hasLabel(VARIABLE)) {
                 if (!entry.key().equals(PROP_ID)) {
                     updatedNodes.add(n);
                 }
@@ -249,7 +249,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
         }
         for (PropertyEntry<Node> entry : data.removedNodeProperties()) {
             Node n = entry.entity();
-            if (n.hasLabel(VARIABLE) && !deletedNodes.contains(n)) {
+            if (!deletedNodes.contains(n) && n.hasLabel(VARIABLE)) {
                 if (!entry.key().equals(PROP_ID)) {
                     updatedNodes.add(n);
                 }
