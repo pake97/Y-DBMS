@@ -2,11 +2,22 @@ package com.example.causal.runtime.compile;
 
 import com.example.causal.api.GraphSnapshot;
 import com.example.causal.api.VariableRef;
+import com.example.causal.runtime.ChangeBatch;
 import com.example.causal.runtime.model.Variable;
 
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 /**
  * Immutable compiled representation of the causal DAG.
@@ -97,9 +108,6 @@ public final class CompiledCausalGraph implements GraphSnapshot {
 
     private final Instant compiledAt;
     private final Map<String, Variable> variableById;      // TODO(student, tier 2): → dense int[] layout
-    private final Map<String, Set<String>> forwardAdj;     // TODO(student, tier 2): → int[][] forwardAdj
-    private final Map<String, Set<String>> reverseAdj;     // TODO(student, tier 2): → int[][] reverseAdj
-    private final List<String> topoOrder;                  // TODO(student, tier 2): → int[] topoOrder
 
     // ── Linear-Gaussian SEM parameters ───────────────────────────────────────
     /** Edge coefficients β, keyed child → (parent → β). Immutable deep copy. */
@@ -128,9 +136,6 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             Instant compiledAt
     ) {
         this.variableById = Collections.unmodifiableMap(new LinkedHashMap<>(variableById));
-        this.forwardAdj   = Collections.unmodifiableMap(deepCopy(forwardAdj));
-        this.reverseAdj   = Collections.unmodifiableMap(deepCopy(reverseAdj));
-        this.topoOrder    = Collections.unmodifiableList(new ArrayList<>(topoOrder));
         this.edgeWeights  = Collections.unmodifiableMap(deepCopyWeights(edgeWeights));
         this.compiledAt   = compiledAt;
         this.parameterized = computeParameterized();
@@ -140,7 +145,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         this.indexToVar = new Variable[n];
         
         for (int i = 0; i < n; i++) {
-            String id = this.topoOrder.get(i);
+            String id = topoOrder.get(i);
             this.nameToIndex.put(id, i);
             this.indexToVar[i] = this.variableById.get(id);
         }
@@ -150,11 +155,11 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         this.denseReverseAdj = new int[n][];
         
         for (int i = 0; i < n; i++) {
-            String id = this.topoOrder.get(i);
-            Set<String> children = this.forwardAdj.getOrDefault(id, Set.of());
+            String id = topoOrder.get(i);
+            Set<String> children = forwardAdj.getOrDefault(id, Set.of());
             this.denseForwardAdj[i] = children.stream().mapToInt(this.nameToIndex::get).toArray();
             
-            Set<String> parents = this.reverseAdj.getOrDefault(id, Set.of());
+            Set<String> parents = reverseAdj.getOrDefault(id, Set.of());
             this.denseReverseAdj[i] = parents.stream().mapToInt(this.nameToIndex::get).toArray();
         }
         
@@ -202,6 +207,253 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     }
 
     // -------------------------------------------------------------------------
+    // Incremental Maintenance
+    // -------------------------------------------------------------------------
+
+    public CompiledCausalGraph patch(ChangeBatch batch) {
+        if (!batch.removedVariables().isEmpty() || !batch.removedEdges().isEmpty()) {
+            return null; // non-local changes, fallback to recompile
+        }
+        if (batch.isEmpty()) {
+            return this;
+        }
+        for (ChangeBatch.Edge e : batch.addedEdges()) {
+            int u = topoIndex(e.from());
+            int v = topoIndex(e.to());
+            // Topo validation rules:
+            // 1. If u and v are old, and u >= v -> invalid backward edge (fallback)
+            // 2. If u is new and v is old -> invalid backward edge (fallback)
+            // 3. If u and v are new -> creation order isn't guaranteed topological (fallback)
+            // 4. If u is old and v is new -> perfectly valid, v will be appended after u
+            
+            // TODO(future): The proper fix is to topologically sort actualAddedVariables 
+            // (against the batch's own edges) before assigning indices. For now, we fallback.
+            if (u == -1 || (u != -1 && v != -1 && u >= v)) {
+                return null; // Topo order violated or unknown, fallback
+            }
+        }
+        try {
+            return new CompiledCausalGraph(this, batch);
+        } catch (PatchNotApplicable e) {
+            LOG.fine(() -> "patch declined: " + e.getMessage());
+            return null; // Topo or accounting error, fallback to recompile
+        }
+    }
+
+    private CompiledCausalGraph(CompiledCausalGraph old, ChangeBatch batch) {
+        List<Variable> actualAddedVariables = batch.addedVariables().stream()
+                .filter(v -> !old.variableById.containsKey(v.id()))
+                // Note: (a, b) -> b means last-wins. This is arbitrary (createdNodes order isn't specified),
+                // but harmless since the database-level uniqueness constraint blocks parallel nodes anyway.
+                .collect(Collectors.toMap(Variable::id, v -> v, (a, b) -> b, LinkedHashMap::new))
+                .values().stream().toList();
+
+        int oldN = old.variableById.size();
+        int newN = oldN + actualAddedVariables.size();
+
+        Map<String, Variable> newVarById = new LinkedHashMap<>(old.variableById);
+        for (Variable v : batch.updatedVariables()) newVarById.put(v.id(), v);
+        for (Variable v : actualAddedVariables) newVarById.put(v.id(), v);
+        
+        if (newVarById.size() != newN) {
+            throw new PatchNotApplicable("Accounting slip: expected " + newN + " variables but got " + newVarById.size());
+        }
+        this.variableById = Collections.unmodifiableMap(newVarById);
+
+        Map<String, Map<String, Double>> newWeights = new HashMap<>(old.edgeWeights);
+        boolean weightsChanged = false;
+        for (ChangeBatch.Edge e : batch.addedEdges()) {
+            if (e.weight() != null) {
+                // A null weight on an added edge means "no weight specified" (keep existing β if any).
+                // We only mutate if a weight was explicitly provided.
+                Map<String, Double> inner = new HashMap<>(newWeights.getOrDefault(e.to(), Map.of()));
+                Double oldW = inner.put(e.from(), e.weight());
+                if (oldW == null || !oldW.equals(e.weight())) {
+                    newWeights.put(e.to(), Collections.unmodifiableMap(inner));
+                    weightsChanged = true;
+                }
+            }
+        }
+        for (ChangeBatch.Edge e : batch.updatedEdges()) {
+            Map<String, Double> inner = new HashMap<>(newWeights.getOrDefault(e.to(), Map.of()));
+            if (e.weight() != null) {
+                Double oldW = inner.put(e.from(), e.weight());
+                if (oldW == null || !oldW.equals(e.weight())) {
+                    newWeights.put(e.to(), Collections.unmodifiableMap(inner));
+                    weightsChanged = true;
+                }
+            } else {
+                // A null weight on an updated edge means the property was explicitly removed.
+                // Remove it from the map so weight() naturally falls back to DEFAULT_WEIGHT.
+                Double oldW = inner.remove(e.from());
+                if (oldW != null) {
+                    if (inner.isEmpty()) {
+                        newWeights.remove(e.to());
+                    } else {
+                        newWeights.put(e.to(), Collections.unmodifiableMap(inner));
+                    }
+                    weightsChanged = true;
+                }
+            }
+        }
+        this.edgeWeights = weightsChanged ? Collections.unmodifiableMap(newWeights) : old.edgeWeights;
+        this.compiledAt = Instant.now();
+        this.nameToIndex = new HashMap<>(old.nameToIndex);
+        this.indexToVar = Arrays.copyOf(old.indexToVar, newN);
+        
+        // ── ALIASING INVARIANT ──
+        // Rows are shared with the previous snapshot, never mutated. Any row this 
+        // constructor writes to is either freshly allocated (flagged rows below, 
+        // new nodes, or the widening branch) or replaced wholesale by reference 
+        // (Arrays.copyOf on adjacency). Never write into a row you did not allocate!
+        // 
+        // The adjacency arrays below are safe because the added-edge loop later
+        // replaces denseForwardAdj[u] with a copyOf rather than mutating it in place.
+        this.denseForwardAdj = new int[newN][];
+        this.denseReverseAdj = new int[newN][];
+        for (int i = 0; i < oldN; i++) {
+            this.denseForwardAdj[i] = old.denseForwardAdj[i];
+            this.denseReverseAdj[i] = old.denseReverseAdj[i];
+        }
+
+        this.topoLayer = Arrays.copyOf(old.topoLayer, newN);
+
+        int longsPerNode = (newN + 63) / 64;
+        int oldLongsPerNode = (oldN + 63) / 64;
+        boolean rowsAliased = (longsPerNode == oldLongsPerNode);
+        this.ancestorBits = new long[newN][];
+        this.descendantBits = new long[newN][];
+
+        if (rowsAliased) {
+            for (int i = 0; i < oldN; i++) {
+                this.ancestorBits[i] = old.ancestorBits[i];
+                this.descendantBits[i] = old.descendantBits[i];
+            }
+        } else {
+            for (int i = 0; i < oldN; i++) {
+                this.ancestorBits[i] = new long[longsPerNode];
+                this.descendantBits[i] = new long[longsPerNode];
+                System.arraycopy(old.ancestorBits[i], 0, this.ancestorBits[i], 0, oldLongsPerNode);
+                System.arraycopy(old.descendantBits[i], 0, this.descendantBits[i], 0, oldLongsPerNode);
+            }
+        }
+        for (Variable v : batch.updatedVariables()) {
+            Integer idx = this.nameToIndex.get(v.id());
+            if (idx != null) {
+                this.indexToVar[idx] = v;
+            }
+        }
+
+        for (int i = oldN; i < newN; i++) {
+            Variable v = actualAddedVariables.get(i - oldN);
+            this.nameToIndex.put(v.id(), i);
+            this.indexToVar[i] = v;
+            this.denseForwardAdj[i] = new int[0];
+            this.denseReverseAdj[i] = new int[0];
+            this.ancestorBits[i] = new long[longsPerNode];
+            this.descendantBits[i] = new long[longsPerNode];
+            this.topoLayer[i] = 0;
+        }
+
+        int minV = newN;
+        int maxU = -1;
+
+        long[] needsAncestorUpdate = new long[longsPerNode];
+        long[] needsDescendantUpdate = new long[longsPerNode];
+
+        for (int i = oldN; i < newN; i++) {
+            needsAncestorUpdate[i >>> 6] |= (1L << (i & 63));
+            needsDescendantUpdate[i >>> 6] |= (1L << (i & 63));
+        }
+
+        for (ChangeBatch.Edge e : batch.addedEdges()) {
+            int u = this.nameToIndex.get(e.from());
+            int v = this.nameToIndex.get(e.to());
+
+            boolean edgeExists = false;
+            for (int child : this.denseForwardAdj[u]) {
+                if (child == v) {
+                    edgeExists = true;
+                    break;
+                }
+            }
+            if (edgeExists) continue;
+
+            int[] oldF = this.denseForwardAdj[u];
+            int[] newF = Arrays.copyOf(oldF, oldF.length + 1);
+            newF[oldF.length] = v;
+            this.denseForwardAdj[u] = newF;
+
+            int[] oldR = this.denseReverseAdj[v];
+            int[] newR = Arrays.copyOf(oldR, oldR.length + 1);
+            newR[oldR.length] = u;
+            this.denseReverseAdj[v] = newR;
+
+            if (v < minV) minV = v;
+            if (u > maxU) maxU = u;
+
+            // Seed the ancestor frontier from old.descendantBits[v] and the descendant frontier 
+            // from old.ancestorBits[u]. For any node z whose ancestor set changes, there is a path 
+            // from some added edge's head to z; taking the last added edge on that path (u'->v'), 
+            // the remainder v'->*z uses only committed edges, so z ∈ old.descendants(v') ∪ {v'}, 
+            // and v' is a head, so z gets flagged. This correctly covers multi-edge batches 
+            // and chains through new nodes.
+            needsAncestorUpdate[v >>> 6] |= (1L << (v & 63));
+            if (v < oldN) {
+                for (int w = 0; w < oldLongsPerNode; w++) {
+                    needsAncestorUpdate[w] |= old.descendantBits[v][w];
+                }
+            }
+
+            needsDescendantUpdate[u >>> 6] |= (1L << (u & 63));
+            if (u < oldN) {
+                for (int w = 0; w < oldLongsPerNode; w++) {
+                    needsDescendantUpdate[w] |= old.ancestorBits[u][w];
+                }
+            }
+        }
+
+        for (int i = minV; i < newN; i++) {
+            if ((needsAncestorUpdate[i >>> 6] & (1L << (i & 63))) == 0) continue;
+            
+            int maxParentLayer = -1;
+            if (rowsAliased && i < oldN) {
+                this.ancestorBits[i] = new long[longsPerNode];
+            } else {
+                Arrays.fill(this.ancestorBits[i], 0L);
+            }
+            for (int p : this.denseReverseAdj[i]) {
+                if (this.topoLayer[p] > maxParentLayer) {
+                    maxParentLayer = this.topoLayer[p];
+                }
+                for (int w = 0; w < longsPerNode; w++) {
+                    this.ancestorBits[i][w] |= this.ancestorBits[p][w];
+                }
+                this.ancestorBits[i][p >>> 6] |= (1L << (p & 63));
+            }
+            this.topoLayer[i] = maxParentLayer + 1;
+        }
+
+        for (int i = maxU; i >= 0; i--) {
+            if ((needsDescendantUpdate[i >>> 6] & (1L << (i & 63))) == 0) continue;
+
+            if (rowsAliased && i < oldN) {
+                this.descendantBits[i] = new long[longsPerNode];
+            } else {
+                Arrays.fill(this.descendantBits[i], 0L);
+            }
+            for (int c : this.denseForwardAdj[i]) {
+                for (int w = 0; w < longsPerNode; w++) {
+                    this.descendantBits[i][w] |= this.descendantBits[c][w];
+                }
+                this.descendantBits[i][c >>> 6] |= (1L << (c & 63));
+            }
+        }
+
+        this.parameterized = computeParameterized();
+    }
+
+    // -------------------------------------------------------------------------
     // GraphSnapshot
     // -------------------------------------------------------------------------
 
@@ -227,17 +479,25 @@ public final class CompiledCausalGraph implements GraphSnapshot {
 
     /** Direct parents (causes) of the variable with the given id. */
     public Set<String> parentsOf(String id) {
-        return reverseAdj.getOrDefault(id, Set.of());
+        int idx = topoIndex(id);
+        if (idx == -1) return Set.of();
+        Set<String> parents = new LinkedHashSet<>();
+        for (int p : denseReverseAdj[idx]) parents.add(indexToVar[p].id());
+        return Collections.unmodifiableSet(parents);
     }
 
     /** Direct children (effects) of the variable with the given id. */
     public Set<String> childrenOf(String id) {
-        return forwardAdj.getOrDefault(id, Set.of());
+        int idx = topoIndex(id);
+        if (idx == -1) return Set.of();
+        Set<String> children = new LinkedHashSet<>();
+        for (int c : denseForwardAdj[idx]) children.add(indexToVar[c].id());
+        return Collections.unmodifiableSet(children);
     }
 
     /** Topological order of variable ids, sources first. */
     public List<String> topoOrder() {
-        return topoOrder;
+        return Arrays.stream(indexToVar).map(Variable::id).toList();
     }
 
     /**
@@ -255,6 +515,14 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     /** Descendant bitset of the variable at {@code denseIndex} (defensive copy — the snapshot stays immutable). */
     public long[] getDescendantBits(int denseIndex) {
         return descendantBits[denseIndex].clone();
+    }
+
+    /**
+     * Tests if variable {@code v} is reachable from variable {@code u} in O(1) time
+     * without making a defensive copy of the bitset.
+     */
+    public boolean reaches(int u, int v) {
+        return (descendantBits[u][v >>> 6] & (1L << (v & 63))) != 0;
     }
 
     public String idForIndex(int denseIndex) {
@@ -324,26 +592,30 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         sb.append("\n║           CompiledCausalGraph — structure dump           ║");
         sb.append("\n╚══════════════════════════════════════════════════════════╝");
         sb.append("\n  variables : ").append(variableById.size());
-        sb.append("\n  edges     : ").append(forwardAdj.values().stream().mapToInt(Set::size).sum());
+        int edgeCount = 0;
+        for (int[] children : denseForwardAdj) edgeCount += children.length;
+        sb.append("\n  edges     : ").append(edgeCount);
         sb.append("\n  compiled  : ").append(compiledAt);
 
+        List<String> topoList = topoOrder();
+
         sb.append("\n\n── Topological order (index : id) ──────────────────────────");
-        for (int i = 0; i < topoOrder.size(); i++) {
-            String id = topoOrder.get(i);
+        for (int i = 0; i < topoList.size(); i++) {
+            String id = topoList.get(i);
             Variable v = variableById.get(id);
             sb.append(String.format("%n  [%2d]  %-30s  observed=%-5b  latent=%b",
                     i, id, v.observed(), v.latent()));
         }
 
         sb.append("\n\n── Forward adjacency (id → children) ───────────────────────");
-        for (String id : topoOrder) {
-            Set<String> children = forwardAdj.getOrDefault(id, Set.of());
+        for (String id : topoList) {
+            Set<String> children = childrenOf(id);
             sb.append(String.format("%n  %-30s →  %s", id, children.isEmpty() ? "(none)" : children));
         }
 
         sb.append("\n\n── Reverse adjacency (id → parents) ────────────────────────");
-        for (String id : topoOrder) {
-            Set<String> parents = reverseAdj.getOrDefault(id, Set.of());
+        for (String id : topoList) {
+            Set<String> parents = parentsOf(id);
             sb.append(String.format("%n  %-30s ←  %s", id, parents.isEmpty() ? "(none)" : parents));
         }
 
@@ -361,13 +633,13 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         if (parameterized) {
             sb.append("\n\n── SEM parameters (linear-Gaussian) ────────────────────────");
             sb.append("\n  Per-variable (intercept μ₀, noise σ²):");
-            for (String id : topoOrder) {
+            for (String id : topoList) {
                 Variable v = variableById.get(id);
                 sb.append(String.format("%n    %-30s  intercept=%.4f  noise=%.4f",
                         id, v.intercept(), v.noiseVariance()));
             }
             sb.append("\n  Edge weights (from → to : β):");
-            for (String to : topoOrder) {
+            for (String to : topoList) {
                 Map<String, Double> byParent = edgeWeights.getOrDefault(to, Map.of());
                 for (String from : parentsOf(to)) {
                     double w = byParent.getOrDefault(from, 1.0);
@@ -381,14 +653,6 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     }
 
     // -------------------------------------------------------------------------
-
-    private static Map<String, Set<String>> deepCopy(Map<String, Set<String>> src) {
-        Map<String, Set<String>> copy = new LinkedHashMap<>();
-        for (Map.Entry<String, Set<String>> e : src.entrySet()) {
-            copy.put(e.getKey(), Collections.unmodifiableSet(new LinkedHashSet<>(e.getValue())));
-        }
-        return copy;
-    }
 
     /** Deep-copy edge weight maps into an immutable structure. */
     private static Map<String, Map<String, Double>> deepCopyWeights(Map<String, Map<String, Double>> src) {
@@ -414,5 +678,11 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             if (v.noiseVariance() != Variable.DEFAULT_NOISE_VARIANCE) return true;
         }
         return false;
+    }
+
+    private static final class PatchNotApplicable extends RuntimeException {
+        PatchNotApplicable(String message) {
+            super(message);
+        }
     }
 }

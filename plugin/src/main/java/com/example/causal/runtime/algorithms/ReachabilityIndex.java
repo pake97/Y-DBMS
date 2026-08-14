@@ -119,8 +119,12 @@ public final class ReachabilityIndex {
 
     /**
      * True if there is a directed path {@code from → … → to}.
+     * Executes in O(1) time by directly querying the compiled reachability bitset.
      */
     public boolean hasDirectedPath(String from, String to) {
-        return descendants(from).contains(to);
+        int u = graph.topoIndex(from);
+        int v = graph.topoIndex(to);
+        if (u == -1 || v == -1) return false;
+        return graph.reaches(u, v);
     }
 }
