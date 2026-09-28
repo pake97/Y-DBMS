@@ -125,7 +125,7 @@ class DslPluginE2ETest {
         try (var session = driver.session()) {
             long incoming = session.run(
                     "MATCH (:Variable)-[r:CAUSES]->(:Variable {id:'Treatment'}) " +
-                    "WHERE r.active = true RETURN count(r) AS n")
+                    "WHERE coalesce(r.active, true) = true RETURN count(r) AS n")
                 .single().get("n").asLong();
             assertEquals(2L, incoming, "do() must not delete persisted edges into Treatment");
         }

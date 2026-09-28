@@ -1,0 +1,137 @@
+%% ============================================================================
+%% Section: Background and Problem
+%% ============================================================================
+\section{Background and Problem Statement}\label{sec:bg}
+
+In this section, we introduce the preliminary notions needed as basic
+ingredients in our framework: causal DAGs and their property-graph encoding,
+the catalog of structural queries, and the data-engineering problem we
+address.
+
+\subsection{Causal DAGs and their property-graph encoding}\label{sec:bg:dag}
+
+\begin{definition}[Causal DAG]
+A causal DAG is a directed acyclic graph $G=(V,E)$ where $V$ is a set of
+random variables and $E \subseteq V \times V$ is a set of edges such that
+$X \rightarrow Y \in E$ asserts that $X$ is a direct cause of $Y$ relative to
+the other variables in $V$~\cite{pearl2009causality}. A function
+$\lambda: V \rightarrow \{\textit{observed}, \textit{latent}\}$ assigns to
+each variable whether it is measured.
+\end{definition}
+
+Latent variables are retained in the model because they change which
+conditional independencies hold and which effects are identifiable, even
+though no data is ever assigned to them. We write $\pa(X)$, $\ch(X)$, $\an(X)$,
+and $\de(X)$ for the parents, children, ancestors, and descendants of $X$;
+ancestors and descendants are the transitive closures of parents and children
+and exclude $X$ itself. For instance, in Fig.~\ref{fig:example}
+$\pa(\textit{onset\_covid19}) = \{\textit{exposure\_sarscov2},
+\textit{access\_tests}, \textit{age}, \textit{susceptibility}\}$ and
+$\an(\textit{reported\_cases})$ contains every drawn variable except
+\textit{reported\_cases} itself.
+
+\noindent\textbf{Property-graph encoding.} Causal4j stores the DAG as a native
+property graph. Each variable is a node
+$(:\textsf{Variable}\;\{\textsf{id},\ \textsf{name},\ \textsf{observed},\ \textsf{latent}\})$
+and each direct cause is a relationship
+$(:\textsf{Variable})\text{-}[:\textsf{CAUSES}\;\{\textsf{active},\ \textsf{weight}\}]\!\rightarrow\!(:\textsf{Variable})$.
+The \textsf{id} property is the canonical key; \textsf{active} lets a curator
+toggle an edge without deleting it, and only edges with
+$\textsf{active}=\text{true}$ participate in the model; \textsf{weight}
+carries an optional structural coefficient used by the quantitative layer
+(Section~\ref{sec:quant}) and ignored by the structural queries. This
+encoding keeps the causal model in the database, co-located and jointly
+queryable with any other graph data, rather than in a transient in-memory
+object owned by an external tool.
+
+\subsection{The causal query catalog}\label{sec:bg:catalog}
+
+Analysts interrogate the DAG through a small and well-established catalog of
+structural queries, which we group by the reasoning they support.
+
+\noindent\textbf{Reachability queries} return $\pa$, $\ch$, $\an$, and $\de$
+of a variable, and test whether a directed path $X \rightarrow \cdots
+\rightarrow Y$ exists. They underpin every other query.
+
+\noindent\textbf{Path-role queries} classify the variables that lie between a
+treatment $T$ and an outcome $Y$. A \textit{mediator} lies on a directed path
+$T \rightarrow \cdots \rightarrow Y$, i.e., it belongs to
+$\de(T) \cap \an(Y)$; a \textit{confounder} is a common cause,
+i.e., a variable in $\an(T) \cap \an(Y)$; a \textit{collider} between $X$ and
+$Y$ is a variable $Z \notin \an(X) \cup \an(Y)$ with one parent in
+$\de(X) \cup \{X\}$ and one parent in $\de(Y) \cup \{Y\}$, i.e., a variable
+at which a path from $X$ and a path from $Y$ meet head to head. In
+Fig.~\ref{fig:example}, \textit{covid19\_burden} is a confounder of
+$T$ and $Y$, \textit{exposure\_sarscov2} and \textit{onset\_covid19} are
+mediators, and \textit{onset\_covid19} is a collider between \textit{age} and
+\textit{susceptibility}.
+
+\noindent\textbf{Independence queries} test d-separation.
+
+\begin{definition}[d-separation]
+Let $X, Y \in V$ and $Z \subseteq V \setminus \{X,Y\}$. A path between $X$ and
+$Y$ is blocked by $Z$ if it contains a non-collider that belongs to $Z$, or a
+collider such that neither the collider nor any of its descendants belongs to
+$Z$. $X$ and $Y$ are d-separated given $Z$, written $X \dsep Y \mid Z$, if
+every path between them is blocked by $Z$~\cite{pearl2009causality}.
+\end{definition}
+
+D-separation is the graphical criterion for conditional independence and is
+not plain reachability: adding a variable to $Z$ can block one path and, when
+that variable is a collider or one of its descendants, open another. In
+Fig.~\ref{fig:example}, $\textit{age} \dsep \textit{susceptibility} \mid
+\emptyset$ holds, while conditioning on \textit{reported\_cases} opens the
+path through the collider \textit{onset\_covid19}.
+
+\noindent\textbf{Identification queries} decide whether the causal effect of
+$T$ on $Y$ can be estimated from observational data by covariate adjustment
+and, if so, return an adjustment set. We adopt the generalized adjustment
+criterion~\cite{shpitser2010validity,perkovic2018complete}, which is complete
+for DAGs and is the criterion implemented by reference
+tools~\cite{textor2016dagitty}.
+
+\begin{definition}[Adjustment criterion]
+Let $T, Y \in V$ with $Y \in \de(T)$. The causal nodes are
+$\cn(T,Y) = (\de(T) \cap \an(Y)) \cup \{Y\}$, i.e., the non-treatment
+variables on directed paths from $T$ to $Y$, and the forbidden set is
+$\forb(T,Y) = \de(\cn(T,Y)) \cup \cn(T,Y) \cup \{T\}$. The proper backdoor
+graph $G^{\mathit{pbd}}_{T,Y}$ is $G$ without the edges $T \rightarrow C$ for
+$C \in \cn(T,Y)$. A set $Z \subseteq V$ satisfies the adjustment criterion
+relative to $(T,Y)$ if $Z \cap \forb(T,Y) = \emptyset$ and
+$T \dsep Y \mid Z$ holds in $G^{\mathit{pbd}}_{T,Y}$.
+\end{definition}
+
+The criterion has a constructive form that we exploit in
+Section~\ref{sec:index}: the effect is identifiable by adjustment if and only
+if the canonical set $\adj(T,Y) = \an(\{T,Y\}) \setminus (\forb(T,Y) \cup
+\{T,Y\})$ satisfies the criterion~\cite{vanderzander2019separators}. In
+Fig.~\ref{fig:example}, $\{\textit{covid19\_burden}\}$ satisfies the
+criterion for $(\textit{interventions}, \textit{reported\_cases})$, while
+\textit{mobility} is forbidden since it lies on a directed path from $T$ to
+$Y$. Listing all inclusion-minimal sets that satisfy the criterion is the most
+expensive query of the catalog, since each candidate is validated by a
+d-separation test.
+
+\subsection{Problem statement}\label{sec:bg:problem}
+
+We target the following data-engineering problem: supporting the causal query
+catalog as a first-class workload inside a graph DBMS. Concretely, a solution
+has to meet four requirements.
+\begin{itemize}
+  \item \textbf{R1 (Expressiveness).} A declarative interface in which each
+  catalog query is a single statement, close to how analysts phrase causal
+  questions, that compiles to physical operators over the graph store.
+  \item \textbf{R2 (Efficiency).} Structural queries answered without
+  re-traversing the stored graph on every call, so that the reachability and
+  path-role operators are sublinear in graph size and identification issues a
+  bounded number of conditioning-aware traversals.
+  \item \textbf{R3 (Correctness).} Results faithful to the graphical semantics
+  above, in particular a conditioning-aware d-separation test and an
+  adjustment criterion that is complete for DAGs.
+  \item \textbf{R4 (Maintainability).} The accelerating structure kept
+  consistent under edge and variable updates without full recomputation, since
+  curated causal graphs change continually.
+\end{itemize}
+None of these is served by exporting the DAG to an external library: R2 and
+R4 in particular are database concerns (indexing, query processing, and
+incremental maintenance), which is why we address them inside the DBMS.

@@ -1,0 +1,208 @@
+%% ============================================================================
+%% Section: Indexing and Query Processing (CORE)
+%% Owns Table tab:complexity and Fig fig:index.
+%% Design follows CODE-PLAN.md WP1 (layout, closures) and WP2 (algorithms).
+%% ============================================================================
+\section{Indexing and Query Processing}\label{sec:index}
+
+This section is the core of the paper. We present the physical layout the
+snapshot compiles to (Section~\ref{sec:index:layout}), the precomputed
+reachability closures that accelerate every structural query
+(Section~\ref{sec:index:bitsets}), and the query-processing algorithms built
+on them: reachability and path roles (Section~\ref{sec:index:reach}),
+conditioning-aware d-separation (Section~\ref{sec:index:dsep}), and
+identification by adjustment (Section~\ref{sec:index:adj}).
+Table~\ref{tab:complexity} summarizes the per-operator cost against a
+map-of-sets baseline, distinguishing the operators that become sublinear from
+those that keep a linear traversal with a smaller constant.
+
+\subsection{Physical layout}\label{sec:index:layout}
+
+The snapshot's variables are assigned dense integer indices $0..n-1$ through a
+\textsf{name}$\to$\textsf{index} map, so that every downstream structure is an
+array rather than a hash map (Fig.~\ref{fig:index}). Edges are stored as
+compressed sparse rows: a forward and a reverse offset/target array pair, so
+that the children of $i$ are the slice
+$\textsf{fwdTarget}[\textsf{fwdOffset}[i] .. \textsf{fwdOffset}[i{+}1])$ and
+the parents of $i$ the symmetric slice of the reverse pair, giving
+cache-friendly, allocation-free neighbor iteration. The topological order is
+stored as an \texttt{int[]} together with its inverse, and each node carries
+its layer $\textsf{layer}[i]$ (0 for sources, otherwise one more than the
+maximum layer of its parents), which lets a traversal prune any neighbor that
+cannot lie on a path between two nodes by a layer comparison. This replaces
+the baseline representation, a \lstinline[style=causaldsl]|Map<String,Set<String>>|
+adjacency with string-keyed lookups and per-query depth-first search, whose
+every structural query costs an $O(|V|+|E|)$ traversal with hashing and
+boxing overhead.
+
+\subsection{Reachability closures as bitsets}\label{sec:index:bitsets}
+
+On top of the dense layout we precompute, for every variable, its ancestor set
+and its descendant set as fixed-width bitsets
+$\textsf{anc}[i], \textsf{des}[i] \in \{0,1\}^n$ packed into
+$w = \lceil n/64 \rceil$ machine words. The ancestor closures are filled in a
+single forward-topological sweep with the recurrence
+\[
+  \textsf{anc}[i] \;=\; \bigcup_{p \in \pa(i)} \bigl(\textsf{anc}[p] \cup \{p\}\bigr),
+\]
+and the descendant closures symmetrically in reverse-topological order. Each
+sweep performs one word-parallel union per edge, so the build costs
+$O((|V|+|E|)\, w)$ time and the two closures occupy $2\,|V|\,w$ words of
+space, i.e., $O(|V|^2/64)$. This is a deliberate space-for-time trade: it
+turns reachability from a traversal into a bit test and, more importantly for
+the causal workload, delivers whole ancestor and descendant sets as single
+array reads. We discuss when the trade stops paying at the end of this
+section.
+
+\begin{figure}[t]\centering
+  \resizebox{\linewidth}{!}{\input{figures/index-layout}}
+  \caption{Compiled index layout for a small fragment. Variables map to dense
+  indices; forward and reverse CSR arrays store adjacency; a topological order
+  and a per-node layer drive pruning; per-node ancestor and descendant bitsets
+  ($\lceil n/64\rceil$ words each) are filled in forward- and
+  reverse-topological order.}
+  \label{fig:index}
+\end{figure}
+
+\subsection{Reachability and path-role queries}\label{sec:index:reach}
+
+With the closures in hand the reachability operators are immediate: $\an(X)$
+and $\de(X)$ are one array read, and a directed path from $X$ to $Y$ exists if
+and only if bit $Y$ is set in $\textsf{des}[X]$, an $O(1)$ test. The path-role
+operators reduce to bitset algebra over the closures:
+{\small
+\begin{align*}
+  \text{confounders}(T,Y) &= \textsf{anc}[T] \cap \textsf{anc}[Y], \\
+  \text{mediators}(T,Y)   &= \textsf{des}[T] \cap \textsf{anc}[Y], \\
+  \cn(T,Y)   &= \text{mediators}(T,Y) \cup \{Y\}, \\
+  \forb(T,Y) &= \{T\} \cup \cn(T,Y) \cup \textstyle\bigcup_{C \in \cn(T,Y)} \textsf{des}[C], \\
+  \adj(T,Y)  &= (\textsf{anc}[T] \cup \textsf{anc}[Y]) \\
+             &\qquad \setminus (\forb(T,Y) \cup \{T,Y\}).
+\end{align*}}
+Each of the first three is $O(w)$ word operations; the forbidden set costs
+one union per causal node, $O(|\cn(T,Y)|\, w)$, and the canonical set two
+more word operations. Colliders between $X$ and $Y$ are the variables outside
+$\textsf{anc}[X] \cup \textsf{anc}[Y]$ having one parent in
+$\textsf{des}[X] \cup \{X\}$ and one in $\textsf{des}[Y] \cup \{Y\}$, which
+is one bit test per parent of each candidate. The variables on backdoor paths
+are found by a breadth-first search on the skeleton starting from $\pa(T)$
+that never enters $\forb(T,Y)$, with the visited set as a bitset. In the
+running example, $\text{confounders}(\textit{interventions},
+\textit{reported\_cases})$ is a single intersection returning
+\textit{covid19\_burden}, and $\forb$ contains \textit{mobility},
+\textit{exposure\_sarscov2}, \textit{onset\_covid19}, and their descendants.
+
+\subsection{Conditioning-aware d-separation}\label{sec:index:dsep}
+
+D-separation is not reachability: adding a variable to the conditioning set
+$Z$ can block one path and, when that variable is a collider or one of its
+descendants, open another. The test must follow edge orientation and the role
+of each node under $Z$, which we do with the Bayes-Ball
+procedure~\cite{shachter1998bayesball}. A search propagates balls from $X$,
+tracking for each visited node whether it was entered from a parent or from a
+child; at each node the admissible continuations depend on whether the node is
+in $Z$: a node in $Z$ entered from a parent bounces the ball back to its
+parents and blocks it otherwise, while a node outside $Z$ passes a ball
+entered from a parent to its children and a ball entered from a child to both
+its parents and its children. $X$ and $Y$ are d-separated given $Z$ exactly
+when no ball reaches $Y$. The procedure is conditioning-aware by construction
+and visits each (node, direction) state at most once, so its cost is
+$O(|V|+|E|)$ in the worst case. Bitsets do not change this bound. However,
+they change the constant in two ways. First, $X$, $Y$, $Z$, the two visited
+sets, and the set of nodes whose outgoing edges are cut are all bitsets, so
+membership is one word test and the traversal allocates nothing. Second,
+d-separation of $X$ and $Y$ given $Z$ depends only on the subgraph induced by
+$\an(X \cup Y \cup Z) \cup X \cup Y \cup Z$~\cite{geiger1990identifying}, and
+that set is one union of closures: the traversal is masked to it and never
+enqueues a node outside, which on sparse DAGs with small $Z$ prunes most of
+the graph. Section~\ref{sec:eval} measures the effect of masking separately
+from the effect of the representation. A flag cutting the outgoing edges of
+the treatment towards its causal nodes turns the same routine into the
+separation test in the proper backdoor graph used next.
+
+\subsection{Identification by adjustment}\label{sec:index:adj}
+
+Identification asks whether the effect of $T$ on $Y$ is estimable by covariate
+adjustment and, if so, for one or all minimal adjustment sets. A naive
+approach enumerates candidate sets and validates each with a d-separation
+test; since the number of candidates is exponential in $|V|$, no speed-up of
+the inner test makes it scale. We instead build on the constructive results
+of van der Zander et al.~\cite{vanderzander2014constructing,vanderzander2019separators},
+whose steps consume exactly the sets the index stores.
+
+\noindent\textbf{Decision.} The effect is identifiable by adjustment if and
+only if the canonical set $\adj(T,Y)$ satisfies the adjustment criterion.
+Since $\adj(T,Y)$ is disjoint from $\forb(T,Y)$ by construction, the decision
+is one closure construction ($O(|\cn(T,Y)|\,w)$ word operations) followed by
+one masked Bayes-Ball run in the proper backdoor graph. This is the default of
+\lstinline[style=causaldsl]|IDENTIFY EFFECT|: a query with no open backdoor
+path returns after a single traversal, and so does a query on a graph with
+thousands of variables.
+
+\noindent\textbf{Enumeration.} Minimal adjustment sets are minimal separators
+of $T$ and $Y$ in the proper backdoor graph restricted to the allowed
+variables $R = V \setminus (\forb(T,Y) \cup \{T,Y\})$. We implement the
+separator framework of~\cite{vanderzander2019separators} in three routines.
+(1) $\textsc{FindSep}(I,R)$ returns $\bigl(\an(\{T,Y\} \cup I) \cap R\bigr)
+\setminus \{T,Y\}$ if that set separates $T$ and $Y$, and reports that no
+separator containing $I$ within $R$ exists otherwise; the candidate is one
+union of closures and the check one traversal.
+(2) $\textsc{FindMinSep}(I,R)$ shrinks the result of \textsc{FindSep} to an
+inclusion-minimal separator by two reachability passes in the moralized
+ancestral graph of $T$, $Y$, and the candidate, keeping only the candidate
+variables reachable from $T$ and then from $Y$; the ancestral graph is the
+mask of the previous section and moralization is local to it.
+(3) $\textsc{ListMinSep}(I,R)$ enumerates all minimal separators by
+branching on one allowed variable $v$ at a time, either forcing it into $I$
+or removing it from $R$, and pruning a branch as soon as \textsc{FindMinSep}
+reports that no separator exists in it. Every leaf emits one minimal set and
+every internal node performs a bounded number of closure unions and
+traversals, so the enumeration runs with polynomial
+delay~\cite{vanderzander2019separators}: the time between two consecutive
+answers is polynomial in $|V|$ regardless of how many answers there are.
+\lstinline[style=causaldsl]|RETURN ADJUSTMENT SETS| streams the result of
+\textsc{ListMinSep} with an optional limit, and \textsc{FindMinSep} alone
+answers a request for a single minimal set.
+
+\begin{table}[t]\centering
+\caption{Per-operator cost of the map-of-sets baseline with per-query DFS and
+of the bitset index, with $w = \lceil |V|/64 \rceil$, $c = |\cn(T,Y)|$, and
+$V_m, E_m$ the nodes and edges of the ancestral mask. Tier (a) operators are sublinear;
+tier (b) keeps a linear traversal with bitset membership and ancestral
+masking; tier (c) replaces exponential enumeration with a bounded number of
+tier (a) and (b) steps per answer.}
+\label{tab:complexity}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llll@{}}
+\toprule
+Operator & Baseline & Index & Tier \\
+\midrule
+ancestors / descendants & $O(|V|{+}|E|)$ & $O(w)$ & (a) \\
+directed path test      & $O(|V|{+}|E|)$ & $O(1)$ & (a) \\
+confounders / mediators & $O(|V|{+}|E|)$ & $O(w)$ & (a) \\
+forbidden / canonical set & $O(c(|V|{+}|E|))$ & $O(c\,w)$ & (a) \\
+colliders               & $O(|V|{+}|E|)$ & $O(|E|)$ bit tests & (a) \\
+d-separation (masked)   & $O(|V|{+}|E|)$ & $O(|V_m|{+}|E_m|)$ & (b) \\
+identifiability decision & $O(2^{|V|})$ tests & $O(c\,w)$ + 1 test & (c) \\
+minimal sets (each)     & $O(2^{|V|})$ tests & poly. delay & (c) \\
+\midrule
+index space             & $O(|V|{+}|E|)$ & $O(|V|{+}|E| + |V|\,w)$ & \\
+index build             & $O(|V|{+}|E|)$ & $O((|V|{+}|E|)\,w)$ & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{When closures stop paying.} The closures cost $2|V|w$ words:
+about 25~MB for $|V| = 10^4$ and about 2.5~GB for $|V| = 10^5$. For DAGs
+beyond a configured memory budget the snapshot keeps only the CSR layout and
+the layer array, and answers reachability by a layer-pruned depth-first search
+that never follows a neighbor whose layer lies outside the interval between
+the two endpoints; path-role and identification operators then run over
+sets computed on demand, at the baseline cost of Table~\ref{tab:complexity}
+minus the hashing overhead. The choice is made once at compile time from
+$|V|$ and the budget, and Section~\ref{sec:eval} reports the latency and
+memory of both branches so that the crossover is a measured quantity rather
+than a guess. Causal DAGs curated by domain experts are, in our experience,
+well below the crossover: the largest reference network we use has
+$|V| = 1041$ and its closures fit in about 280~KB.

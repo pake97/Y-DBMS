@@ -1,0 +1,67 @@
+%% ============================================================================
+%% Section: Incremental Index Maintenance
+%% Included from main.tex via \input{sections/incremental}
+%% Faithful to lifecycle/CausalGraphChangeListener.java, ChangeBatch.java,
+%% CausalGraphLifecycle.java. See the status note on what is implemented vs.
+%% designed.
+%% ============================================================================
+\section{Incremental Index Maintenance}\label{sec:incr}
+
+A curated causal graph is edited continually, an edge is added as evidence
+accrues, a variable is reclassified as latent, an edge is deactivated pending
+review. Requirement R4 asks that the compiled index survive these edits without
+a full recompilation after every change. This section describes how Causal4j
+observes graph mutations and keeps the snapshot consistent.
+
+\paragraph{Observing changes}
+The plugin registers a transaction-event listener, scoped to the database for its
+lifetime, that sees every committing write. Before a transaction commits, the
+listener inspects the transaction data and, if it touches the causal schema,
+distills the change into a compact \emph{change batch}: the ids of created and
+deleted \textsf{Variable} nodes and the endpoint pairs of created and deleted
+\textsf{CAUSES} edges. Transactions that touch no causal schema are rejected by a
+cheap guard and cost nothing. The pre-commit hook is also the natural place to
+\emph{validate}: because a well-formed causal model must remain acyclic, an edge
+insertion that would close a cycle can be rejected here, aborting the offending
+transaction rather than admitting an invalid model into the index. The batch is
+handed to the post-commit hook, which applies it to the runtime once the write is
+durable.
+
+\paragraph{Incremental patch}
+Given a change batch, the closures of \S\ref{sec:index:bitsets} can be maintained
+locally rather than rebuilt. Inserting an edge $u\!\to\!v$ (having checked it
+introduces no cycle) extends the CSR adjacency and then propagates closures over
+only the \emph{affected cone}: $u$ and its ancestors gain $v$ and its descendants
+as new descendants, and symmetrically $v$ and its descendants gain $u$ and its
+ancestors as new ancestors. Concretely, $\textsf{descendantBits}[u]\cup\{v\}$ is
+OR-ed into the descendant bitset of every ancestor of $u$, and the dual update is
+applied for ancestors; nodes outside the cone are untouched, so the work is
+bounded by the size of the affected region rather than by $|V|$. Adding or
+removing a variable allocates or frees a dense index and scrubs its incident
+edges. A property flip on an edge's \textsf{active} flag is treated as an edge
+insertion or deletion, and a flip of a variable's \textsf{latent} flag is a
+property-only update that leaves the topology, and therefore the closures,
+untouched.
+
+\paragraph{When to fall back}
+Not every edit patches cheaply. Edge \emph{deletion} can shrink ancestor and
+descendant closures in non-local ways, a single removed edge may sever
+reachability for many pairs, so when a deletion invalidates cached closures the
+sound choice is to recompute the affected cone or, in the worst case, fall back to
+a full recompilation. The system therefore treats incremental maintenance as an
+optimization over the always-correct recompile: additive changes and property
+flips patch in place, while topology-shrinking changes fall back when a bounded
+patch would be unsound. \S\ref{sec:eval} measures the crossover, batch size and
+edit type at which incremental maintenance beats recompilation
+(Fig.~\ref{fig:incr}).
+
+\NOTE{Implementation status (remove before CR; honest-gaps brief). The
+transaction-listener plumbing, schema-change detection, the change-batch diff of
+added/removed variables and edges, database-scoped registration/teardown, is
+implemented. The post-commit hook currently applies the always-correct
+\emph{fallback}: it invalidates the snapshot so the next query recompiles. The
+bounded in-place patch described above (the OR-in over the affected cone) and the
+pre-commit cycle/active/latent validators are specified but not yet wired; the
+change batch is deliberately the context object through which they will be
+applied. Frame R4 as ``designed, plumbing in place, patch pending'' until the
+applyChange path and its eval land.}

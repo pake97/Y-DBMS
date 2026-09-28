@@ -1,0 +1,114 @@
+%% ============================================================================
+%% Section: Introduction
+%% Included from main.tex via \input{sections/introduction}
+%% Editorial notes use \TODO{} / \NOTE{} (defined in main.tex); remove before CR.
+%% Numbers marked \TODO are NOT yet measured -- see ICDE2027-outline.md, sec. 13.
+%% ============================================================================
+\section{Introduction}\label{sec:intro}
+
+Causal reasoning has become central to data-driven decision making across
+epidemiology, economics, and the empirical sciences. Analysts increasingly ask
+\emph{structural} questions of a causal model: \emph{which variables confound
+the effect of a treatment $T$ on an outcome $Y$?}, \emph{does a valid adjustment
+set exist, and what is it?}, or \emph{is $X$ independent of $Y$ once we condition
+on $Z$?} Each of these is answered not from data alone but from the topology of a
+\emph{causal directed acyclic graph} (DAG), whose nodes are variables and whose
+edges encode direct causal influence~\cite{pearl2009causality}. Such DAGs are no
+longer small, hand-drawn diagrams: they are large, continually revised, and
+increasingly stored and versioned inside graph databases alongside the domain
+data they describe.
+
+Despite this, causal analysis today is largely divorced from the systems that
+store the graph. The prevailing practice is to \emph{export} the DAG into a
+standalone library---\textsc{DoWhy}, \textsc{dagitty}, \textsc{pgmpy}, or
+\textsc{causal-learn}---compute the answer in a separate process, and discard the
+in-memory representation afterwards. This round-trip forfeits precisely the
+properties a database is built to provide: durable and concurrent access to a
+single authoritative model, declarative querying, integration with co-located
+data, and---critically---\emph{incremental} response to a changing graph. When an
+edge is added or a variable is reclassified as latent, the entire model must be
+re-extracted and every downstream index rebuilt from scratch. No graph DBMS
+today treats causal structural queries as a first-class, \emph{indexed} workload.
+
+Closing this gap is not merely a matter of wrapping a library behind a stored
+procedure. First, the operators analysts need are not all expressible as plain
+graph reachability: \emph{d-separation} and \emph{adjustment-set enumeration}
+depend on the conditioning set and on edge orientation, and require
+conditioning-aware traversal (the Bayes-Ball procedure) rather than a transitive
+closure. Second, answered naively---by traversing the stored graph on every
+call---each query costs $O(V{+}E)$, and identification tasks issue many such
+queries as they enumerate and test candidate adjustment sets, so per-query
+traversal does not scale to large DAGs or high query volume. Third, the index
+that accelerates these queries must survive updates: a causal graph under active
+curation cannot afford a full recompilation after every edit.
+
+\NOTE{Optional 4th challenge sentence: expressing the operators in a language
+that is close to how domain experts phrase causal questions, yet compiles to
+physical operators a query engine can execute.}
+
+We present \textbf{Causal4j}, a system that makes causal structural queries a
+native, indexed workload inside a property-graph DBMS (Neo4j). Causal4j has
+three parts, shown in Fig.~\ref{fig:arch}. (i) A \emph{declarative causal query
+language} whose operators---ancestors and descendants, mediators, colliders and
+confounders, backdoor paths, d-separation, and adjustment-set
+identification---read like the questions analysts already ask, and whose
+statements compile to physical operators over the graph store. (ii) A
+\emph{compiled causal index}: on compilation the DAG stored as
+$(:$\textsf{Variable}$)\text{-}[:$\textsf{CAUSES}$]\!\rightarrow\!(:$\textsf{Variable}$)$
+is snapshotted into a dense, integer-indexed layout (CSR adjacency, a
+topological order and per-node layer) augmented with precomputed
+\emph{ancestor} and \emph{descendant} bitsets; structural queries then reduce
+from $O(V{+}E)$ traversals to $O(V/64)$ word operations, and d-separation and
+adjustment enumeration are cast as bitset intersections. (iii) \emph{Incremental
+maintenance} of that index under edge and variable updates, so a mutating causal
+graph is kept queryable without full recompilation.
+
+\NOTE{Insert Fig.~1 (architecture) here -- provided by figures/architecture.tex.}
+
+This paper makes the following contributions:
+\begin{itemize}
+  \item A \textbf{declarative causal query language}, embedded in a graph DBMS,
+  covering structural queries, identification (adjustment sets, backdoor
+  criterion), and a quantitative layer (interventions, counterfactuals), with a
+  defined compilation from language operators to physical graph operators
+  (\S\ref{sec:lang}).
+  \item A \textbf{compiled reachability index for causal DAGs}---dense CSR
+  adjacency with topological-layer pruning and precomputed ancestor/descendant
+  bitsets---that reduces structural queries from $O(V{+}E)$ to $O(V/64)$ and
+  supports bitset Bayes-Ball d-separation and adjustment-set enumeration
+  (\S\ref{sec:index}).
+  \item An \textbf{incremental maintenance} scheme that updates the index under
+  edge and variable mutations, bounding work to the affected region rather than
+  recompiling the graph (\S\ref{sec:incr}).
+  \item An \textbf{empirical study} on standard Bayesian-network DAGs and
+  synthetic scale-free DAGs, comparing Causal4j against in-DBMS Cypher traversal,
+  Neo4j GDS, and external causal libraries on latency, throughput, index build
+  time, memory, and update cost, released as a reproducible artifact
+  (\S\ref{sec:eval}).
+\end{itemize}
+
+\NOTE{Results preview -- fill once the eval in \S\ref{sec:eval} exists. Keep it
+one or two sentences with the headline numbers.}
+On DAGs ranging from \TODO{$V_{\min}$} to \TODO{$V_{\max}$} variables, Causal4j
+answers d-separation and adjustment-set queries \TODO{$N\times$} faster than
+in-DBMS Cypher traversal and \TODO{$M\times$} faster than round-tripping to an
+external library, builds its index in \TODO{under X\,ms}, and applies an edge
+update in \TODO{Y}, versus \TODO{Z} for a full recompilation.
+
+\emph{Scope note for reviewers.} This is a data-engineering contribution: a
+declarative query language embedded in a graph DBMS, a physical reachability index
+for causal DAGs, query processing over that index, and its incremental
+maintenance under updates. The structural-causal-model semantics (d-separation,
+the backdoor criterion, adjustment sets) are the \emph{workload} the engine
+supports, drawn from established causal theory~\cite{pearl2009causality}; they are
+not claimed as a contribution. What is new is treating that workload as a
+first-class, indexed, incrementally maintained query workload \emph{inside} the
+store, rather than in an external library.
+
+The remainder of the paper is organized as follows. \S\ref{sec:bg} defines
+causal DAGs, the query catalog, and the in-DBMS problem. \S\ref{sec:lang}
+presents the language and its compilation; \S\ref{sec:compile} the compilation
+of the causal snapshot; \S\ref{sec:index} the index and query processing;
+\S\ref{sec:incr} incremental maintenance; and \S\ref{sec:quant} the quantitative
+layer. \S\ref{sec:eval} reports the evaluation, \S\ref{sec:related} surveys
+related work, and \S\ref{sec:concl} concludes.

@@ -1,0 +1,141 @@
+%% ============================================================================
+%% Section: Indexing and Query Processing  (CORE)
+%% Included from main.tex via \input{sections/indexing}
+%% Owns Table tab:complexity and Fig fig:index.
+%% Design faithful to the Tier-2 layout planned in CompiledCausalGraph.java and
+%% the algorithms in DefaultCausalGraphRuntime.java / PathAnalyzer.java /
+%% ReachabilityIndex.java. See the status note (\NOTE) on implementation state.
+%% ============================================================================
+\section{Indexing and Query Processing}\label{sec:index}
+
+This section is the core of the paper. It presents the physical layout the causal
+snapshot compiles to (\S\ref{sec:index:layout}), the precomputed reachability
+bitsets that accelerate every structural query (\S\ref{sec:index:bitsets}), and
+the query-processing algorithms built on them: reachability and path roles
+(\S\ref{sec:index:reach}), conditioning-aware d-separation
+(\S\ref{sec:index:dsep}), and adjustment-set enumeration
+(\S\ref{sec:index:adj}). Table~\ref{tab:complexity} summarizes the per-operator
+cost against a map-of-sets baseline.
+
+\NOTE{Implementation status (remove before CR; kept here per the honest-gaps
+brief). The algorithms in \S\ref{sec:index:reach}--\S\ref{sec:index:adj} are
+implemented and unit-tested (Bayes-Ball d-separation, backdoor adjustment
+enumeration, path roles). The \emph{dense CSR + bitset} physical layout of
+\S\ref{sec:index:layout}--\S\ref{sec:index:bitsets} is specified but not yet the
+running representation: the current prototype answers these queries over a
+map-of-sets adjacency with DFS closures (the $O(V{+}E)$ baseline column of
+Table~\ref{tab:complexity}). The bitset layout is what the \S\ref{sec:eval}
+speedups will measure; the ``Index query'' column states the design target, not a
+measured result. Do not claim the speedup as achieved until the eval lands.}
+
+\subsection{Physical layout}\label{sec:index:layout}
+
+The snapshot's variables are assigned dense integer indices $0..n{-}1$ via a
+\textsf{name}$\to$\textsf{index} map, so every downstream structure is an array
+rather than a hash map (Fig.~\ref{fig:index}). Edges are stored as compressed
+adjacency: a forward and a reverse \emph{CSR}-style array pair
+($\textsf{forwardAdj}[i]$ lists the child indices of $i$, $\textsf{reverseAdj}[i]$
+its parents), giving cache-friendly, allocation-free neighbor iteration. The
+topological order is stored as an \texttt{int[]} $\textsf{topoOrder}$, and each
+node carries its \emph{layer} $\textsf{topoLayer}[i]$ (0 for sources), which lets
+a traversal prune any neighbor that cannot lie on a path between two nodes by a
+simple layer comparison. This replaces the baseline representation---a
+\lstinline[style=causaldsl]|Map<String,Set<String>>| adjacency with
+\texttt{String}-keyed lookups and per-query DFS---whose every structural query
+costs an $O(V{+}E)$ traversal with hashing overhead.
+
+\subsection{Reachability bitsets}\label{sec:index:bitsets}
+
+On top of the dense layout we precompute, for every variable, the set of its
+ancestors and the set of its descendants as fixed-width bitsets
+$\textsf{ancestorBits}[i],\textsf{descendantBits}[i]\in\{0,1\}^{n}$, packed into
+$\lceil n/64\rceil$ machine words. The ancestor closures are filled in a single
+reverse-topological sweep using the recurrence
+\[
+  \textsf{ancestorBits}[i] \;=\; \bigcup_{p\,\in\,\mathrm{pa}(i)}
+      \bigl(\textsf{ancestorBits}[p] \;\cup\; \{p\}\bigr),
+\]
+and descendants symmetrically in forward-topological order; each is one
+$O(V{+}E)$ pass at compile time whose cost is amortized over all later queries.
+The closures occupy $O(V^2/64)$ words---the deliberate space-for-time trade that
+turns reachability from traversal into a word-parallel bit test. Sparse or very
+large DAGs can instead keep only the CSR layout and answer reachability by a
+layer-pruned DFS; \S\ref{sec:eval} characterizes the memory/latency crossover
+between the two.
+
+\begin{figure}[t]\centering
+  \resizebox{\linewidth}{!}{\input{figures/index-layout}}
+  \caption{Compiled index layout for a small fragment. Variables map to dense
+  indices; forward/reverse CSR arrays store adjacency; a topological order and
+  per-node layer drive pruning; and per-node ancestor/descendant bitsets
+  ($\lceil n/64\rceil$ words each) are filled in reverse-/forward-topological
+  order. Structural queries become word-parallel bit operations over the
+  bitsets.}
+  \label{fig:index}
+\end{figure}
+
+\subsection{Reachability and path-role queries}\label{sec:index:reach}
+
+With the closures in hand the reachability operators are immediate:
+$\mathrm{an}(X)$ and $\mathrm{de}(X)$ are a single bitset read, and
+$\textsf{hasDirectedPath}(X,Y)$ is one bit test---is $Y$ set in
+$\textsf{descendantBits}[X]$---in $O(1)$. The path-role operators reduce to
+bitset algebra over these closures. Confounders of $T$ and $Y$ are the common
+ancestors $\textsf{ancestorBits}[T]\cap\textsf{ancestorBits}[Y]$; mediators of
+$T\!\to\!Y$ are $\textsf{descendantBits}[T]\cap\textsf{ancestorBits}[Y]$; and
+colliders are the nodes whose parents include one reachable from $X$ and one from
+$Y$ while the node itself ancestors neither---again a handful of intersections
+per candidate. Each is $O(V/64)$ word operations rather than the baseline's
+repeated DFS.
+
+\subsection{Conditioning-aware d-separation}\label{sec:index:dsep}
+
+D-separation is \emph{not} reachability: adding a variable to the conditioning set
+$Z$ can block one path and, if that variable is a collider or an ancestor of one,
+unblock another. The test must therefore follow edge orientation and the role of
+each node under $Z$, which we do with the Bayes-Ball procedure. A search
+propagates ``balls'' from $X$, tracking for each visited node whether it was
+entered from a parent or from a child; at each node the admissible continuations
+depend on whether the node is in $Z$: an observed non-collider blocks a ball
+arriving along the chain/fork, while a collider (or a node with an observed
+descendant) passes a ball arriving from two children. $X$ and $Y$ are
+d-separated given $Z$ exactly when no ball reaches $Y$. The procedure is
+conditioning-aware by construction and, with conditioning and frontier sets
+represented as bitsets, its per-step membership tests are $O(1)$ and the whole
+test $O(V/64)$ in the frontier. A single flag---cutting the outgoing edges of the
+treatment---turns the same routine into the backdoor test used next.
+
+\subsection{Adjustment-set enumeration}\label{sec:index:adj}
+
+Identification asks whether the effect of $T$ on $Y$ is estimable by covariate
+adjustment and, if so, for a valid set. A set $Z$ satisfies the \emph{backdoor
+criterion} when it contains no descendant of $T$ and blocks every backdoor path
+from $T$ to $Y$; the second condition is exactly the d-separation test of
+\S\ref{sec:index:dsep} with $T$'s outgoing edges cut. Enumeration first restricts
+the candidate pool to \emph{eligible} variables---those that are not $T$, not $Y$,
+and (via $\textsf{descendantBits}[T]$) not descendants of $T$, so the
+no-descendant clause holds for free. It then searches candidate sets in
+increasing size and returns the first non-empty level of blocking sets, yielding
+\emph{minimal} adjustment sets; the empty set is tested first, so a query with no
+open backdoor path returns immediately. This is the most traversal-intensive
+operator in the catalog---it issues one backdoor (d-separation) test per
+candidate set---which is precisely why casting the inner test as an $O(V/64)$
+bitset operation, rather than a graph traversal, is what makes identification
+scale (R2).
+
+\begin{table}[t]\centering
+\caption{Per-operator cost: map-of-sets $+$ DFS baseline vs.\ the bitset index.
+$k$ is the number of candidate sets an identification query tests.}
+\label{tab:complexity}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Operator & Baseline query & Index query & Index space \\
+\midrule
+ancestors / descendants & $O(V{+}E)$ & $O(V/64)$ & $O(V^2/64)$ \\
+hasDirectedPath         & $O(V{+}E)$ & $O(1)$     & --- \\
+mediators/conf./coll.   & $O(V{+}E)$ & $O(V/64)$  & --- \\
+d-separation            & $O(V{+}E)$ & $O(V/64)$  & --- \\
+adjustment sets         & $O(k(V{+}E))$ & $O(k\,V/64)$ & --- \\
+\bottomrule
+\end{tabular}
+\end{table}

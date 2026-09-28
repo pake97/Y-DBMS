@@ -269,7 +269,7 @@ public class Neo4jQueryExecutor implements QueryExecutor {
                     if (intercept != 0.0) model.setIntercept(id, intercept);
                     if (noise != 1.0)     model.setNoise(id, noise);
                 });
-            session.run("MATCH (a:Variable)-[r:CAUSES]->(b:Variable) WHERE r.active = true " +
+            session.run("MATCH (a:Variable)-[r:CAUSES]->(b:Variable) WHERE coalesce(r.active, true) = true " +
                         "RETURN a.id AS from, b.id AS to, coalesce(r.weight, 1.0) AS weight")
                 .stream()
                 .forEach(r -> {
@@ -296,7 +296,7 @@ public class Neo4jQueryExecutor implements QueryExecutor {
                 .map(r -> r.get("id").asString()).collect(Collectors.joining(", ")));
             sb.append("\n  Edges:\n");
             session.run("MATCH (a:Variable)-[r:CAUSES]->(b:Variable) " +
-                        "WHERE r.active = true RETURN a.id AS from, b.id AS to ORDER BY from, to")
+                        "WHERE coalesce(r.active, true) = true RETURN a.id AS from, b.id AS to ORDER BY from, to")
                 .stream()
                 .forEach(r -> sb.append("    ").append(r.get("from").asString())
                                  .append(" -> ").append(r.get("to").asString()).append('\n'));

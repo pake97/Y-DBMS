@@ -1,0 +1,58 @@
+%% ============================================================================
+%% Section: Compilation -- The Causal Snapshot
+%% Faithful to GraphLoader.java, TopologicalSorter.java, CompiledCausalGraph.java,
+%% RuntimeRegistry.java, DefaultCausalGraphRuntime.java (after WP1 and WP4).
+%% ============================================================================
+\section{Compilation: The Causal Snapshot}\label{sec:compile}
+
+Structural queries are not answered against the stored property graph
+directly. On \texttt{causal.compile} the graph is read once and compiled into
+an immutable in-memory snapshot that every subsequent query reads. Compilation
+is the boundary between the mutable, transactional graph and the
+read-optimized structure of Section~\ref{sec:index}: it is where the
+$O(|V|+|E|)$ scan is paid once, so that queries need not pay it again.
+
+\noindent\textbf{Loading.} The loader performs two passes inside one read
+transaction. The first pass materializes every \textsf{Variable} node with its
+\textsf{observed}/\textsf{latent} flag and, when present, its linear-Gaussian
+parameters; undeclared properties fall back to defaults. The second pass reads
+the \textsf{CAUSES} relationships with a Cypher query that filters on
+\lstinline[style=causaldsl]|coalesce(r.active, true)|, so only active edges
+enter the snapshot and a curator can toggle an edge in or out of the model
+without deleting it. Filtering in Cypher lets the DBMS use its own
+relationship access rather than a full relationship scan in the plugin.
+
+\noindent\textbf{Topological order and acyclicity.} The loader then computes
+a topological order of the variables with Kahn's algorithm over the forward
+adjacency. This serves two purposes: it is the order in which the closures of
+Section~\ref{sec:index} and the recursions of Section~\ref{sec:quant} are
+filled, and it is the acyclicity check. If the order fails to cover every
+variable the graph contains a directed cycle and is not a DAG, and compilation
+aborts with an error rather than admitting an ill-formed model. Enforcing the
+DAG invariant at compile time (and at commit time, Section~\ref{sec:incr})
+means that no downstream operator has to defend against cycles.
+
+\noindent\textbf{The immutable snapshot.} The result is a compiled causal
+graph: variables, forward and reverse adjacency, the topological order, the
+closures of Section~\ref{sec:index}, and the SEM parameters, all held in
+arrays that are never modified after construction. Immutability is deliberate.
+Since the snapshot never changes, every reader sees a consistent view without
+locking, and the index can be built once and cached rather than reconstructed
+per query. The snapshot is also the single source of truth: derived facts
+(ancestors, adjustment sets) are exposed through \texttt{causal.*} procedures
+over it rather than materialized back into the graph as extra relationships,
+which would double the maintenance burden under updates.
+
+\noindent\textbf{Runtime registry and consistency.} Neo4j instantiates a
+procedure class afresh for every call, so the snapshot cannot live inside a
+procedure. It is held instead by a process-scoped registry that maps a model
+name to a runtime owning the current snapshot of that model in a single
+\texttt{volatile} reference. Recompilation, incremental patching, and
+invalidation are serialized per model, while all reads are lock-free: a query
+captures the current reference once and works against that fixed snapshot,
+so a concurrent recompile or patch installs a new snapshot without exposing a
+partially built one. This gives a snapshot-isolated consistency model: a
+query runs entirely against the model as of the compile or patch that
+produced its snapshot. When and how a new snapshot is installed, by full
+recompilation or by the incremental patch that avoids re-reading the graph,
+is the subject of Section~\ref{sec:incr}.

@@ -225,7 +225,7 @@ public final class CypherTranslator {
     public CypherQuery showDagEdges() {
         return CypherQuery.read(
             "MATCH (a:Variable)-[r:CAUSES]->(b:Variable) " +
-            "WHERE r.active = true RETURN a.id AS from, b.id AS to ORDER BY from, to",
+            "WHERE coalesce(r.active, true) = true RETURN a.id AS from, b.id AS to ORDER BY from, to",
             Map.of(),
             null
         );

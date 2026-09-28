@@ -1,0 +1,127 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts,amsthm}
+\newtheorem{definition}{Definition}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{url}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,shapes.geometric,topaths,calc}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+% DSL listing style
+\lstdefinestyle{causaldsl}{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\bfseries,
+  columns=fullflexible,
+  breaklines=true,
+  keywords={DEFINE,MODEL,CAUSAL,DAG,VARIABLE,IDENTIFY,EFFECT,OF,ON,RETURN,
+            ADJUSTMENT,SETS,ANCESTORS,DESCENDANTS,MEDIATORS,COLLIDERS,
+            CONFOUNDERS,BACKDOOR,PATHS,BETWEEN,AND,ESTIMATE,INTERVENE,
+            COMPARE,TO,COUNTERFACTUAL,GIVEN,WHAT,WOULD,HAVE,BEEN,IF,USE,RESET,
+            EXPLAIN,MINIMAL,SHOW,MODELS,WEIGHT,MEAN,NOISE}
+}
+
+% editorial notes: remove before submission
+\newcommand{\TODO}[1]{\textcolor{red}{[\textbf{TODO:} #1]}}
+\newcommand{\NOTE}[1]{\textcolor{blue}{[#1]}}
+
+% notation
+\newcommand{\an}{\mathrm{an}}
+\newcommand{\de}{\mathrm{de}}
+\newcommand{\pa}{\mathrm{pa}}
+\newcommand{\ch}{\mathrm{ch}}
+\newcommand{\cn}{\mathrm{cn}}
+\newcommand{\forb}{\mathrm{forb}}
+\newcommand{\adj}{\mathrm{adj}}
+\newcommand{\dsep}{\perp\!\!\!\perp}
+
+\begin{document}
+
+\title{Causal4j: A Declarative Language and In-DBMS Reachability
+Index for Causal Structural Queries over Graph Databases}
+
+% ORCIDs are required for every author at submission time.
+\author{
+\IEEEauthorblockN{Amedeo Pachera}
+\IEEEauthorblockA{\textit{CNRS LIRIS} \\
+\textit{Lyon 1 University}\\
+Lyon, France \\
+amedeo.pachera@univ-lyon1.fr}
+\and
+\IEEEauthorblockN{Kirollos Nayrouz}
+\IEEEauthorblockA{\textit{CNRS LIRIS} \\
+\textit{Lyon 1 University}\\
+Lyon, France \\
+kirollos.nayrouz@etu.univ-lyon1.fr}
+\and
+\IEEEauthorblockN{Angela Bonifati}
+\IEEEauthorblockA{\textit{CNRS LIRIS \& IUF} \\
+\textit{Lyon 1 University}\\
+Lyon, France \\
+angela.bonifati@univ-lyon1.fr}
+\and
+\IEEEauthorblockN{Andrea Mauri}
+\IEEEauthorblockA{\textit{CNRS LIRIS} \\
+\textit{Lyon 1 University}\\
+Lyon, France \\
+andrea.mauri@univ-lyon1.fr}
+}
+
+\maketitle
+
+\begin{abstract}
+Causal directed acyclic graphs (DAGs) are increasingly stored in graph
+databases next to the data they describe, yet the structural questions asked
+of them (which variables confound a treatment and an outcome, whether two
+variables are independent given a conditioning set, which covariates form a
+valid adjustment set) are still answered by exporting the DAG to an external
+library. This round-trip forfeits durable shared access, declarative querying,
+and incremental response to a changing graph. We present Causal4j, a system
+that supports causal structural queries as a first-class, indexed workload
+inside a property-graph DBMS. Causal4j consists of (i) a declarative causal
+query language whose operators compile to physical operators over the graph
+store; (ii) a compiled index that snapshots the DAG into a dense adjacency
+layout with precomputed ancestor and descendant closures stored as bitsets, so
+that reachability and path-role queries become word-parallel set operations
+and identification by covariate adjustment reduces to one closure construction
+and one conditioning-aware traversal; and (iii) an incremental maintenance
+scheme that patches the closures under edge and variable updates within the
+affected region of the graph. On DAGs from \TODO{$V_{\min}$} to
+\TODO{$V_{\max}$} variables, Causal4j answers structural and identification
+queries \TODO{$N\times$} faster than in-DBMS traversal and \TODO{$M\times$}
+faster than an external library round-trip, builds its index in
+\TODO{$X$~ms}, and applies an edge update in \TODO{$Y$} against \TODO{$Z$} for
+a full recompilation, while matching reference causal tools exactly on every
+verdict.
+\end{abstract}
+
+\begin{IEEEkeywords}
+graph databases, query languages, reachability indexing, query processing,
+causal DAGs, adjustment sets, incremental maintenance
+\end{IEEEkeywords}
+
+\input{sections/01_introduction}
+\input{sections/02_background}
+\input{sections/03_language}
+\input{sections/04_compilation}
+\input{sections/05_indexing}
+\input{sections/06_incremental}
+\input{sections/07_quantitative}
+\input{sections/08_evaluation}
+\input{sections/09_related}
+\input{sections/10_conclusion}
+
+\section*{Acknowledgment}
+\TODO{ICDE 2027 requires an AI-generated content acknowledgement naming the
+tools used and the sections concerned. Fill before submission.}
+
+\bibliographystyle{ieeetr} % switch to IEEEtran.bst (from the ICDE template) at submission
+\bibliography{refs}
+
+\end{document}

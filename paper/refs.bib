@@ -1,0 +1,361 @@
+%% Bibliography for the Causal4j ICDE 2027 submission.
+%% Entries marked "verify" were written from memory of the venue/year; check
+%% pages and DOIs against DBLP before camera-ready.
+
+@book{pearl2009causality,
+  title     = {Causality: Models, Reasoning, and Inference},
+  author    = {Pearl, Judea},
+  year      = {2009},
+  edition   = {2nd},
+  publisher = {Cambridge University Press}
+}
+
+@article{steiger2021covid,
+  title   = {Causal graph analysis of {COVID}-19 observational data in {G}erman districts reveals effects of determining factors on reported case numbers},
+  author  = {Steiger, Edgar and Mu{\ss}gnug, Tobias and Kroll, Lars Eric},
+  journal = {PLOS ONE},
+  volume  = {16},
+  number  = {5},
+  pages   = {e0237277},
+  year    = {2021},
+  note    = {Source of the running-example DAG; verify the variable and edge counts against Fig.~1 of the paper}
+}
+
+@article{pachera2025whatif,
+  title   = {What If: Causal Analysis with Graph Databases},
+  author  = {Pachera, Amedeo and Bonifati, Angela and Palmiotto, Mattia and Mauri, Andrea},
+  journal = {Proc. VLDB Endow.},
+  volume  = {18},
+  number  = {11},
+  pages   = {4009--4020},
+  year    = {2025},
+  note    = {verify pages}
+}
+
+@misc{qiu2026causal,
+  title         = {Toward a Causal Data Management Ecosystem for Decision Making and Agentic {AI}},
+  author        = {Qiu, Dazhuo and Zhou, Yingli and Pachera, Amedeo and Bonifati, Angela and Mauri, Andrea},
+  year          = {2026},
+  eprint        = {2608.07214},
+  archivePrefix = {arXiv}
+}
+
+%% ---- causal tooling -------------------------------------------------------
+
+@misc{sharma2020dowhy,
+  title         = {{DoWhy}: An End-to-End Library for Causal Inference},
+  author        = {Sharma, Amit and Kiciman, Emre},
+  year          = {2020},
+  eprint        = {2011.04216},
+  archivePrefix = {arXiv}
+}
+
+@article{textor2016dagitty,
+  title   = {Robust causal inference using directed acyclic graphs: the {R} package `dagitty'},
+  author  = {Textor, Johannes and van der Zander, Benito and Gilthorpe, Mark S. and Li{\'s}kiewicz, Maciej and Ellison, George T. H.},
+  journal = {International Journal of Epidemiology},
+  volume  = {45},
+  number  = {6},
+  pages   = {1887--1894},
+  year    = {2016}
+}
+
+@article{ankan2024pgmpy,
+  title   = {pgmpy: A {P}ython Toolkit for {B}ayesian Networks},
+  author  = {Ankan, Ankur and Textor, Johannes},
+  journal = {Journal of Machine Learning Research},
+  volume  = {25},
+  number  = {265},
+  pages   = {1--8},
+  year    = {2024},
+  note    = {verify}
+}
+
+@article{zheng2024causallearn,
+  title   = {Causal-learn: Causal Discovery in {P}ython},
+  author  = {Zheng, Yujia and Huang, Biwei and Chen, Wei and Ramsey, Joseph and Gong, Mingming and Cai, Ruichu and Shimizu, Shohei and Spirtes, Peter and Zhang, Kun},
+  journal = {Journal of Machine Learning Research},
+  volume  = {25},
+  number  = {60},
+  pages   = {1--8},
+  year    = {2024},
+  note    = {verify}
+}
+
+@misc{lee2023ananke,
+  title         = {Ananke: A {P}ython Package for Causal Inference Using Graphical Models},
+  author        = {Lee, Jaron J. R. and Bhattacharya, Rohit and Nabi, Razieh and Shpitser, Ilya},
+  year          = {2023},
+  eprint        = {2301.11477},
+  archivePrefix = {arXiv}
+}
+
+%% ---- causal algorithms ----------------------------------------------------
+
+@inproceedings{shachter1998bayesball,
+  title     = {Bayes-Ball: The Rational Pastime (for Determining Irrelevance and Requisite Information in Belief Networks and Influence Diagrams)},
+  author    = {Shachter, Ross D.},
+  booktitle = {Proc. UAI},
+  pages     = {480--487},
+  year      = {1998}
+}
+
+@article{geiger1990identifying,
+  title   = {Identifying independence in {B}ayesian networks},
+  author  = {Geiger, Dan and Verma, Thomas and Pearl, Judea},
+  journal = {Networks},
+  volume  = {20},
+  number  = {5},
+  pages   = {507--534},
+  year    = {1990}
+}
+
+@inproceedings{shpitser2010validity,
+  title     = {On the Validity of Covariate Adjustment for Estimating Causal Effects},
+  author    = {Shpitser, Ilya and VanderWeele, Tyler and Robins, James M.},
+  booktitle = {Proc. UAI},
+  pages     = {527--536},
+  year      = {2010}
+}
+
+@article{perkovic2018complete,
+  title   = {Complete Graphical Characterization and Construction of Adjustment Sets in {M}arkov Equivalence Classes of Ancestral Graphs},
+  author  = {Perkovi{\'c}, Emilija and Textor, Johannes and Kalisch, Markus and Maathuis, Marloes H.},
+  journal = {Journal of Machine Learning Research},
+  volume  = {18},
+  number  = {220},
+  pages   = {1--62},
+  year    = {2018}
+}
+
+@inproceedings{textor2011adjustment,
+  title     = {Adjustment Criteria in Causal Diagrams: An Algorithmic Perspective},
+  author    = {Textor, Johannes and Li{\'s}kiewicz, Maciej},
+  booktitle = {Proc. UAI},
+  pages     = {681--688},
+  year      = {2011}
+}
+
+@inproceedings{vanderzander2014constructing,
+  title     = {Constructing Separators and Adjustment Sets in Ancestral Graphs},
+  author    = {van der Zander, Benito and Li{\'s}kiewicz, Maciej and Textor, Johannes},
+  booktitle = {Proc. UAI},
+  pages     = {907--916},
+  year      = {2014}
+}
+
+@article{vanderzander2019separators,
+  title   = {Separators and adjustment sets in causal graphs: Complete criteria and an algorithmic framework},
+  author  = {van der Zander, Benito and Li{\'s}kiewicz, Maciej and Textor, Johannes},
+  journal = {Artificial Intelligence},
+  volume  = {270},
+  pages   = {1--40},
+  year    = {2019}
+}
+
+@inproceedings{vanderzander2020minimal,
+  title     = {Finding minimal d-separators in linear time and applications},
+  author    = {van der Zander, Benito and Li{\'s}kiewicz, Maciej},
+  booktitle = {Proc. UAI (PMLR 115)},
+  pages     = {637--647},
+  year      = {2020},
+  note      = {verify pages}
+}
+
+%% ---- reachability indexing ------------------------------------------------
+
+@article{cohen2003reachability,
+  title   = {Reachability and Distance Queries via 2-Hop Labels},
+  author  = {Cohen, Edith and Halperin, Eran and Kaplan, Haim and Zwick, Uri},
+  journal = {SIAM Journal on Computing},
+  volume  = {32},
+  number  = {5},
+  pages   = {1338--1355},
+  year    = {2003}
+}
+
+@article{yildirim2010grail,
+  title   = {{GRAIL}: Scalable Reachability Index for Large Graphs},
+  author  = {Y{\i}ld{\i}r{\i}m, Hilmi and Chaoji, Vineet and Zaki, Mohammed J.},
+  journal = {Proc. VLDB Endow.},
+  volume  = {3},
+  number  = {1},
+  pages   = {276--284},
+  year    = {2010}
+}
+
+@inproceedings{seufert2013ferrari,
+  title     = {{FERRARI}: Flexible and Efficient Reachability Range Assignment for Graph Indexing},
+  author    = {Seufert, Stephan and Anand, Avishek and Bedathur, Srikanta and Weikum, Gerhard},
+  booktitle = {Proc. ICDE},
+  pages     = {1009--1020},
+  year      = {2013}
+}
+
+@inproceedings{cheng2013tflabel,
+  title     = {{TF-Label}: A Topological-Folding Labeling Scheme for Reachability Querying in a Large Graph},
+  author    = {Cheng, James and Huang, Silu and Wu, Huanhuan and Fu, Ada Wai-Chee},
+  booktitle = {Proc. SIGMOD},
+  pages     = {193--204},
+  year      = {2013}
+}
+
+@inproceedings{yano2013pruned,
+  title     = {Fast and Scalable Reachability Queries on Graphs by Pruned Labeling with Landmarks and Paths},
+  author    = {Yano, Yosuke and Akiba, Takuya and Iwata, Yoichi and Yoshida, Yuichi},
+  booktitle = {Proc. CIKM},
+  pages     = {1601--1606},
+  year      = {2013}
+}
+
+@article{wei2014ip,
+  title   = {Reachability Querying: An Independent Permutation Labeling Approach},
+  author  = {Wei, Hao and Yu, Jeffrey Xu and Lu, Can and Jin, Ruoming},
+  journal = {Proc. VLDB Endow.},
+  volume  = {7},
+  number  = {12},
+  pages   = {1191--1202},
+  year    = {2014}
+}
+
+@article{su2017bfl,
+  title   = {Reachability Querying: Can It Be Even Faster?},
+  author  = {Su, Jiao and Zhu, Qing and Wei, Hao and Yu, Jeffrey Xu},
+  journal = {IEEE Transactions on Knowledge and Data Engineering},
+  volume  = {29},
+  number  = {3},
+  pages   = {683--697},
+  year    = {2017}
+}
+
+@inproceedings{zhou2017dagreduction,
+  title     = {{DAG} Reduction: Fast Answering Reachability Queries},
+  author    = {Zhou, Junfeng and Zhou, Shijie and Yu, Jeffrey Xu and Wei, Hao and Chen, Ziyang and Tang, Xian},
+  booktitle = {Proc. SIGMOD},
+  pages     = {375--390},
+  year      = {2017},
+  note      = {verify author list}
+}
+
+@article{hanauer2022oreach,
+  title   = {{O'Reach}: Even Faster Reachability in Large Graphs},
+  author  = {Hanauer, Kathrin and Schulz, Christian and Trummer, Jonathan},
+  journal = {ACM Journal of Experimental Algorithmics},
+  volume  = {27},
+  pages   = {4.2:1--4.2:27},
+  year    = {2022},
+  note    = {verify article number}
+}
+
+@article{reachabilitysurvey2025,
+  title   = {Indexing Techniques for Graph Reachability Queries},
+  author  = {{TODO: authors}},
+  journal = {ACM Computing Surveys},
+  year    = {2025},
+  note    = {DOI 10.1145/3776737; fill authors, volume, and article number}
+}
+
+@article{demetrescu2004dynamic,
+  title   = {A New Approach to Dynamic All Pairs Shortest Paths},
+  author  = {Demetrescu, Camil and Italiano, Giuseppe F.},
+  journal = {Journal of the ACM},
+  volume  = {51},
+  number  = {6},
+  pages   = {968--992},
+  year    = {2004},
+  note    = {verify; alternatively cite Italiano's dynamic transitive closure work}
+}
+
+%% ---- graph query languages ------------------------------------------------
+
+@inproceedings{deutsch2022gql,
+  title     = {Graph Pattern Matching in {GQL} and {SQL/PGQ}},
+  author    = {Deutsch, Alin and Francis, Nadime and Green, Alastair and Hare, Keith and Li, Bei and Libkin, Leonid and Lindaaker, Tobias and Marsault, Victor and Martens, Wim and Michels, Jan and Murlak, Filip and Plantikow, Stefan and Selmer, Petra and van Rest, Oskar and Voigt, Hannes and Vrgo{\v{c}}, Domagoj and Wu, Mingxi and Zemke, Fred},
+  booktitle = {Proc. SIGMOD},
+  pages     = {2246--2258},
+  year      = {2022}
+}
+
+@inproceedings{francis2023gpc,
+  title     = {{GPC}: A Pattern Calculus for Property Graphs},
+  author    = {Francis, Nadime and Gheerbrant, Am{\'e}lie and Guagliardo, Paolo and Libkin, Leonid and Marsault, Victor and Martens, Wim and Murlak, Filip and Peterfreund, Liat and Rogova, Alexandra and Vrgo{\v{c}}, Domagoj},
+  booktitle = {Proc. PODS},
+  pages     = {241--250},
+  year      = {2023}
+}
+
+@misc{neo4jgds,
+  title        = {Neo4j Graph Data Science Library},
+  author       = {{Neo4j, Inc.}},
+  howpublished = {\url{https://neo4j.com/docs/graph-data-science/}},
+  year         = {2026},
+  note         = {version used in Section~\ref{sec:eval}}
+}
+
+%% ---- causality in databases ---------------------------------------------
+
+@inproceedings{salimi2018hypdb,
+  title     = {Bias in {OLAP} Queries: Detection, Explanation, and Removal},
+  author    = {Salimi, Babak and Cole, Corey and Ports, Dan R. K. and Suciu, Dan},
+  booktitle = {Proc. SIGMOD},
+  pages     = {1021--1035},
+  year      = {2018}
+}
+
+@inproceedings{salimi2020carl,
+  title     = {Causal Relational Learning},
+  author    = {Salimi, Babak and Parikh, Harsh and Kayali, Moe and Getoor, Lise and Roy, Sudeepa and Suciu, Dan},
+  booktitle = {Proc. SIGMOD},
+  pages     = {241--256},
+  year      = {2020}
+}
+
+@inproceedings{galhotra2022hyper,
+  title     = {{HypeR}: Hypothetical Reasoning With What-If and How-To Queries Using a Probabilistic Causal Approach},
+  author    = {Galhotra, Sainyam and Gilad, Amir and Roy, Sudeepa and Salimi, Babak},
+  booktitle = {Proc. SIGMOD},
+  pages     = {1598--1611},
+  year      = {2022}
+}
+
+@article{youngmann2023integration,
+  title   = {Causal Data Integration},
+  author  = {Youngmann, Brit and Cafarella, Michael and Salimi, Babak and Zeng, Anna},
+  journal = {Proc. VLDB Endow.},
+  volume  = {16},
+  number  = {10},
+  pages   = {2659--2665},
+  year    = {2023}
+}
+
+@article{meliou2014causality,
+  title   = {Causality and Explanations in Databases},
+  author  = {Meliou, Alexandra and Roy, Sudeepa and Suciu, Dan},
+  journal = {Proc. VLDB Endow.},
+  volume  = {7},
+  number  = {13},
+  pages   = {1715--1716},
+  year    = {2014}
+}
+
+%% ---- maintenance, datasets ------------------------------------------------
+
+@article{gupta1995maintenance,
+  title   = {Maintenance of Materialized Views: Problems, Techniques, and Applications},
+  author  = {Gupta, Ashish and Mumick, Inderpal Singh},
+  journal = {IEEE Data Engineering Bulletin},
+  volume  = {18},
+  number  = {2},
+  pages   = {3--18},
+  year    = {1995}
+}
+
+@article{scutari2010bnlearn,
+  title   = {Learning {B}ayesian Networks with the bnlearn {R} Package},
+  author  = {Scutari, Marco},
+  journal = {Journal of Statistical Software},
+  volume  = {35},
+  number  = {3},
+  pages   = {1--22},
+  year    = {2010}
+}

@@ -1,0 +1,162 @@
+%% ============================================================================
+%% Section: The Causal Query Language
+%% Included from main.tex via \input{sections/language}
+%% Requires the `causaldsl' listings style and the \TODO/\NOTE macros from main.tex.
+%% Table label tab:operators is referenced from sections/background.tex (\S2.2).
+%% Operator->procedure mapping is faithful to dsl/.../exec/CypherTranslator.java
+%% and plugin/.../api/ProcedureNames.java.
+%% ============================================================================
+\section{The Causal Query Language}\label{sec:lang}
+
+Requirement R1 asks for a declarative interface in which each catalog query is a
+single statement, phrased close to how an analyst states a causal question, that
+compiles to physical operators over the graph store. This section presents that
+language: its surface (\S\ref{sec:lang:surface}), the mapping from each operator
+to the physical operator that answers it (\S\ref{sec:lang:compile},
+Table~\ref{tab:operators}), and the model registry that lets a single database
+hold several causal worlds at once (\S\ref{sec:lang:registry}). The physical
+operators themselves, and why they are fast, are the subject of
+\S\ref{sec:index}; here we are concerned only with the interface and its
+compilation.
+
+\subsection{Design and surface syntax}\label{sec:lang:surface}
+
+The language is a small statement-oriented DSL. A program is a sequence of
+statements; each statement is one of three kinds. \emph{Definition} statements
+declare variables and edges and thereby write the causal model into the graph.
+\emph{Structural} statements ask the catalog queries of \S\ref{sec:bg:catalog}:
+reachability, path roles, and identification. \emph{Quantitative} statements
+express interventions and counterfactuals over a parameterized model
+(\S\ref{sec:quant}). Two design choices follow directly from R1. First, an
+operator names a causal concept, not a traversal: an analyst writes
+\lstinline[style=causaldsl]|CONFOUNDERS OF T AND Y| rather than a path pattern,
+so the statement reads as the question and its compilation to a graph operation
+is the system's concern, not the user's. Second, every statement is
+self-contained and refers to variables by their canonical
+\textsf{id}, so a query is portable across any database holding a model with
+those variables.
+
+Definition statements come in a standalone and a block form. A bare
+\lstinline[style=causaldsl]|DEFINE CAUSAL VARIABLE| introduces a single variable
+with its observation status; a \lstinline[style=causaldsl]|DEFINE CAUSAL DAG|
+block declares a model as a set of edges, optionally carrying a structural
+coefficient per edge for the quantitative layer:
+
+\begin{lstlisting}[style=causaldsl]
+DEFINE CAUSAL DAG CovidModel {
+  covid19_burden    -> interventions
+  covid19_burden    -> exposure_sarscov2
+  interventions     -> mobility
+  mobility          -> exposure_sarscov2
+  exposure_sarscov2 -> onset_covid19
+  onset_covid19     -> reported_cases
+}
+\end{lstlisting}
+
+\noindent
+Against the model so defined, the structural questions of our running example
+(\S\ref{sec:bg:example}) are each one statement:
+
+\begin{lstlisting}[style=causaldsl]
+CONFOUNDERS OF interventions AND reported_cases
+BACKDOOR PATHS BETWEEN interventions AND reported_cases
+IDENTIFY EFFECT OF interventions ON reported_cases
+  RETURN ADJUSTMENT SETS EXPLAIN
+\end{lstlisting}
+
+\noindent
+The first returns \textsf{covid19\_burden}; the second reports the backdoor path
+it opens; the third decides identifiability and, with
+\lstinline[style=causaldsl]|RETURN ADJUSTMENT SETS|, returns the valid adjustment
+sets, the optional \lstinline[style=causaldsl]|EXPLAIN| attaching a
+human-readable justification. The reachability and path-role operators
+(\lstinline[style=causaldsl]|CAUSES OF|, \lstinline[style=causaldsl]|EFFECTS OF|,
+\lstinline[style=causaldsl]|ANCESTORS OF|, \lstinline[style=causaldsl]|DESCENDANTS OF|,
+\lstinline[style=causaldsl]|MEDIATORS BETWEEN|, \lstinline[style=causaldsl]|COLLIDERS BETWEEN|)
+follow the same one-statement-per-question shape. The full grammar is given in
+ANTLR form in the artifact; Table~\ref{tab:operators} lists the operators that
+matter for what follows.
+
+\subsection{Compilation to physical operators}\label{sec:lang:compile}
+
+A statement is parsed to an AST and then compiled, statement by statement, to one
+or more Cypher units that execute inside the DBMS. The compiler emits exactly two
+kinds of unit. A \emph{definition} statement compiles to Cypher \emph{writes}
+that maintain the schema of \S\ref{sec:bg:dag}: a \lstinline[style=causaldsl]|DEFINE|
+becomes a \texttt{MERGE} of the \textsf{Variable} nodes and \textsf{CAUSES} edges
+it introduces (a single batched \texttt{UNWIND} for the edge set), followed by a
+call to \texttt{causal.compile} that refreshes the compiled snapshot
+(\S\ref{sec:compile}). A \emph{structural} statement compiles to a read: a
+\texttt{CALL} of the \texttt{causal.*} procedure that answers it, which consults
+the snapshot rather than re-traversing the stored graph. This two-target
+compilation is what keeps the model \emph{in} the database: the language never
+holds the graph in client memory, and the same authoritative snapshot serves
+every reader.
+
+\begin{table*}[t]
+  \centering
+  \caption{Language operators, their graphical semantics, and the physical
+  operator each compiles to. Reachability and path-role operators map to
+  \texttt{causal.*} procedures over the compiled snapshot (\S\ref{sec:index});
+  d-separation is exposed as \texttt{causal.dsep} and is the inner test that
+  identification issues repeatedly. Definition statements compile to Cypher
+  writes plus a snapshot recompile.}
+  \label{tab:operators}
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}p{0.30\linewidth} p{0.34\linewidth} p{0.28\linewidth}@{}}
+    \toprule
+    \textbf{DSL statement} & \textbf{Graphical meaning} & \textbf{Physical operator} \\
+    \midrule
+    \multicolumn{3}{@{}l}{\textit{Definition}}\\
+    \lstinline[style=causaldsl]|DEFINE ... DAG| & write / update model & \texttt{MERGE} + \texttt{causal.compile} \\
+    \addlinespace[2pt]
+    \multicolumn{3}{@{}l}{\textit{Reachability}}\\
+    \lstinline[style=causaldsl]|CAUSES OF X|       & $\mathrm{pa}(X)$ & \texttt{causal.parents} \\
+    \lstinline[style=causaldsl]|EFFECTS OF X|      & $\mathrm{ch}(X)$ & \texttt{causal.children} \\
+    \lstinline[style=causaldsl]|ANCESTORS OF X|    & $\mathrm{an}(X)$ & \texttt{causal.ancestors} \\
+    \lstinline[style=causaldsl]|DESCENDANTS OF X|  & $\mathrm{de}(X)$ & \texttt{causal.descendants} \\
+    \addlinespace[2pt]
+    \multicolumn{3}{@{}l}{\textit{Path roles}}\\
+    \lstinline[style=causaldsl]|MEDIATORS ...|   & on a directed $T\!\to\!Y$ path & \texttt{causal.mediators} \\
+    \lstinline[style=causaldsl]|COLLIDERS ...|   & $\to Z \leftarrow$ on a path & \texttt{causal.colliders} \\
+    \lstinline[style=causaldsl]|CONFOUNDERS ...| & $\mathrm{an}(T)\cap\mathrm{an}(Y)$ & \texttt{causal.confounders} \\
+    \lstinline[style=causaldsl]|BACKDOOR PATHS ...| & path with edge into $T$ & \texttt{causal.backdoorVariables} \\
+    \addlinespace[2pt]
+    \multicolumn{3}{@{}l}{\textit{Independence \& identification}}\\
+    (inner test) & $X\!\perp\!Y\mid Z$ (d-sep) & \texttt{causal.dsep} \\
+    \lstinline[style=causaldsl]|IDENTIFY EFFECT ...| & backdoor criterion, adj.\ sets & \texttt{causal.adjustmentCandidate} \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+Structural operators map to procedures one-to-one. The reachability operators
+compile to \texttt{causal.parents}, \texttt{causal.children},
+\texttt{causal.ancestors}, and \texttt{causal.descendants}; the path-role
+operators to \texttt{causal.mediators}, \texttt{causal.colliders}, and
+\texttt{causal.confounders}; \lstinline[style=causaldsl]|BACKDOOR PATHS| to
+\texttt{causal.backdoorVariables}; and \lstinline[style=causaldsl]|IDENTIFY EFFECT|
+to \texttt{causal.adjustmentCandidate}, which returns whether an adjustment set
+exists, the candidate sets, and, under \lstinline[style=causaldsl]|EXPLAIN|, an
+explanation. D-separation is not a top-level keyword but the inner test that
+identification issues repeatedly; it is exposed as the \texttt{causal.dsep}
+procedure so that the cost of the traversal-intensive query (R2) is borne by a
+single indexed operator (\S\ref{sec:index}) rather than by client-side path
+enumeration. The quantitative statements (\lstinline[style=causaldsl]|INTERVENE|,
+\lstinline[style=causaldsl]|COUNTERFACTUAL|) are handled by the quantitative
+layer of \S\ref{sec:quant}; numeric intervention compiles to
+\texttt{causal.linearGaussianInference}, while world construction is resolved in
+the registry described next.
+
+\subsection{Model registry and causal worlds}\label{sec:lang:registry}
+
+A causal database is rarely a single fixed graph: a curator maintains several
+models, and an intervention $do(X{=}x)$ defines a \emph{derived} model, the same
+DAG with the edges into $X$ removed, that an analyst wants to name, query, and
+compare against the original. The language therefore addresses models by name.
+\lstinline[style=causaldsl]|DEFINE MODEL| registers a base model;
+\lstinline[style=causaldsl]|USE MODEL| makes a named model (base or derived) the
+active graph against which subsequent structural statements run; and
+\lstinline[style=causaldsl]|RESET| returns to the base model while leaving derived
+worlds registered and addressable. Context switching is resolved entirely in the registry and emits no Cypher, so moving between worlds costs a name lookup rather than a re-read of the graph. This registry is also the seam at which the quantitative layer attaches: an \lstinline[style=causaldsl]|INTERVENE| 
+statement materializes its derived world once and registers it under a canonical name, so that a later \lstinline[style=causaldsl]|USE MODEL| over that world reuses the same compiled snapshot. The mechanics of snapshotting a model, base or derived, into the layout the procedures read is the subject of the next section.

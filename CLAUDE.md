@@ -55,7 +55,7 @@ plugin/src/test/java/com/example/causal/
   runtime/       ← pure unit tests (TopologicalSorterTest)
   procedures/    ← integration tests using neo4j-harness (CausalProceduresTest)
 dev/
-  seed-dag.cypher  ← COVID-19 causal DAG (25 variables, 76 edges)
+  seed-dag.cypher  ← COVID-19 causal DAG (25 variables, 78 edges)
   seed.sh          ← loads seed-dag.cypher into local Neo4j via cypher-shell
 ```
 

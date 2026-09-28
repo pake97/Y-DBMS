@@ -1,0 +1,19 @@
+%% ============================================================================
+%% Section: Conclusion
+%% Included from main.tex via \input{sections/conclusion}
+%% ============================================================================
+\section{Conclusion}\label{sec:concl}
+
+Causal4j treats causal structural queries as a first-class, indexed workload
+inside a property-graph DBMS. It contributes a declarative causal query language
+that compiles to physical operators over the graph store, a compiled reachability
+index, dense CSR adjacency with topological-layer pruning and precomputed
+ancestor/descendant bitsets, that casts d-separation and adjustment-set
+enumeration as bitset operations, and an incremental maintenance scheme that keeps
+the index consistent as the graph is edited, all over a single authoritative
+model that stays queryable by ordinary Cypher. Future work includes cost-based
+selection between full-closure bitsets and layer-pruned traversal on large sparse
+DAGs, an ADMG/latent-projection index for models with unmeasured confounding,
+batched enumeration that shares work across the many d-separation tests an
+identification query issues, and integration with the DBMS concurrency and
+recovery model for multi-writer causal curation.

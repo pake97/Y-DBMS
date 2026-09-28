@@ -1,0 +1,80 @@
+%% ============================================================================
+%% Section: Related Work
+%% ============================================================================
+\section{Related Work}\label{sec:related}
+
+\noindent\textbf{Reachability indexing.} Answering reachability without
+per-query traversal is a long line of database research, from 2-hop
+labeling~\cite{cohen2003reachability} through scalable interval and label
+indexes such as GRAIL~\cite{yildirim2010grail}, FERRARI~\cite{seufert2013ferrari},
+TF-Label~\cite{cheng2013tflabel}, pruned landmark
+labeling~\cite{yano2013pruned}, IP$^+$~\cite{wei2014ip}, and
+BFL~\cite{su2017bfl}, to DAG reduction~\cite{zhou2017dagreduction} and
+O'Reach~\cite{hanauer2022oreach}; a recent survey covers the
+field~\cite{reachabilitysurvey2025}. These indexes answer point-to-point
+reachability on graphs with millions of nodes under a label-size budget. Our
+ancestor and descendant bitsets are a deliberately simple point in this
+space, a full transitive closure packed into machine words, chosen for two
+reasons: causal DAGs are small enough for the closure to fit, and the
+operators above reachability (confounders, forbidden sets, canonical
+adjustment sets, minimal separators) need whole ancestor and descendant sets,
+which bitsets deliver as one word-parallel operation. We bring a classical
+reachability trade-off to a workload that has not previously been treated as
+an indexed DBMS workload, and we maintain the closure incrementally, which
+label-based indexes typically do not.
+
+\noindent\textbf{Property-graph query languages.} Cypher and the GQL and
+SQL/PGQ standards~\cite{deutsch2022gql,francis2023gpc} express graph pattern
+matching and variable-length paths declaratively; our language compiles to
+Cypher plus procedures rather than replacing it. What these languages do not
+provide is conditioning-aware d-separation or adjustment-set construction as
+first-class operators: these are not path patterns, and expressing them in
+Cypher means client-side orchestration of many traversals. Our earlier vision
+paper~\cite{pachera2025whatif} argued for causal operators over property
+graphs and sketched extraction, do-calculus, and view-maintenance directions
+with a proof of concept on Neo4j; the present paper contributes what that
+vision left open, namely a concrete language, a physical index, the
+query-processing algorithms over it, incremental maintenance, and an
+evaluation, and a companion position paper~\cite{qiu2026causal} places such a
+store in a broader causal data-management ecosystem.
+
+\noindent\textbf{Causality in databases.} Database research has studied
+causal inference over relational data~\cite{salimi2018hypdb,salimi2020carl},
+hypothetical what-if and how-to queries with a probabilistic causal
+model~\cite{galhotra2022hyper}, causal data
+integration~\cite{youngmann2023integration}, and causality as a tool for
+explaining query answers~\cite{meliou2014causality}. In these works the
+causal model is an input to query answering over the data; in ours the causal
+DAG is the stored object and the operators are structural queries over it.
+The two are complementary: an identification query answered by Causal4j
+selects the adjustment set that a relational causal-inference engine then
+uses to estimate an effect.
+
+\noindent\textbf{Causal tooling and algorithms.} Causal analysis is dominated
+by standalone libraries (DoWhy~\cite{sharma2020dowhy},
+dagitty~\cite{textor2016dagitty}, pgmpy~\cite{ankan2024pgmpy},
+causal-learn~\cite{zheng2024causallearn}, Ananke~\cite{lee2023ananke}) that
+implement d-separation, the adjustment criterion, and identification over an
+in-memory graph. None is DBMS-resident: each requires exporting the DAG,
+computes in a separate process, and discards its representation, so none
+offers durable shared access, in-database querying, or maintenance under a
+changing graph. The algorithms we build on come from this community:
+Bayes-Ball~\cite{shachter1998bayesball} and the ancestral restriction of
+d-separation~\cite{geiger1990identifying}, the adjustment criterion and its
+completeness~\cite{shpitser2010validity,perkovic2018complete}, and the
+separator framework with its constructive identifiability test and
+polynomial-delay enumeration~\cite{textor2011adjustment,vanderzander2014constructing,vanderzander2019separators,vanderzander2020minimal}.
+We reuse their semantics (indeed we validate against dagitty in
+Section~\ref{sec:eval}) and relocate the computation inside the store, where
+the sets these algorithms consume are precomputed.
+
+\noindent\textbf{In-DBMS analytics and incremental maintenance.} Pushing
+analytics into the database through procedures and user-defined functions is
+established practice; our contribution is the physical design and query
+processing for causal operators, not the extension mechanism. Keeping the
+index consistent under updates connects to incremental view
+maintenance~\cite{gupta1995maintenance} and to dynamic transitive
+closure~\cite{demetrescu2004dynamic}: our insertion patch is an instance of
+maintaining a materialized closure under edge insertion, and our cone
+recompute bounds the non-local case of deletion by the ancestors and
+descendants of the deleted edge, with recompilation as the fallback.

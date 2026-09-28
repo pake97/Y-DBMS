@@ -1,0 +1,51 @@
+%% ============================================================================
+%% Figure: running example -- fragment of the COVID-19 causal DAG
+%% (Steiger et al. 2021). Edges are faithful to dev/seed-dag.cypher.
+%% Included from sections/01_introduction.tex inside a figure* env.
+%% Requires: \usepackage{tikz}; \usetikzlibrary{arrows.meta,positioning}
+%% ============================================================================
+\begin{tikzpicture}[
+    font=\scriptsize,
+    >={Stealth[length=1.8mm]},
+    node distance=6mm,
+    obs/.style={draw, rounded corners=1.5pt, minimum height=5.5mm,
+                inner sep=2.5pt, align=center, fill=white},
+    lat/.style={draw, dashed, rounded corners=1.5pt, minimum height=5.5mm,
+                inner sep=2.5pt, align=center, fill=white},
+    tnode/.style={obs, fill=black!12, very thick},
+    ynode/.style={obs, fill=black!12, very thick},
+    conf/.style={obs, draw=black, densely dotted, very thick},
+    edge/.style={->, gray!70},
+    bd/.style={->, thick},               % backdoor-path edge
+    every node/.style={outer sep=0pt}
+]
+
+% --- nodes (placed by topological flow, left -> right) ---
+\node[conf]  (burden) at (0.0, 1.5)  {covid19\_burden \\ \textit{(confounder)}};
+\node[tnode] (interv) at (0.0, 0.0)  {interventions \\ ($T$)};
+\node[obs]   (mob)    at (2.6, 0.8)  {mobility};
+\node[lat]   (exp)    at (5.0, 0.4)  {exposure\_sarscov2};
+\node[obs]   (acc)    at (6.6, 1.7)  {access\_tests};
+\node[obs]   (age)    at (7.8, -1.2) {age};
+\node[obs]   (sus)    at (10.2, -1.2){susceptibility};
+\node[lat]   (onset)  at (7.8, 0.4)  {onset\_covid19};
+\node[ynode] (rep)    at (10.2, 0.4) {reported\_cases \\ ($Y$)};
+
+% --- causal edges ---
+\draw[edge] (interv) -- (mob);
+\draw[edge] (burden) -- (mob);
+\draw[edge] (mob)    -- (exp);
+\draw[edge] (exp)    -- (acc);
+\draw[edge] (acc)    -- (onset);
+\draw[edge] (age)    -- (onset);
+\draw[edge] (age)    to[bend left=10] (exp);
+\draw[edge] (sus)    -- (onset);
+
+% --- backdoor path: T <- burden -> exposure -> onset -> reported ---
+\draw[bd] (burden) -- (interv);
+\draw[bd] (burden) to[bend left=12] (exp);
+\draw[edge] (interv) to[bend right=12] (exp);
+\draw[bd] (exp)    -- (onset);
+\draw[bd] (onset)  -- (rep);
+
+\end{tikzpicture}

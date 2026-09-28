@@ -1,0 +1,81 @@
+%% ============================================================================
+%% Figure: compiled index layout (dense CSR + reachability bitsets)
+%% Included from sections/indexing.tex inside a figure env via \resizebox{\input}.
+%% Requires: \usepackage{tikz}; \usetikzlibrary{positioning,fit}
+%% Example DAG: A(0)->B(1), A(0)->C(2), B(1)->D(3), C(2)->D(3)
+%% ============================================================================
+\begin{tikzpicture}[
+    font=\scriptsize,
+    >={Stealth[length=1.6mm]},
+    cell/.style={draw, minimum width=5.2mm, minimum height=5mm, inner sep=1pt,
+                 align=center, fill=white},
+    lab/.style={anchor=east, font=\scriptsize\itshape},
+    node distance=2mm,
+]
+
+% ---- tiny example DAG (top-left) ----
+\node[draw, circle, minimum size=5mm] (A) at (0,0)      {A};
+\node[draw, circle, minimum size=5mm] (B) at (1.1,0.7)  {B};
+\node[draw, circle, minimum size=5mm] (C) at (1.1,-0.7) {C};
+\node[draw, circle, minimum size=5mm] (D) at (2.2,0)    {D};
+\draw[->] (A) -- (B); \draw[->] (A) -- (C);
+\draw[->] (B) -- (D); \draw[->] (C) -- (D);
+\node[font=\scriptsize\itshape] at (1.1,-1.6) {DAG (indices A{=}0,B{=}1,C{=}2,D{=}3)};
+
+% ---- name -> index map ----
+\node[lab] (m0) at (5.2, 1.0) {nameToIndex:};
+\node[cell] (mA) at (6.1,1.0) {A:0};
+\node[cell, right=of mA] (mB) {B:1};
+\node[cell, right=of mB] (mC) {C:2};
+\node[cell, right=of mC] (mD) {D:3};
+
+% ---- forward CSR ----
+\node[lab] (f0) at (5.2, 0.3) {forwardAdj:};
+\node[cell] (f1) at (6.1,0.3) {1,2};
+\node[cell, right=of f1] (f2) {3};
+\node[cell, right=of f2] (f3) {3};
+\node[cell, right=of f3] (f4) {--};
+
+% ---- reverse CSR ----
+\node[lab] (r0) at (5.2, -0.4) {reverseAdj:};
+\node[cell] (r1) at (6.1,-0.4) {--};
+\node[cell, right=of r1] (r2) {0};
+\node[cell, right=of r2] (r3) {0};
+\node[cell, right=of r3] (r4) {1,2};
+
+% ---- topo order / layer ----
+\node[lab] (t0) at (5.2, -1.1) {topoOrder:};
+\node[cell] (t1) at (6.1,-1.1) {0};
+\node[cell, right=of t1] (t2) {1};
+\node[cell, right=of t2] (t3) {2};
+\node[cell, right=of t3] (t4) {3};
+\node[lab] (l0) at (5.2, -1.7) {topoLayer:};
+\node[cell] (l1) at (6.1,-1.7) {0};
+\node[cell, right=of l1] (l2) {1};
+\node[cell, right=of l2] (l3) {1};
+\node[cell, right=of l3] (l4) {2};
+
+% ---- ancestor bitsets (rows = variable, columns = bit for A B C D) ----
+\node[font=\scriptsize\itshape] at (1.4,-2.6) {ancestorBits[i] (bit set = ancestor)};
+\node[lab] at (-0.3,-3.2) {A}; \node[lab] at (-0.3,-3.7) {B};
+\node[lab] at (-0.3,-4.2) {C}; \node[lab] at (-0.3,-4.7) {D};
+% rows explicitly (A,B,C,D) x (A,B,C,D)
+\foreach \row/\y/\vals in {A/-3.2/{0/0,1/0,2/0,3/0}, B/-3.7/{0/1,1/0,2/0,3/0},
+                           C/-4.2/{0/1,1/0,2/0,3/0}, D/-4.7/{0/1,1/1,2/1,3/0}} {
+  \foreach \c/\v in \vals {
+    \node[cell, minimum width=4.5mm] at ({0.1+\c*0.5},\y) {\v};
+  }
+}
+
+% ---- descendant bitsets ----
+\node[font=\scriptsize\itshape] at (5.2,-2.6) {descendantBits[i] (bit set = descendant)};
+\node[lab] at (3.6,-3.2) {A}; \node[lab] at (3.6,-3.7) {B};
+\node[lab] at (3.6,-4.2) {C}; \node[lab] at (3.6,-4.7) {D};
+\foreach \row/\y/\vals in {A/-3.2/{0/0,1/1,2/1,3/1}, B/-3.7/{0/0,1/0,2/0,3/1},
+                           C/-4.2/{0/0,1/0,2/0,3/1}, D/-4.7/{0/0,1/0,2/0,3/0}} {
+  \foreach \c/\v in \vals {
+    \node[cell, minimum width=4.5mm] at ({4.0+\c*0.5},\y) {\v};
+  }
+}
+
+\end{tikzpicture}

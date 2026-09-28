@@ -1,0 +1,154 @@
+%% ============================================================================
+%% Section: Introduction
+%% ============================================================================
+\section{Introduction}\label{sec:intro}
+
+Causal directed acyclic graphs (DAGs) are widely adopted as the reference
+model for reasoning about cause and effect across epidemiology, public health,
+economics, and the empirical social sciences, to name a few. In a causal DAG
+the nodes are variables and the edges encode direct causal
+influence~\cite{pearl2009causality}, and analysts interrogate the graph with
+\textit{structural} questions: which variables confound the effect of a
+treatment $T$ on an outcome $Y$, whether a valid adjustment set exists and
+which one it is, or whether $X$ is independent of $Y$ once $Z$ is held fixed.
+Each of these questions is answered from the topology of the DAG alone. Such
+DAGs are no longer small hand-drawn diagrams: they are large, continually
+revised, and increasingly stored and versioned inside graph databases next to
+the domain data they describe~\cite{pachera2025whatif,qiu2026causal}.
+
+However, causal analysis is today divorced from the systems that store the
+graph. The prevailing practice is to export the DAG into a standalone library
+(e.g., DoWhy~\cite{sharma2020dowhy}, dagitty~\cite{textor2016dagitty},
+pgmpy~\cite{ankan2024pgmpy}, or causal-learn~\cite{zheng2024causallearn}),
+compute the answer in a separate process, and discard the in-memory
+representation afterwards. This round-trip forfeits precisely the properties a
+database is built to provide: durable and concurrent access to a single
+authoritative model, declarative querying, integration with co-located data,
+and incremental response to a changing graph. When an edge is added or a
+variable is reclassified as latent, the whole model has to be re-extracted and
+every downstream structure rebuilt from scratch. To the best of our knowledge,
+no graph DBMS treats causal structural queries as a first-class, indexed
+workload.
+
+Previous work touching this problem follows three lines. (i) Causal
+libraries~\cite{sharma2020dowhy,textor2016dagitty,ankan2024pgmpy,zheng2024causallearn,lee2023ananke}
+implement d-separation, the adjustment criterion, and identification over an
+in-memory graph, with efficient algorithms for the identification
+problems~\cite{vanderzander2019separators,vanderzander2020minimal}; none is
+DBMS-resident. (ii) Database research on causality has addressed causal
+inference over relational data, hypothetical what-if queries, and causal data
+integration~\cite{salimi2018hypdb,salimi2020carl,galhotra2022hyper,youngmann2023integration},
+where the causal model is an input to query answering rather than a stored
+object with its own operators. (iii) Graph database research offers mature
+reachability indexes~\cite{yildirim2010grail,cheng2013tflabel,zhou2017dagreduction}
+and declarative pattern languages~\cite{deutsch2022gql}, but neither
+d-separation nor adjustment-set enumeration is a path pattern, and neither has
+been treated as an indexed workload. These lines face a common limitation:
+the operators the analyst needs are implemented far from the store, and the
+store offers no operator that understands edge orientation and conditioning.
+
+\begin{figure*}[t]
+    \centering
+    \input{figures/running-example}
+    \caption{A fragment of the COVID-19 causal DAG of Steiger et
+    al.~\cite{steiger2021covid} used as running example. Solid boxes are
+    observed variables, dashed boxes are latent ones. \textit{interventions}
+    ($T$) and \textit{reported\_cases} ($Y$) are the treatment and the outcome
+    of the queries of Section~\ref{sec:intro}; \textit{covid19\_burden} is a
+    common cause of both and opens the backdoor path drawn in bold.}
+    \label{fig:example}
+\end{figure*}
+
+Fig.~\ref{fig:example} shows a fragment of a COVID-19 causal DAG curated by
+epidemiologists~\cite{steiger2021covid}, stored as a property graph, on
+which we consider three situations. (a) An analyst asks for the confounders
+of \textit{interventions} and \textit{reported\_cases}: the answer,
+\textit{covid19\_burden}, is the intersection of two ancestor sets, a query a
+graph database can answer only with two variable-length path traversals
+followed by a client-side intersection. (b) The analyst asks whether
+\textit{susceptibility} is independent of \textit{age} given
+\textit{reported\_cases}: the two variables share no ancestor and are
+independent, but conditioning on \textit{reported\_cases}, a descendant of the
+collider \textit{onset\_covid19}, opens the path between them, so the answer
+depends on edge orientation and on the conditioning set, which no path pattern
+expresses. (c) A curator adds an edge from \textit{access\_tests} to
+\textit{reported\_cases} as new evidence accrues: every ancestor set computed
+so far for \textit{reported\_cases} is stale, and an external tool has no way
+to know it.
+
+Based on the above observations, one can notice a gap between what the store
+offers and what the workload needs. Three difficulties stand in the way of
+closing it, and none is solved by wrapping a library behind a stored
+procedure. First, the operators are not all plain reachability: d-separation
+and adjustment-set construction depend on the conditioning set and on edge
+orientation, and require a conditioning-aware traversal rather than a
+transitive closure. Second, answered by traversing the stored graph on every
+call, each query costs $O(|V|+|E|)$, and identification issues many such
+queries, so per-query traversal does not scale to large DAGs or high query
+volume. Third, the structure that accelerates these queries must survive
+updates: a causal graph under active curation cannot afford a full
+recompilation after every edit.
+
+A key requirement for any solution is therefore a representation of the DAG
+from which whole ancestor and descendant sets, not only point-to-point
+reachability, can be read in constant or near-constant time, because every
+operator in the causal catalog (confounders, mediators, the forbidden set of
+an adjustment problem, the canonical adjustment set) is an algebraic
+combination of such sets. Precomputed reachability closures stored as bitsets
+meet this requirement: a closure is one array read, an intersection is one
+word-parallel operation, and the linear-time identification algorithms of
+van der Zander et al.~\cite{vanderzander2019separators} consume exactly these
+sets. We therefore build the index around them and design the query
+processing and the maintenance around what they make cheap.
+
+We present \textbf{Causal4j}, a system that makes causal structural queries a
+native, indexed workload inside a property-graph DBMS (Neo4j). Causal4j has
+three parts, shown in Fig.~\ref{fig:arch}: a declarative causal query language
+whose statements compile to physical operators over the graph store, a
+compiled causal index that snapshots the stored DAG into a dense layout with
+precomputed ancestor and descendant bitsets, and an incremental maintenance
+scheme that keeps the index consistent as the graph is edited. In sum, we make
+the following contributions.
+\begin{itemize}
+  \item We propose a declarative causal query language embedded in a graph
+  DBMS, covering reachability, path roles, independence, identification, and a
+  quantitative layer, together with its compilation from language operators to
+  Cypher writes and physical procedures (Section~\ref{sec:lang}).
+  \item We introduce a compiled reachability index for causal DAGs (dense CSR
+  adjacency, topological layers, and ancestor/descendant bitsets) and the
+  query-processing algorithms built on it: bitset algebra for reachability and
+  path roles, ancestral masking for d-separation, and identification by
+  covariate adjustment through the constructive criterion and polynomial-delay
+  enumeration of minimal adjustment sets (Section~\ref{sec:index}).
+  \item We formalize incremental maintenance of the index under edge and
+  variable mutations, with an insertion patch and a deletion recompute both
+  bounded by the affected cone of the graph, and we use the same machinery to
+  derive interventional worlds by graph surgery (Section~\ref{sec:incr}).
+  \item We evaluate Causal4j on standard Bayesian-network DAGs and synthetic
+  DAGs against in-DBMS traversal, Cypher, Neo4j GDS, and external causal
+  libraries. The results show that \TODO{headline: $N\times$ lower latency on
+  identification, index build under $X$~ms, incremental update $Y$ against
+  $Z$ for recompilation, exact agreement with dagitty on every verdict}
+  (Section~\ref{sec:eval}).
+\end{itemize}
+
+\begin{figure}[t]
+    \centering
+    \resizebox{\linewidth}{!}{\input{figures/architecture}}
+    \caption{Causal4j architecture. A statement is parsed and compiled into
+    Cypher writes (definitions) or calls to \texttt{causal.*} procedures
+    (queries); the procedures read a compiled snapshot of the stored DAG held
+    by the plugin, which a transaction listener keeps consistent under
+    updates.}
+    \label{fig:arch}
+\end{figure}
+
+The remainder of the paper is structured as follows.
+Section~\ref{sec:bg} defines causal DAGs, the query catalog, and the problem.
+Section~\ref{sec:lang} presents the language and its compilation, and
+Section~\ref{sec:compile} the compilation of the stored graph into a snapshot.
+Section~\ref{sec:index} presents the index and the query-processing
+algorithms, Section~\ref{sec:incr} incremental maintenance, and
+Section~\ref{sec:quant} the quantitative layer. Section~\ref{sec:eval} reports
+the experimental evaluation and Section~\ref{sec:related} discusses related
+work. Finally, Section~\ref{sec:conclusion} concludes the paper.

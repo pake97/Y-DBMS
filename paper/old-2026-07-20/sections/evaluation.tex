@@ -1,0 +1,77 @@
+%% ============================================================================
+%% Section: Evaluation
+%% Included from main.tex via \input{sections/evaluation}
+%% Owns Fig fig:latency and Fig fig:incr (referenced from \S7).
+%% SKELETON: experimental design is written; all quantitative results are \TODO
+%% pending measurement. See the status note.
+%% ============================================================================
+\section{Evaluation}\label{sec:eval}
+
+\NOTE{Status: this section is the experimental \emph{design}. No results are
+measured yet; every number is a \TODO. Do not submit without filling these. The
+prose fixes the questions, baselines, datasets, and metrics so the harness has a
+target; keep the ``pending'' framing until the artifact produces numbers.}
+
+Our evaluation asks five questions. \textbf{RQ1 (query performance):} how do
+Causal4j's structural and identification queries compare in latency and
+throughput against alternatives? \textbf{RQ2 (index cost):} what does the
+compiled index cost to build and to store, as a function of graph size and
+density? \textbf{RQ3 (maintenance):} when does incremental maintenance beat full
+recompilation? \textbf{RQ4 (scalability):} how does query latency grow with
+$|V|$? \textbf{RQ5 (correctness):} do the answers agree with established causal
+tools?
+
+\paragraph{Baselines}
+We compare four points along the ``how close to the DBMS'' axis: (a) an in-DBMS
+map-of-sets adjacency with per-query DFS---the un-indexed baseline of
+Table~\ref{tab:complexity}; (b) plain Cypher variable-length path queries
+answering the same structural questions declaratively; (c) Neo4j GDS traversal
+primitives~\cite{TODO_neo4j}; and (d) round-tripping the DAG to external causal
+libraries---DoWhy~\cite{TODO_dowhy}, dagitty~\cite{TODO_dagitty},
+pgmpy~\cite{TODO_pgmpy}, and causal-learn~\cite{TODO_causallearn}---which
+includes export/import cost, the overhead our in-DBMS design removes.
+
+\paragraph{Datasets}
+We use standard Bayesian-network DAGs of increasing size (from small networks such
+as \textsc{asia} and \textsc{sachs} through \textsc{alarm} and \textsc{hepar2} to
+large ones such as \textsc{munin}), synthetic scale-free DAGs generated with a
+preferential-attachment model to control $|V|$ and density independently, and the
+COVID-19 running-example DAG~\cite{piccininni2020covid}. \TODO{Fix the exact
+network list and the synthetic $|V|$ grid ($10^2$--$10^4$) and edge-density
+settings; state the generator and seeds for reproducibility.}
+
+\paragraph{Metrics and protocol}
+For RQ1 we report median and tail latency and sustained throughput per operator
+(ancestors/descendants, d-separation, adjustment-set enumeration). For RQ2, index
+build time and resident memory vs.\ $|V|$ and density. For RQ3, wall-clock of an
+incremental batch vs.\ a full recompile across batch sizes and edit types
+(insert, delete, active/latent flip). For RQ4, latency vs.\ $|V|$ on a log--log
+scale. For RQ5, exact agreement of d-separation verdicts and adjustment sets
+against dagitty and causal-learn on every dataset. \TODO{State hardware, JVM
+version and heap, Neo4j version, warmup and repeat counts, and report variance
+(CI or IQR), per the reproducibility brief in the outline.}
+
+\paragraph{Expected results (to be measured)}
+On DAGs from \TODO{$V_{\min}$} to \TODO{$V_{\max}$} variables we expect Causal4j
+to answer d-separation and adjustment-set queries \TODO{$N\times$} faster than
+in-DBMS DFS and \TODO{$M\times$} faster than an external round-trip, to build its
+index in \TODO{under X\,ms}, and to apply an incremental edge batch in
+\TODO{Y} versus \TODO{Z} for a full recompile, while matching the reference tools
+exactly on correctness (RQ5). Figures~\ref{fig:latency} and~\ref{fig:incr} report
+RQ4 and RQ3 respectively.
+
+\begin{figure}[t]\centering
+  \fbox{\parbox{0.9\linewidth}{\centering \TODO{Fig.: query latency vs.\ $|V|$
+  (log--log), one line per method (Causal4j index, DFS baseline, Cypher, GDS,
+  external round-trip).}}}
+  \caption{Query latency vs.\ graph size (RQ4). \emph{Pending measurement.}}
+  \label{fig:latency}
+\end{figure}
+
+\begin{figure}[t]\centering
+  \fbox{\parbox{0.9\linewidth}{\centering \TODO{Fig.: incremental update vs.\
+  full recompile, by batch size and edit type; mark the crossover.}}}
+  \caption{Incremental maintenance vs.\ recompilation (RQ3). \emph{Pending
+  measurement.}}
+  \label{fig:incr}
+\end{figure}
