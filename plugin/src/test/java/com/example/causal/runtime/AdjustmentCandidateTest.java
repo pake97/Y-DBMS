@@ -8,7 +8,6 @@ import com.example.causal.runtime.model.Variable;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
 import java.time.Instant;
 import java.util.*;
 
@@ -87,9 +86,7 @@ class AdjustmentCandidateTest {
 
     private static DefaultCausalGraphRuntime runtimeWithSnapshot(CompiledCausalGraph graph) throws Exception {
         DefaultCausalGraphRuntime rt = new DefaultCausalGraphRuntime();
-        Field snapshotField = DefaultCausalGraphRuntime.class.getDeclaredField("snapshot");
-        snapshotField.setAccessible(true);
-        snapshotField.set(rt, graph);
+        rt.install(graph);
         return rt;
     }
 

@@ -7,7 +7,6 @@ import com.example.causal.runtime.algorithms.TopologicalSorter;
 import com.example.causal.runtime.model.Variable;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.Constructor;
 import java.time.Instant;
 import java.util.*;
@@ -73,9 +72,7 @@ class DSeparationBayesBallTest {
 
     private static DefaultCausalGraphRuntime runtimeWithSnapshot(CompiledCausalGraph graph) throws Exception {
         DefaultCausalGraphRuntime rt = new DefaultCausalGraphRuntime();
-        Field snapshotField = DefaultCausalGraphRuntime.class.getDeclaredField("snapshot");
-        snapshotField.setAccessible(true);
-        snapshotField.set(rt, graph);
+        rt.install(graph);
         return rt;
     }
 

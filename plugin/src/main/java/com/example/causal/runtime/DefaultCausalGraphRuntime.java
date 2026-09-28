@@ -22,23 +22,15 @@ import java.util.*;
  * <p>Neo4j instantiates procedure classes per-call, so this runtime must not
  * live inside a procedure class. It is accessed through {@link RuntimeRegistry}.
  *
- * <h2>Student A implementation surface</h2>
- * <ul>
- *   <li>{@link #isDSeparated} — implement Bayes Ball or Shpitser's algorithm.</li>
- *   <li>{@link #candidateAdjustmentSet} — implement backdoor criterion (or
- *       front-door, or ID algorithm) against the compiled graph.</li>
- *   <li>Replace per-query {@link ReachabilityIndex} construction with a cached
- *       index built at compile time once the bitset layout is ready.</li>
- * </ul>
+ * <p>One {@link ReachabilityIndex} is built per snapshot in {@link #compile};
+ * it reads the closures {@link CompiledCausalGraph} precomputes. See
+ * {@code CODE-PLAN.md} for the index work plan.
  */
 public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
 
     private volatile CompiledCausalGraph snapshot;
 
-    // TODO(student, tier 2): cache a ReachabilityIndex here once bitsets are
-    // pre-computed in CompiledCausalGraph. Tier 1 work can ignore this — the
-    // current per-query allocation is cheap against today's DFS implementation.
-    // private volatile ReachabilityIndex reachabilityIndex;
+    private volatile ReachabilityIndex reachability;
 
     public DefaultCausalGraphRuntime() {}
 
@@ -48,16 +40,22 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
 
     @Override
     public synchronized GraphSnapshot compile(GraphCompileOptions options) {
-        snapshot = GraphLoader.load(options);
-        snapshot.logStructure();  // prints adjacency lists + topo order — check the log to verify your structures
-        // TODO(student, tier 2): rebuild the cached ReachabilityIndex here once
-        // CompiledCausalGraph owns the ancestor/descendant bitsets.
-        return snapshot;
+        CompiledCausalGraph g = GraphLoader.load(options);
+        install(g);
+        g.logStructure();  // adjacency, topo order, layers, closures
+        return g;
+    }
+
+    /** Publish {@code g} and its index. Package-private so unit tests can skip Neo4j. */
+    synchronized void install(CompiledCausalGraph g) {
+        snapshot = g;
+        reachability = new ReachabilityIndex(g);
     }
 
     @Override
     public synchronized void invalidate() {
         snapshot = null;
+        reachability = null;
     }
 
     // -------------------------------------------------------------------------
@@ -95,8 +93,7 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
 
     @Override
     public Set<VariableRef> ancestors(Set<VariableRef> vars) {
-        CompiledCausalGraph g = requireSnapshot();
-        ReachabilityIndex idx = new ReachabilityIndex(g);
+        ReachabilityIndex idx = requireIndex();
         Set<VariableRef> result = new LinkedHashSet<>();
         for (VariableRef v : vars) {
             for (String aid : idx.ancestors(v.id())) result.add(new VariableRef(aid));
@@ -106,8 +103,7 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
 
     @Override
     public Set<VariableRef> descendants(Set<VariableRef> vars) {
-        CompiledCausalGraph g = requireSnapshot();
-        ReachabilityIndex idx = new ReachabilityIndex(g);
+        ReachabilityIndex idx = requireIndex();
         Set<VariableRef> result = new LinkedHashSet<>();
         for (VariableRef v : vars) {
             for (String did : idx.descendants(v.id())) result.add(new VariableRef(did));
@@ -117,7 +113,7 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
 
     @Override
     public boolean hasDirectedPath(VariableRef x, VariableRef y) {
-        return new ReachabilityIndex(requireSnapshot()).hasDirectedPath(x.id(), y.id());
+        return requireIndex().hasDirectedPath(x.id(), y.id());
     }
 
     // -------------------------------------------------------------------------
@@ -215,7 +211,7 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
             String treatmentId,
             String outcomeId
     ) {
-        Set<String> descendantsOfTreatment = new ReachabilityIndex(g).descendants(treatmentId);
+        Set<String> descendantsOfTreatment = requireIndex().descendants(treatmentId);
         List<String> eligibleIds = new ArrayList<>();
         for (String id : g.topoOrder()) {
             if (id.equals(treatmentId) || id.equals(outcomeId)) continue;
@@ -448,5 +444,14 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
                     "No compiled snapshot available. Call CALL causal.compile() first.");
         }
         return g;
+    }
+
+    private ReachabilityIndex requireIndex() {
+        ReachabilityIndex idx = reachability;
+        if (idx == null) {
+            throw new IllegalStateException(
+                    "No compiled snapshot available. Call CALL causal.compile() first.");
+        }
+        return idx;
     }
 }
