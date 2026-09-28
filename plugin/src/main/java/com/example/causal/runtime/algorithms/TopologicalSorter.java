@@ -5,10 +5,8 @@ import java.util.*;
 /**
  * Topological sort of a directed acyclic graph using Kahn's algorithm.
  *
- * <p>Input and output use string variable ids. Once Student A introduces the
- * dense integer layout in {@link com.example.causal.runtime.compile.CompiledCausalGraph},
- * this class should be updated to operate on {@code int[]} arrays directly,
- * eliminating hashing overhead.
+ * <p>Input and output use string variable ids. It runs once per compile, on
+ * the loader's maps, before the dense layout is built.
  */
 public final class TopologicalSorter {
 

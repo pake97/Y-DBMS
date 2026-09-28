@@ -117,7 +117,7 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     }
 
     // -------------------------------------------------------------------------
-    // Causal identification — Tier 1 for Student A
+    // Causal identification
     // -------------------------------------------------------------------------
 
     @Override
@@ -358,9 +358,7 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     }
 
     // -------------------------------------------------------------------------
-    // Path-based structural queries — delegate to PathAnalyzer (implemented).
-    // These are the worked Tier 1 example; isDSeparated / candidateAdjustmentSet
-    // above follow the same delegation-to-an-algorithm-class shape.
+    // Path-based structural queries — delegate to PathAnalyzer.
     // -------------------------------------------------------------------------
 
     @Override
