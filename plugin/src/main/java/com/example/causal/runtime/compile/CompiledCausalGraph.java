@@ -2,6 +2,7 @@ package com.example.causal.runtime.compile;
 
 import com.example.causal.api.GraphSnapshot;
 import com.example.causal.api.VariableRef;
+import com.example.causal.runtime.index.BitSet64;
 import com.example.causal.runtime.model.Variable;
 
 import java.time.Instant;
@@ -11,95 +12,34 @@ import java.util.logging.Logger;
 /**
  * Immutable compiled representation of the causal DAG.
  *
- * <p>This is the central data structure that Student A is responsible for
- * optimising. The current implementation uses plain Java collections.
- *
- * <h2>Student A implementation plan</h2>
- *
- * The plan is tiered — only Tier 1 is needed for the procedures to be
- * functionally complete. Tier 2 and 3 are performance and ergonomics.
- *
- * <h3>Tier 1 — required for the plugin to answer every DSL query</h3>
- * <ol>
- *   <li>Implement the path-based queries in
- *       {@link com.example.causal.runtime.algorithms.PathAnalyzer}
- *       (mediators, colliders, confounders, backdoorVariables).
- *       Unblocks {@code MEDIATORS / COLLIDERS / CONFOUNDERS / BACKDOOR}
- *       in the DSL. Nothing here needs to change yet.</li>
- *   <li>Implement d-separation and the backdoor criterion in
- *       {@link com.example.causal.runtime.DefaultCausalGraphRuntime}
- *       (see TODOs there). Unblocks {@code causal.dsep} and
- *       {@code causal.adjustmentCandidate}, which currently return
- *       {@code .unimplemented()} placeholders.</li>
- * </ol>
- *
- * <h3>Tier 2 — performance refactor (snapshot layout + bitsets)</h3>
- * <ol>
- *   <li>Replace the Map-based adjacency in this class with a dense
- *       {@code int}-indexed layout:
- *       <pre>
- *         Map&lt;String, Integer&gt; nameToIndex;   // variable id → dense int index
- *         Variable[]           indexToVar;     // dense index → Variable
- *         int[][]              forwardAdj;     // index → int[] of child indices
- *         int[][]              reverseAdj;     // index → int[] of parent indices
- *         int[]                topoOrder;      // topological order as int indices
- *         int[]                topoLayer;      // layer per node (0 = source); prunes traversals
- *       </pre>
- *   </li>
- *   <li>Pre-compute ancestor/descendant bitsets per variable (drives the
- *       speedup for every structural query):
- *       <pre>
- *         long[][] ancestorBits;    // ancestorBits[i] = ancestors of i as a bitset
- *         long[][] descendantBits;  // descendantBits[i] = descendants of i as a bitset
- *       </pre>
- *       Fill in reverse topological order:
- *       {@code ancestorBits[i] = ⋃ (ancestorBits[p] | setBit(p))} over parents p.
- *       Store these here and let {@link com.example.causal.runtime.algorithms.ReachabilityIndex}
- *       read them.</li>
- *   <li>Expose {@code topoIndex(String id)} as an O(1) map lookup (replaces
- *       the current {@link #topoIndex} {@code indexOf} scan).</li>
- * </ol>
- *
- * <h3>Tier 3 — optional ergonomics / lazy caches</h3>
+ * <p>Alongside the id-keyed maps (kept for the string-level API), the
+ * constructor builds a dense, integer-indexed layout:
  * <ul>
- *   <li>One-liner derived sets on top of the bitsets, computed lazily:
- *       {@code markovBlanket(v) = parents ∪ children ∪ parents_of_children},
- *       {@code forbiddenAdjustmentSet(t, y)} = descendants of {@code t} that
- *       lie on a directed path to {@code y} (used by the DSL's
- *       {@code ESTIMATE} validator).</li>
- *   <li>Lazy pair-index cache: {@code Map<(treatment, outcome), PairFacts>}
- *       with {@code hasDirectedPath / hasBackdoorPath / mediatorsBitset /
- *       minimalAdjustmentSetsRef}. Add only if profiling shows the same
- *       pairs are queried repeatedly.</li>
+ *   <li>{@code nameToIndex} / {@code indexToVar}: dense index {@code 0..n-1}
+ *       in loader insertion order;</li>
+ *   <li>CSR adjacency: children of {@code i} are
+ *       {@code fwdTarget[fwdOffset[i] .. fwdOffset[i+1])}, parents likewise
+ *       in {@code revOffset}/{@code revTarget};</li>
+ *   <li>{@code topoOrderIdx}, its inverse {@code topoPos}, and
+ *       {@code topoLayer} (0 for sources, else 1 + max layer of parents);</li>
+ *   <li>ancestor/descendant closures as one {@code long[words]} bitset per
+ *       node ({@link BitSet64}); a node's own bit is never set.</li>
  * </ul>
+ * The closures cost {@code 2 * n * ceil(n/64)} longs (about {@code n^2/4}
+ * bytes: 250 KB at n = 1000, 25 MB at n = 10 000). Every array is filled in
+ * the constructor and never written again. See {@code CODE-PLAN.md} (WP1).
  *
- * <h3>Explicitly out of scope for v1</h3>
- * <ul>
- *   <li>Materialising derived relationships as Neo4j edges
- *       ({@code :ANCESTOR_OF}, {@code :IN_TOPO_LAYER}, etc.) — the snapshot
- *       is the single source of truth; duplicating it in the graph doubles
- *       the invalidation burden. Expose derived facts through
- *       {@code causal.*} procedures instead.</li>
- *   <li>Districts / c-components (ADMG / latent projection), path-pattern
- *       signature caches, spouse sets — only needed if d-separation is
- *       implemented via the moral graph or if the DSL grows an ADMG layer.</li>
- * </ul>
- *
- * <h2>Verifying your structures</h2>
- * Call {@link #logStructure()} after any structural change — it prints the full
- * adjacency lists and topological order to the console so you can eyeball correctness.
- * {@link com.example.causal.runtime.DefaultCausalGraphRuntime#compile} calls it
- * automatically every time the graph is compiled.
+ * <p>{@link #logStructure()} dumps all of this; it runs on every compile.
  */
 public final class CompiledCausalGraph implements GraphSnapshot {
 
     private static final Logger LOG = Logger.getLogger(CompiledCausalGraph.class.getName());
 
     private final Instant compiledAt;
-    private final Map<String, Variable> variableById;      // TODO(student, tier 2): → dense int[] layout
-    private final Map<String, Set<String>> forwardAdj;     // TODO(student, tier 2): → int[][] forwardAdj
-    private final Map<String, Set<String>> reverseAdj;     // TODO(student, tier 2): → int[][] reverseAdj
-    private final List<String> topoOrder;                  // TODO(student, tier 2): → int[] topoOrder
+    private final Map<String, Variable> variableById;
+    private final Map<String, Set<String>> forwardAdj;
+    private final Map<String, Set<String>> reverseAdj;
+    private final List<String> topoOrder;
 
     // ── Linear-Gaussian SEM parameters ───────────────────────────────────────
     /** Edge coefficients β, keyed child → (parent → β). Immutable deep copy. */
@@ -107,10 +47,18 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     /** True when at least one SEM parameter differs from the default. */
     private final boolean parameterized;
 
-    // TODO(student, tier 2): add alongside the dense layout
-    // private final int[]    topoLayer;       // layer per node (0 = source)
-    // private final long[][] ancestorBits;    // ancestorBits[i] = bitset of ancestors of i
-    // private final long[][] descendantBits;  // descendantBits[i] = bitset of descendants of i
+    // ── Dense layout + closures (see class Javadoc) ───────────────────────
+    private final int n;
+    private final Map<String, Integer> nameToIndex;
+    private final Variable[] indexToVar;
+    private final int[] fwdOffset, fwdTarget;
+    private final int[] revOffset, revTarget;
+    private final int[] topoOrderIdx;
+    private final int[] topoPos;
+    private final int[] topoLayer;
+    private final int words;
+    private final long[][] ancestorBits;
+    private final long[][] descendantBits;
 
     /**
      * Full constructor including linear-Gaussian SEM edge weights.
@@ -129,7 +77,87 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         this.topoOrder    = Collections.unmodifiableList(new ArrayList<>(topoOrder));
         this.edgeWeights  = Collections.unmodifiableMap(deepCopyWeights(edgeWeights));
         this.compiledAt   = compiledAt;
+
+        // 1. dense index in loader order
+        this.n = this.variableById.size();
+        Map<String, Integer> idx = new LinkedHashMap<>();
+        this.indexToVar = new Variable[n];
+        for (Variable v : this.variableById.values()) {
+            indexToVar[idx.size()] = v;
+            idx.put(v.id(), idx.size());
+        }
+        this.nameToIndex = Collections.unmodifiableMap(idx);
+
+        // 2. CSR adjacency
+        this.fwdOffset = new int[n + 1];
+        this.fwdTarget = csr(this.forwardAdj, fwdOffset);
+        this.revOffset = new int[n + 1];
+        this.revTarget = csr(this.reverseAdj, revOffset);
+        if (fwdOffset[n] != revOffset[n]) {
+            throw new IllegalStateException("forward/reverse adjacency disagree: "
+                    + fwdOffset[n] + " vs " + revOffset[n] + " edges");
+        }
+
+        // 3. topological order as indices (TopologicalSorter already checked acyclicity)
+        this.topoOrderIdx = new int[n];
+        this.topoPos = new int[n];
+        for (int k = 0; k < n; k++) {
+            int i = nameToIndex.get(this.topoOrder.get(k));
+            topoOrderIdx[k] = i;
+            topoPos[i] = k;
+        }
+
+        // 4. layers, 5. ancestor closure: one forward-topological pass
+        this.words = BitSet64.words(n);
+        this.topoLayer = new int[n];
+        this.ancestorBits = new long[n][];
+        for (int i : topoOrderIdx) {
+            long[] anc = new long[words];
+            int layer = 0;
+            for (int e = revOffset[i]; e < revOffset[i + 1]; e++) {
+                int p = revTarget[e];
+                BitSet64.or(anc, ancestorBits[p]);
+                BitSet64.set(anc, p);
+                layer = Math.max(layer, topoLayer[p] + 1);
+            }
+            topoLayer[i] = layer;
+            ancestorBits[i] = anc;
+        }
+
+        // 6. descendant closure: one reverse-topological pass
+        this.descendantBits = new long[n][];
+        for (int k = n - 1; k >= 0; k--) {
+            int i = topoOrderIdx[k];
+            long[] des = new long[words];
+            for (int e = fwdOffset[i]; e < fwdOffset[i + 1]; e++) {
+                int c = fwdTarget[e];
+                BitSet64.or(des, descendantBits[c]);
+                BitSet64.set(des, c);
+            }
+            descendantBits[i] = des;
+        }
+
         this.parameterized = computeParameterized();
+    }
+
+    /** Fill {@code offset} and return the target array for one adjacency direction. */
+    private int[] csr(Map<String, Set<String>> adj, int[] offset) {
+        int m = 0;
+        for (int i = 0; i < n; i++) {
+            offset[i] = m;
+            m += adj.getOrDefault(indexToVar[i].id(), Set.of()).size();
+        }
+        offset[n] = m;
+        int[] target = new int[m];
+        for (int i = 0; i < n; i++) {
+            int e = offset[i];
+            for (String id : adj.getOrDefault(indexToVar[i].id(), Set.of())) {
+                Integer j = nameToIndex.get(id);
+                if (j == null) throw new IllegalStateException("edge endpoint `" + id + "` is not a variable");
+                target[e++] = j;
+            }
+        }
+        return target;
     }
 
     // -------------------------------------------------------------------------
@@ -171,12 +199,50 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         return topoOrder;
     }
 
-    /**
-     * Topological position of the variable (0 = source), or -1 if unknown.
-     * TODO(student, tier 2): replace with O(1) map lookup once dense layout is in place.
-     */
+    /** Topological position of the variable (0 = source), or -1 if unknown. */
     public int topoIndex(String id) {
-        return topoOrder.indexOf(id);
+        int i = indexOf(id);
+        return i < 0 ? -1 : topoPos[i];
+    }
+
+    // -------------------------------------------------------------------------
+    // Index-level accessors (dense int ids)
+    // -------------------------------------------------------------------------
+
+    /** Dense index of {@code id}, or -1 if unknown. */
+    public int indexOf(String id) {
+        Integer i = nameToIndex.get(id);
+        return i == null ? -1 : i;
+    }
+
+    public String idOf(int i)          { return indexToVar[i].id(); }
+    public Variable variableAt(int i)  { return indexToVar[i]; }
+    public int wordCount()             { return words; }
+    public int layer(int i)            { return topoLayer[i]; }
+    public int topoPosition(int i)     { return topoPos[i]; }
+
+    /** Ancestors of {@code i} as a bitset. The internal array: callers must not mutate it. */
+    public long[] ancestorBits(int i)   { return ancestorBits[i]; }
+
+    /** Descendants of {@code i} as a bitset. The internal array: callers must not mutate it. */
+    public long[] descendantBits(int i) { return descendantBits[i]; }
+
+    /** True if there is a directed path {@code from → … → to} of length ≥ 1. */
+    public boolean reaches(int from, int to) {
+        return BitSet64.get(descendantBits[from], to);
+    }
+
+    /** Children of {@code i} (a copy of the CSR slice, in loader order). */
+    public int[] childrenOf(int i) { return Arrays.copyOfRange(fwdTarget, fwdOffset[i], fwdOffset[i + 1]); }
+
+    /** Parents of {@code i} (a copy of the CSR slice, in loader order). */
+    public int[] parentsOf(int i)  { return Arrays.copyOfRange(revTarget, revOffset[i], revOffset[i + 1]); }
+
+    /** Ids of the set bits, in ascending index order. */
+    public Set<String> toIds(long[] bits) {
+        Set<String> out = new LinkedHashSet<>();
+        BitSet64.stream(bits).forEach(i -> out.add(indexToVar[i].id()));
+        return out;
     }
 
     // -------------------------------------------------------------------------
@@ -219,7 +285,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     }
 
     // -------------------------------------------------------------------------
-    // Structural logging — for Student A to verify data structures
+    // Structural logging
     // -------------------------------------------------------------------------
 
     /**
@@ -227,10 +293,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
      *
      * <p>Called automatically by
      * {@link com.example.causal.runtime.DefaultCausalGraphRuntime#compile} after
-     * every compile. Read the output to verify that your data structures are correct.
-     *
-     * <p>When you add new internal structures (bitsets, index maps, etc.), add a
-     * section here so you can inspect them in the same place.
+     * every compile. When you add new internal structures, add a section here.
      *
      * <p>Output goes to the standard JUL logger. In Neo4j server mode the log
      * appears in {@code logs/neo4j.log}. In the embedded test harness it prints
@@ -265,16 +328,12 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             sb.append(String.format("%n  %-30s ←  %s", id, parents.isEmpty() ? "(none)" : parents));
         }
 
-        // TODO(student, tier 2): add sections here once you implement the dense
-        // layout + bitsets. Logging them in one place is how you verify correctness
-        // before switching callers over. Suggested:
-        //
-        //   ── Topo layer per node ─────────────────────────────────────
-        //     for (int i = 0; i < size(); i++) sb.append(... topoLayer[i] ...);
-        //
-        //   ── Ancestor bitsets ────────────────────────────────────────
-        //     for (int i = 0; i < size(); i++)
-        //         sb.append(String.format("%n  [%2d] %s", i, Long.toBinaryString(ancestorBits[i][0])));
+        sb.append("\n\n── Topo layer per node (index : id : layer) ────────────────");
+        for (int i = 0; i < n; i++) {
+            sb.append(String.format("%n  [%2d]  %-30s  layer=%d", i, idOf(i), topoLayer[i]));
+        }
+        appendClosure(sb, "Ancestor closure", ancestorBits);
+        appendClosure(sb, "Descendant closure", descendantBits);
 
         // ── Linear-Gaussian SEM parameters (when present) ────────────
         if (parameterized) {
@@ -297,6 +356,17 @@ public final class CompiledCausalGraph implements GraphSnapshot {
 
         sb.append("\n────────────────────────────────────────────────────────────\n");
         LOG.info(sb.toString());
+    }
+
+    /** One row per node: the bit row (column j = node j) when n ≤ 64, else the row cardinality. */
+    private void appendClosure(StringBuilder sb, String title, long[][] bits) {
+        sb.append("\n\n── ").append(title)
+          .append(n <= 64 ? " (row i, column j = index j) " : " (row i : |set|) ")
+          .append("─".repeat(Math.max(0, 40 - title.length())));
+        for (int i = 0; i < n; i++) {
+            sb.append(String.format("%n  [%2d]  %s", i,
+                    n <= 64 ? BitSet64.toBinaryString(bits[i], n) : String.valueOf(BitSet64.cardinality(bits[i]))));
+        }
     }
 
     // -------------------------------------------------------------------------

@@ -36,6 +36,7 @@ plugin/
       model/          ← Variable record
       compile/        ← GraphLoader, CompiledCausalGraph
       algorithms/     ← TopologicalSorter, ReachabilityIndex, PathAnalyzer
+      index/          ← BitSet64 (static long[] bitset helpers)
     procedures/       ← thin @Procedure / @UserFunction wrappers
     dto/              ← Cypher row-mapping classes
     lifecycle/        ← transaction listener + extension factory
@@ -352,8 +353,12 @@ key used by `VariableRef`.
 
 ## Structural logging
 
-Every `CALL causal.compile()` dumps the full adjacency lists + topological
-order via `CompiledCausalGraph.logStructure()`. In the embedded test harness
+`CALL causal.compile()` also builds a dense CSR layout and the ancestor/descendant
+bitset closures of every variable, so ancestor, descendant and reachability
+queries are lookups instead of traversals.
+
+Every `CALL causal.compile()` dumps the full adjacency lists, topological
+order, layers and closures via `CompiledCausalGraph.logStructure()`. In the embedded test harness
 this goes to stdout; on a real server it goes to `logs/neo4j.log`. Add a
 section to `logStructure()` whenever you introduce a new cached structure.
 

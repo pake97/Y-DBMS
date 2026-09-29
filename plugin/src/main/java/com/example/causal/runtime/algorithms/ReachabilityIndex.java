@@ -5,37 +5,13 @@ import com.example.causal.runtime.compile.CompiledCausalGraph;
 import java.util.*;
 
 /**
- * Provides ancestor, descendant, and reachability queries over a compiled graph.
+ * Ancestor, descendant, and reachability queries over a compiled graph.
  *
- * <h2>Current implementation</h2>
- * Uses iterative DFS for correctness. Per-query cost is O(V + E).
- *
- * <h2>TODO(student, tier 2): Bitset acceleration</h2>
- * This is the same bitset work listed in
- * {@link CompiledCausalGraph}'s Tier 2 plan — that class owns the storage,
- * this class reads it. Once the dense layout lands:
- * <ol>
- *   <li>Assign each variable a dense index 0..n-1 (via the {@code nameToIndex}
- *       map planned in {@code CompiledCausalGraph}).</li>
- *   <li>Represent ancestor sets as {@code long[ceil(n/64)]} bitsets.</li>
- *   <li>Pre-compute {@code ancestorBits[i]} for every variable in
- *       reverse-topological order (store on {@code CompiledCausalGraph},
- *       not here):
- *       <pre>
- *         for each node i in reverse-topo order:
- *           ancestorBits[i] = union of (ancestorBits[p] | setBit(p)) for each parent p
- *       </pre>
- *   </li>
- *   <li>Replace the DFS in {@link #ancestors} with an O(n/64) bitset lookup.</li>
- *   <li>For d-separation (Bayes Ball), represent conditioning sets and
- *       reachable sets as bitsets to enable O(n/64) intersection tests.</li>
- * </ol>
- *
- * <p><b>Not required for Tier 1.</b> The path queries in
- * {@link PathAnalyzer} and the d-separation / backdoor work in
- * {@code DefaultCausalGraphRuntime} can both be written against today's
- * DFS-based {@link #ancestors} / {@link #descendants} — they stay correct
- * when the storage switches to bitsets.
+ * <p>The default methods read the ancestor/descendant closures that
+ * {@link CompiledCausalGraph} precomputes at compile time: a lookup costs
+ * O(n/64) plus the size of the answer, and results come back in ascending
+ * dense-index order. The {@code *Dfs} methods keep the original traversal
+ * as the reference implementation.
  */
 public final class ReachabilityIndex {
 
@@ -50,7 +26,36 @@ public final class ReachabilityIndex {
      * Returns an empty set if {@code id} is unknown or has no parents.
      */
     public Set<String> ancestors(String id) {
-        // TODO(student, tier 2): replace with O(n/64) bitset lookup after pre-computation
+        int i = graph.indexOf(id);
+        return i < 0 ? new LinkedHashSet<>() : graph.toIds(graph.ancestorBits(i));
+    }
+
+    /** {@link #ancestors(String)} through the index, or {@link #ancestorsDfs} when {@code useIndex} is false. */
+    public Set<String> ancestors(String id, boolean useIndex) {
+        return useIndex ? ancestors(id) : ancestorsDfs(id);
+    }
+
+    /**
+     * All descendants of {@code id} (transitive children), excluding {@code id} itself.
+     * Returns an empty set if {@code id} is unknown or has no children.
+     */
+    public Set<String> descendants(String id) {
+        int i = graph.indexOf(id);
+        return i < 0 ? new LinkedHashSet<>() : graph.toIds(graph.descendantBits(i));
+    }
+
+    /** True if there is a directed path {@code from → … → to}. */
+    public boolean hasDirectedPath(String from, String to) {
+        int f = graph.indexOf(from), t = graph.indexOf(to);
+        return f >= 0 && t >= 0 && graph.reaches(f, t);
+    }
+
+    /**
+     * Ancestors by iterative DFS over the parent maps, O(V + E) per query.
+     * Reference implementation; used by the parity test and by the DFS
+     * baseline of the evaluation (CODE-PLAN.md WP5). Do not delete.
+     */
+    public Set<String> ancestorsDfs(String id) {
         Set<String> visited = new LinkedHashSet<>();
         Deque<String> stack = new ArrayDeque<>(graph.parentsOf(id));
         while (!stack.isEmpty()) {
@@ -63,11 +68,11 @@ public final class ReachabilityIndex {
     }
 
     /**
-     * All descendants of {@code id} (transitive children), excluding {@code id} itself.
-     * Returns an empty set if {@code id} is unknown or has no children.
+     * Descendants by iterative DFS over the child maps, O(V + E) per query.
+     * Reference implementation; used by the parity test and by the DFS
+     * baseline of the evaluation (CODE-PLAN.md WP5). Do not delete.
      */
-    public Set<String> descendants(String id) {
-        // TODO(student, tier 2): replace with O(n/64) bitset lookup after pre-computation
+    public Set<String> descendantsDfs(String id) {
         Set<String> visited = new LinkedHashSet<>();
         Deque<String> stack = new ArrayDeque<>(graph.childrenOf(id));
         while (!stack.isEmpty()) {
@@ -77,12 +82,5 @@ public final class ReachabilityIndex {
             }
         }
         return visited;
-    }
-
-    /**
-     * True if there is a directed path {@code from → … → to}.
-     */
-    public boolean hasDirectedPath(String from, String to) {
-        return descendants(from).contains(to);
     }
 }
