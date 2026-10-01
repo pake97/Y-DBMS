@@ -8,13 +8,13 @@ import com.example.causal.api.GraphSnapshot;
 import com.example.causal.api.VariableRef;
 import com.example.causal.dto.CounterfactualRecord;
 import com.example.causal.dto.LinearGaussianRecord;
-import com.example.causal.runtime.ChangeBatch;
 import com.example.causal.runtime.algorithms.CounterfactualInference;
 import com.example.causal.runtime.algorithms.LinearGaussianInference;
 import com.example.causal.runtime.algorithms.PathAnalyzer;
 import com.example.causal.runtime.algorithms.ReachabilityIndex;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
 import com.example.causal.runtime.compile.GraphLoader;
+import com.example.causal.runtime.compile.SnapshotPatcher;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -74,13 +74,18 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
         reachability = null;
     }
 
+    /**
+     * Patch the current snapshot with {@code batch} via {@link SnapshotPatcher}.
+     * Returns false when there is no snapshot or the batch needs a full recompile.
+     */
     public synchronized boolean applyChange(ChangeBatch batch) {
         if (snapshot == null) return false;
-        CompiledCausalGraph next = snapshot.patch(batch);
+        CompiledCausalGraph next = SnapshotPatcher.apply(snapshot, batch);
         if (next == null) {
             return false;
         }
         snapshot = next;
+        reachability = new ReachabilityIndex(next);
         return true;
     }
 
