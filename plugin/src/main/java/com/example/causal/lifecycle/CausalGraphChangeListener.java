@@ -281,8 +281,8 @@ public final class CausalGraphChangeListener implements TransactionEventListener
             }
 
             for (ChangeBatch.Edge e : builtBatch.addedEdges()) {
-                boolean fromKnown = cg == null || cg.topoIndex(e.from()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.from()));
-                boolean toKnown = cg == null || cg.topoIndex(e.to()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.to()));
+                boolean fromKnown = cg == null || cg.indexOf(e.from()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.from()));
+                boolean toKnown = cg == null || cg.indexOf(e.to()) != -1 || builtBatch.addedVariables().stream().anyMatch(v -> v.id().equals(e.to()));
                 if (!fromKnown) {
                     throw new IllegalArgumentException("Edge references unknown variable: " + e.from());
                 }
@@ -302,7 +302,7 @@ public final class CausalGraphChangeListener implements TransactionEventListener
                         break;
                     }
                     if (visited.add(curr)) {
-                        if (cg != null && cg.topoIndex(curr) != -1) {
+                        if (cg != null && cg.indexOf(curr) != -1) {
                             for (String child : cg.childrenOf(curr)) {
                                 if (removedArcs.contains(curr + "\u0000" + child)) continue;
                                 if (!visited.contains(child)) stack.push(child);
@@ -362,10 +362,18 @@ public final class CausalGraphChangeListener implements TransactionEventListener
      * causal schema, skip the full scan in {@link #beforeCommit}.
      */
     private static boolean touchesCausalSchema(TransactionData data) {
-        if (data.createdNodes().iterator().hasNext()) return true;
-        if (data.deletedNodes().iterator().hasNext()) return true;
-        if (data.createdRelationships().iterator().hasNext()) return true;
-        if (data.deletedRelationships().iterator().hasNext()) return true;
+        // Created/deleted nodes count only as :Variable, so a transaction on
+        // unrelated nodes costs nothing. A deleted node's labels surface in
+        // removedLabels (checked below); hasLabel() on it would throw.
+        for (Node n : data.createdNodes())           if (n.hasLabel(VARIABLE)) return true;
+        for (PropertyEntry<Node> entry : data.removedNodeProperties()) {
+            if (!data.isDeleted(entry.entity()) && entry.entity().hasLabel(VARIABLE)) return true;
+        }
+        for (PropertyEntry<Relationship> entry : data.removedRelationshipProperties()) {
+            if (entry.entity().isType(CAUSES)) return true;
+        }
+        for (Relationship r : data.createdRelationships()) if (r.isType(CAUSES)) return true;
+        for (Relationship r : data.deletedRelationships()) if (r.isType(CAUSES)) return true;
         for (LabelEntry l : data.assignedLabels())   if (l.label().equals(VARIABLE)) return true;
         for (LabelEntry l : data.removedLabels())    if (l.label().equals(VARIABLE)) return true;
         for (PropertyEntry<Relationship> entry : data.assignedRelationshipProperties()) {

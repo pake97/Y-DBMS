@@ -1,16 +1,17 @@
 package com.example.causal.runtime.algorithms;
 
 import com.example.causal.runtime.compile.CompiledCausalGraph;
-import com.example.causal.testsupport.GraphTestSupport;
-import com.example.causal.testsupport.GraphTestSupport.GraphInput;
+import com.example.causal.testsupport.Graphs;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import java.util.*;
 
 /**
- * Benchmark, not a regression test — excluded from the default surefire run by
- * the {@code *IT} suffix. Run explicitly with:
+ * Benchmark, not a regression test — tagged {@code slow} (excluded from CI). Run with
+ * {@code mvn test -pl plugin -Dgroups=slow}, or alone with:
  * {@code mvn test -pl plugin -Dtest=ReachabilityPerformanceIT}
  */
+@Tag("slow")
 public class ReachabilityPerformanceIT {
 
     @Test
@@ -27,12 +28,9 @@ public class ReachabilityPerformanceIT {
         }
         System.out.println("Generated " + edges.size() + " edges.");
 
-        System.out.println("Parsing DAG strings into Maps and sorting topologically...");
-        GraphInput input = GraphTestSupport.parseEdges(edges);
-
-        System.out.println("\n--- COMPILATION PHASE ---");
+        System.out.println("\n--- COMPILATION PHASE (parse + topo sort + compile) ---");
         long compileStart = System.currentTimeMillis();
-        CompiledCausalGraph graph = GraphTestSupport.buildFromInput(input);
+        CompiledCausalGraph graph = Graphs.fromEdges(edges);
         long compileEnd = System.currentTimeMillis();
         System.out.println("Graph Compilation Time: " + (compileEnd - compileStart) + " ms");
 

@@ -2,13 +2,10 @@ package com.example.causal.runtime;
 
 import com.example.causal.api.AdjustmentCandidateResult;
 import com.example.causal.api.VariableRef;
-import com.example.causal.runtime.algorithms.TopologicalSorter;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
-import com.example.causal.runtime.model.Variable;
+import com.example.causal.testsupport.Graphs;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Constructor;
-import java.time.Instant;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,7 +16,7 @@ class AdjustmentCandidateTest {
 
     @Test
     void returnsEmptySetWhenBackdoorAlreadyBlocked() throws Exception {
-        CompiledCausalGraph g = graphFromEdges(List.of("T->Y"));
+        CompiledCausalGraph g = Graphs.fromEdges(List.of("T->Y"));
         DefaultCausalGraphRuntime rt = runtimeWithSnapshot(g);
 
         AdjustmentCandidateResult result = rt.candidateAdjustmentSet(ref("T"), ref("Y"));
@@ -31,7 +28,7 @@ class AdjustmentCandidateTest {
     @Test
     void excludesDescendantsOfTreatmentFromCandidateSets() throws Exception {
         // backdoor blocker is Z; M is a descendant of T and must never be proposed.
-        CompiledCausalGraph g = graphFromEdges(List.of("Z->T", "Z->Y", "T->M"));
+        CompiledCausalGraph g = Graphs.fromEdges(List.of("Z->T", "Z->Y", "T->M"));
         DefaultCausalGraphRuntime rt = runtimeWithSnapshot(g);
 
         AdjustmentCandidateResult result = rt.candidateAdjustmentSet(ref("T"), ref("Y"));
@@ -45,7 +42,7 @@ class AdjustmentCandidateTest {
     @Test
     void returnsAllMinimalSetsWhenMultipleExist() throws Exception {
         // both Z and W alone block the only backdoor path T <- Z -> W -> Y.
-        CompiledCausalGraph g = graphFromEdges(List.of("Z->T", "Z->W", "W->Y"));
+        CompiledCausalGraph g = Graphs.fromEdges(List.of("Z->T", "Z->W", "W->Y"));
         DefaultCausalGraphRuntime rt = runtimeWithSnapshot(g);
 
         AdjustmentCandidateResult result = rt.candidateAdjustmentSet(ref("T"), ref("Y"));
@@ -59,7 +56,7 @@ class AdjustmentCandidateTest {
     @Test
     void returnsMinimalSetsInDeterministicTopoCombinationOrder() throws Exception {
         // both Z and W are minimal size-1 blockers; order follows eligible topo-combination order.
-        CompiledCausalGraph g = graphFromEdges(List.of("Z->T", "Z->W", "W->Y"));
+        CompiledCausalGraph g = Graphs.fromEdges(List.of("Z->T", "Z->W", "W->Y"));
         DefaultCausalGraphRuntime rt = runtimeWithSnapshot(g);
 
         AdjustmentCandidateResult result = rt.candidateAdjustmentSet(ref("T"), ref("Y"));
@@ -71,7 +68,7 @@ class AdjustmentCandidateTest {
     @Test
     void returnsFalseAndNoCandidateSetWhenNoAdjustmentExists() throws Exception {
         // Y -> T creates a backdoor path T <- Y, but Y is excluded from candidate sets as outcome.
-        CompiledCausalGraph g = graphFromEdges(List.of("Y->T"));
+        CompiledCausalGraph g = Graphs.fromEdges(List.of("Y->T"));
         DefaultCausalGraphRuntime rt = runtimeWithSnapshot(g);
 
         AdjustmentCandidateResult result = rt.candidateAdjustmentSet(ref("T"), ref("Y"));
@@ -96,37 +93,4 @@ class AdjustmentCandidateTest {
         return Collections.unmodifiableSet(out);
     }
 
-    private static CompiledCausalGraph graphFromEdges(List<String> edges) {
-        Set<String> nodes = new LinkedHashSet<>();
-        Map<String, Set<String>> forward = new LinkedHashMap<>();
-        Map<String, Set<String>> reverse = new LinkedHashMap<>();
-
-        edges.stream().map(edge -> edge.split("->")).forEach(parts -> {
-            String from = parts[0];
-            String to = parts[1];
-            nodes.add(from);
-            nodes.add(to);
-            forward.computeIfAbsent(from, key -> new LinkedHashSet<>()).add(to);
-            reverse.computeIfAbsent(to, key -> new LinkedHashSet<>()).add(from);
-        });
-
-        nodes.forEach(node -> {
-            forward.putIfAbsent(node, new LinkedHashSet<>());
-            reverse.putIfAbsent(node, new LinkedHashSet<>());
-        });
-
-        Map<String, Variable> variableById = new LinkedHashMap<>();
-        nodes.forEach(id -> variableById.put(id, Variable.from(id, id, true, false, 0.0, 1.0)));
-        List<String> topoOrder = TopologicalSorter.sort(nodes, forward);
-
-        try {
-            Constructor<CompiledCausalGraph> constructor = CompiledCausalGraph.class.getDeclaredConstructor(
-                    Map.class, Map.class, Map.class, List.class, Map.class, Instant.class
-            );
-            constructor.setAccessible(true);
-            return constructor.newInstance(variableById, forward, reverse, topoOrder, Map.of(), Instant.now());
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("unable to build test compiled graph", e);
-        }
-    }
 }

@@ -2,11 +2,13 @@ package com.example.causal.runtime.compile;
 
 import com.example.causal.runtime.ChangeBatch;
 import com.example.causal.runtime.model.Variable;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.*;
 
+@Tag("slow")
 public class IncrementalMaintenancePerformanceIT {
 
     @Test
@@ -65,14 +67,14 @@ public class IncrementalMaintenancePerformanceIT {
         // Warm up
         for (ChangeBatch batch : batches) {
             for (int i = 0; i < 1000; i++) {
-                oldGraph.patch(batch);
+                SnapshotPatcher.apply(oldGraph, batch);
             }
         }
 
         for (ChangeBatch batch : batches) {
             long start = System.nanoTime();
             for (int i = 0; i < queries; i++) {
-                oldGraph.patch(batch);
+                SnapshotPatcher.apply(oldGraph, batch);
             }
             long end = System.nanoTime();
             double ms = (end - start) / 1_000_000.0;

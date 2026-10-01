@@ -51,6 +51,20 @@
         </testResources>
         <plugins>
             <!--
+                *IT benchmarks are tagged `slow`: they run with the default
+                includes below, and CI drops them with -Dgroups='!synthetic,!slow'.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                </configuration>
+            </plugin>
+            <!--
                 Shade produces a fat JAR with all non-provided dependencies bundled.
                 Deploy target/causal4j-plugin-1.0-SNAPSHOT.jar to Neo4j plugins/.
             -->

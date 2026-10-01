@@ -7,6 +7,7 @@ import com.example.causal.runtime.RuntimeRegistry;
 import com.example.causal.testsupport.SeedDagSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.neo4j.graphdb.GraphDatabaseService;
@@ -19,14 +20,15 @@ import java.nio.file.Path;
 import java.util.Set;
 
 /**
- * Benchmark, not a regression test — excluded from the default surefire run by
- * the {@code *IT} suffix. Run explicitly with:
+ * Benchmark, not a regression test — tagged {@code slow} (excluded from CI). Run with
+ * {@code mvn test -pl plugin -Dgroups=slow}, or alone with:
  * {@code mvn test -pl plugin -Dtest=ListenerPerformanceIT}
  *
  * <p>{@link CausalGraphChangeListener} is registered automatically by
  * {@code CausalGraphExtensionFactory} (META-INF/services), so the in-process
  * harness exercises the real listener on every commit.
  */
+@Tag("slow")
 public class ListenerPerformanceIT {
 
     @TempDir
