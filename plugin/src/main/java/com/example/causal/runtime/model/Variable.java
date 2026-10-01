@@ -24,6 +24,10 @@ public record Variable(
         double intercept,
         double noiseVariance
 ) {
+    /** Default observed flag when not declared in Neo4j. */
+    public static final boolean DEFAULT_OBSERVED = true;
+    /** Default latent flag when not declared in Neo4j. */
+    public static final boolean DEFAULT_LATENT = false;
     /** Default edge weight (β coefficient) when not declared in Neo4j. */
     public static final double DEFAULT_WEIGHT = 1.0;
     /** Default intercept when not declared in Neo4j. */
