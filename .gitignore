@@ -20,3 +20,6 @@ pipeline/*.egg-info/
 pipeline/out/
 # desktop app exports
 Claude outputs/
+_incoming/
+_to_delete/
+paper/
