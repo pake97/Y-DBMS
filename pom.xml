@@ -12,6 +12,7 @@
     <modules>
         <module>plugin</module>
         <module>dsl</module>
+        <module>bench</module>
     </modules>
 
     <properties>

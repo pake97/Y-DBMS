@@ -27,3 +27,6 @@ bench/datasets/synthetic/*/edges.csv
 bench/py/**/__pycache__/
 bench/py/*.egg-info/
 bench/py/.pytest_cache/
+# bench harness outputs
+bench/results/
+bench/out/
