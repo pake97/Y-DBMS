@@ -70,6 +70,12 @@ public final class Datasets {
         return d;
     }
 
+    /** Path of the dataset's edges.csv, whether or not it exists (for test assumptions). */
+    public static Path edgesPath(String id) {
+        return all().stream().filter(x -> x.id().equals(id)).findFirst()
+                .map(d -> d.dir().resolve("edges.csv")).orElse(datasetsDir().resolve(id).resolve("edges.csv"));
+    }
+
     private static List<Dataset> scan(Path parent, String family) {
         if (!Files.isDirectory(parent)) return List.of();
         try (Stream<Path> dirs = Files.list(parent)) {

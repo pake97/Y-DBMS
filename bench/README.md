@@ -55,3 +55,46 @@ Latent nodes (covid only) are excluded from adjustment sets. Without R + dagitty
 n ≤ 316; synthetic graphs with n = 1000 carry d-separation verdicts and canonical sets
 only. bnlearn and covid get everything. The paper's RQ5 paragraph must state these caps
 and the per-dataset timeout / too-many counts from `reference/<dataset>/meta.json`.
+
+## Benchmark harness (WP5b)
+
+The `bench` Maven module (JMH 1.37, embedded Neo4j 2025.05 with GDS 2.19) measures
+Section VIII on the inputs above. Build once with
+`mvn -B package -pl bench -am -DskipTests` (→ `bench/target/bench.jar`); the scripts
+build it if it is missing. Python steps need the conda env above plus
+`pip install -e 'bench/py[r,plots,external]'`.
+
+```bash
+bench/run_all.sh                      # everything, then results_to_tex; prints the run id
+RUN_ID=<id> bench/run_all.sh          # resume an interrupted run (finished steps are skipped)
+bench/run_quick.sh                    # CI subset, < 5 min
+bench/export_paper.sh <run-id>        # copy tables/figures/numbers.tex into ../Causal4j-paper (never commits)
+```
+
+Each run writes `bench/results/<UTC>-<hash>/` (JMH JSON, CSVs, `environment.json`,
+`timeouts.csv`, `wall_time.txt`) and `results_to_tex` writes `bench/out/<run-id>/`.
+Results are never overwritten; both directories are gitignored.
+
+| Paper element | Produced by | Input in the run directory |
+|---|---|---|
+| Table III (datasets) | WP5a `causal4j-bench stats`, copied to `out/<run>/tables/datasets.tex` | – |
+| RQ1 tier (a) table `tables/rq1_tier_a.tex` | `scripts/rq1_tier_a.sh` (TierABenchmarks index on/off, CypherBenchmarks, GdsBenchmarks) | `tier_a.json`, `cypher.json`, `gds.json`, `timeouts.csv` |
+| RQ1 external round-trip | `scripts/rq1_external.sh` (ServeBolt + `causal4j_bench.roundtrip`: pgmpy, dagitty, causal-learn, DoWhy) | `roundtrip.csv` |
+| RQ2 table `tables/rq2.tex`, Fig. `figures/rq2_crossover.pdf` | `scripts/rq2.sh` (CompileBenchmarks both branches; `run.Rq2` heap + latency) | `compile.json`, `rq2.csv` |
+| RQ4 Fig. `figures/rq4_latency.pdf` | `scripts/rq4.sh` (TierABenchmarks index=on over the synthetic grid) + RQ1 baselines | `rq4.json` |
+| `\speedupTierAvsDfs`, `\speedupTierAvsCypher` | geometric mean over bnlearn + covid × 5 operators of baseline / Causal4j median latency (censored pairs excluded) | `tier_a.json`, `cypher.json` |
+| `\buildMsMunin` | CompileBenchmarks median, munin, closures | `compile.json` |
+| `\closureKbMunin` | analytic `2·n·⌈n/64⌉·8` B for munin | – |
+| `\crossoverNodes` (256 MB), `\crossoverNodesSixtyFourMB`, `\crossoverNodesOneGB`, `\crossoverLatencyRatio` | `rq2.csv`: closure heap extrapolated with the measured heap/closure ratio of the largest graph; pruned/closure `reaches` ratio at that graph | `rq2.csv` |
+| RQ3, RQ5, tiers (b)/(c) macros | phase 5b-2; `\TODO{...}` until then | – |
+
+**Protocol.** Pure-Java benchmarks: `SampleTime`, 3 forks, 5 × 1 s warm-up, 10 × 1 s
+measurement. Embedded-DBMS baselines: 1 fork, 3 + 5 iterations. Forks get `-Xmx4g`.
+Medians and p99 come from the JMH sample histograms. Cypher and GDS queries run in a
+transaction with a 60 s timeout; a timed-out query goes to `timeouts.csv`, and after
+3 timeouts an operator is censored for the rest of its trial. Any (system, dataset,
+operator) with a timeout is drawn as an open marker at 60 s and excluded from speedups.
+The external round-trip stops a (library, operator) after 60 s of queries (`censored`).
+
+**Wall time.** Full `run_all.sh` on the reference machine: _to be recorded after the
+first full run_ (`bench/results/<run>/wall_time.txt`).

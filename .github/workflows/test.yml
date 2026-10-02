@@ -33,3 +33,30 @@ jobs:
       - run: pytest -q bench/py
       - name: Regenerated files match the committed ones
         run: git diff --exit-code -- bench
+  bench-quick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: bench/py/pyproject.toml
+      - run: pip install -e 'bench/py[plots]'
+      - run: causal4j-bench fetch --only asia,alarm
+      - run: causal4j-bench synth --only n=100
+      - run: mvn -B -q package -pl bench -am -DskipTests
+      - run: mvn -B test -pl bench -am -Dtest=BaselineAgreementTest -Dsurefire.failIfNoSpecifiedTests=false  # Cypher/GDS == index
+      - run: RUN_ID=ci bench/run_quick.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-quick
+          path: |
+            bench/results/ci
+            bench/out/ci

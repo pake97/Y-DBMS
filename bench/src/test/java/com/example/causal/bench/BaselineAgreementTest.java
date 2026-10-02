@@ -1,5 +1,6 @@
 package com.example.causal.bench;
 
+import com.example.causal.bench.data.Datasets;
 import com.example.causal.bench.data.EdgeList;
 import com.example.causal.bench.data.EdgeListLoader;
 import com.example.causal.bench.data.Workloads;
@@ -14,6 +15,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Every baseline answers the same question as Causal4j before anything is timed. */
 class BaselineAgreementTest {
@@ -21,6 +23,9 @@ class BaselineAgreementTest {
     @ParameterizedTest
     @ValueSource(strings = {"asia", "alarm", "covid"})
     void cypherAndGdsAgreeWithTheIndex(String dataset) {
+        // bnlearn edge lists are gitignored; the bench-quick CI job fetches asia and alarm.
+        assumeTrue(java.nio.file.Files.exists(Datasets.edgesPath(dataset)),
+                () -> dataset + " edges.csv missing: causal4j-bench fetch --only " + dataset);
         EdgeList el = EdgeListLoader.load(dataset);
         CompiledCausalGraph g = SnapshotFactory.fromEdgeList(el);
         ReachabilityIndex idx = new ReachabilityIndex(g);
