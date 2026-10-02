@@ -1,232 +1,258 @@
 # Causal4j: code plan for the ICDE 2027 submission
 
-Target: ICDE 2027 Round 2, **November 11, 2026, 17:00 PT**. Today is September 26, 2026, which leaves six and a half weeks. This plan replaces `IMPLEMENTATION-GUIDE.md` and Section 13 of `paper/ICDE2027-outline.md`; it is derived from the review in `paper/REVIEW-icde2027.md` and from the rewritten paper (`Downloads/Causal4j`), so every work package below corresponds to a claim the new draft makes. The rule from the implementation guide still holds: **no work package starts before the parity test of the previous one is green**, because each one builds on the arrays the previous one produces.
+Target: ICDE 2027 Round 2, **November 11, 2026, 17:00 PT**. Plan revised on
+**September 28, 2026** after WP0 and WP1 landed. This file replaces the September 26
+version; the executable per-WP briefs for Claude Code live in `plans/`.
 
-Two people: A = Amedeo, K = Kirollos. Effort is in working days.
+The rule from the first version still holds: **no work package starts before the
+parity test of the previous one is green**, because each one builds on the arrays the
+previous one produces.
 
-| WP | What | Owner | Days | Blocks |
+Two people: A = Amedeo, K = Kirollos. Effort is in working days; WP1 took one day
+with Claude Code instead of the six budgeted, so the budgets below are what the
+remaining packages should cost with the same method.
+
+## Status
+
+| WP | What | Owner | Status | Days left |
 |---|---|---|---|---|
-| 0 | Repository hygiene, branch, CI | A | 1 | everything |
-| 1 | Dense layout + reachability closures (the index) | K | 6 | 2, 3, 4, 5 |
-| 2 | Query processing over the index (path roles, masked Bayes-Ball, generalized adjustment, polynomial-delay enumeration) | K + A | 8 | 5 |
-| 3 | Incremental maintenance (insert patch, cone recompute, flips, pre-commit acyclicity) | K | 6 | 5 |
-| 4 | Server-side model registry and derived worlds | A | 4 | 5 |
-| 5 | Benchmark harness, datasets, baselines, correctness validation | A | 8 | paper §8 |
-| 6 | Artifact packaging, reproducibility scripts | A | 2 | submission |
+| 0 | Repository hygiene, branch, CI | A | **done** Sep 28 (`00871a3`, `17bbdf2`, tag `v0-dfs-baseline`) | 0 |
+| 1 | Dense layout + reachability closures | K + Claude Code | **done** Sep 28 on `feat/index-wp1-closures` (6 commits, 165 tests green). **Not yet merged into `feat/index`.** | 0 |
+| 1.5 | Reconcile with the August branch (see below) | A | **done** Oct 1 (merge `b729c7b`, PR #31) | 0 |
+| 2 | Query processing over the index | K + Claude Code | next | 4 |
+| 3 | Incremental maintenance | K | reduced: port + complete | 4 |
+| 4 | Server-side model registry and derived worlds | A | unchanged | 3 |
+| 5 | Benchmark harness, datasets, baselines, correctness | A | seeded by August ITs | 7 |
+| 6 | Artifact packaging | A | unchanged | 2 |
 
-Critical path: WP1 → WP2 → WP5. WP3 and WP4 run in parallel with WP2 once WP1 is green. If WP3 slips past October 30, the paper keeps insertion and property flips as measured and reports deletion as cone recompute only; if WP4 slips, §3.3 of the paper is cut to the client-side registry paragraph (already written as the fallback).
+Immediate actions (today): merge `feat/index-wp1-closures` into `feat/index` (squash
+or merge commit, either is fine), `git add plans/` and commit, then branch
+`feat/index-wp2-queries` from `feat/index`.
 
----
+## What changed: the August branch
 
-## WP0. Repository hygiene (Sep 29)
+The review of September 26 and the first plan were written against `master`, which
+stops at PR #24 (July 21). Two remote branches contain work that never reached
+`master`: `origin/bitset-reachability-index` (K, July 21) and
+`origin/incremental-index-maintenance` (K, August 14, includes the former; local
+`fix/listener-delete-guard` adds one test on top). Together they change 49 files
+(+4.5k lines) and contain:
 
-1. Commit the two dirty files (`CausalGraphChangeListener.java`, `CounterfactualInference.java`) after reading the diff; commit `paper/`, `pipeline/`, `PIPELINE-DESIGN.md`; delete `IMPLEMENTATION-GUIDE.md` in favor of this file.
-2. Branch `feat/index` from `main`; every WP is a PR against it; `main` receives the merge on November 1 at the latest.
-3. Add a GitHub Actions workflow running `mvn -B test -Dgroups="!synthetic"` on Java 17/21 so parity tests run on every PR.
-4. Fix the four inconsistent counts of the running example now: `dev/seed-dag.cypher` seeds **25 variables and 78 active edges** (one `id` appears twice in the file; `grep -o "id: *'[a-z_0-9]*'" | sort -u` gives 25). Update `README.md`, `CLAUDE.md`, and the paper to 25/78 and verify the edge count against Piccininni et al. (2020), Fig. 3.
-5. Make `hydrateCurrentGraph()` and `showDag()` in `Neo4jQueryExecutor` filter with `coalesce(r.active, true)` like `GraphLoader`, so client and server see the same edge set.
+- a bitset index inside `CompiledCausalGraph` (`int[][]` adjacency, `getAncestorBits`,
+  `getDescendantBits`, `reaches`, `idForIndex`), i.e., a second implementation of WP1
+  with a different layout and API;
+- `CompiledCausalGraph.patch(ChangeBatch)`: an insertion-only, copy-on-write patch
+  (rows shared with the previous snapshot, widened at word boundaries) that returns
+  `null` to request a full recompile on any removal, on any added edge whose endpoints
+  violate the existing topological index order, and on accounting errors
+  (`PatchNotApplicable`);
+- `ChangeBatch` moved to `runtime/` with `Edge(from, to, weight)`, `updatedVariables`,
+  `updatedEdges`;
+- a `CausalGraphChangeListener` (309 lines) that handles `active` and `weight` flips on
+  relationships and `latent`/`observed`/SEM flips on nodes, rejects parallel `CAUSES`
+  edges, rejects edges to unknown variables, and detects cycles in `beforeCommit`
+  against the snapshot plus the batch; `afterCommit` calls
+  `DefaultCausalGraphRuntime.applyChange(batch)` and invalidates on `false`;
+- tests: `IncrementalPatchTest` (11 cases incl. word-boundary widening and row
+  aliasing), `IncrementalListenerCypherTest` (13 embedded-Neo4j cases incl. cycle
+  rejection and delete-all), `ReachabilityIndexParityTest`, and three performance ITs
+  (`ReachabilityPerformanceIT`, `IncrementalMaintenancePerformanceIT`,
+  `ListenerPerformanceIT`);
+- `CLAUDE.md` schema constraints (one `CAUSES` per pair; `MERGE ... SET`, not inline
+  properties) and a `dev/seed-dag.cypher` that creates the uniqueness constraint.
 
----
-
-## WP1. The index: dense layout and reachability closures (Sep 30 – Oct 7)
-
-**Files.** `runtime/compile/CompiledCausalGraph.java` (rewrite), `runtime/compile/GraphLoader.java` (build call), `runtime/algorithms/ReachabilityIndex.java` (read the closures; keep DFS as oracle), new `runtime/index/BitSet64.java` (static helpers over `long[]`), new test `runtime/index/IndexParityTest.java`.
-
-**Layout to add to `CompiledCausalGraph`** (all `final`, filled in the constructor, never mutated; the incremental path in WP3 produces a *new* instance by copy-on-write of the touched rows):
-
-```java
-final int n;                          // number of variables
-final Map<String,Integer> nameToIndex;// id -> dense index
-final Variable[] indexToVar;
-final int[] fwdOffset, fwdTarget;     // CSR: children of i are fwdTarget[fwdOffset[i] .. fwdOffset[i+1])
-final int[] revOffset, revTarget;     // CSR: parents of i
-final int[] topoOrder;                // sources first
-final int[] topoPos;                  // inverse of topoOrder, O(1) topoIndex(id)
-final int[] topoLayer;                // 0 for sources; layer[v] = 1 + max layer of parents
-final int words;                      // ceil(n / 64)
-final long[][] ancestorBits;          // ancestorBits[i][w]; bit j set iff j in an(i)
-final long[][] descendantBits;        // bit j set iff j in de(i)
-```
-
-**Build algorithm** (in the constructor, after `TopologicalSorter` has produced `topoOrder`):
-
-```
-for i in topoOrder:                       // forward order: parents are done before i
-    layer[i] = 0; anc = new long[words]
-    for p in parents(i):
-        layer[i] = max(layer[i], layer[p] + 1)
-        or(anc, ancestorBits[p]); set(anc, p)
-    ancestorBits[i] = anc
-for i in reverse(topoOrder):              // children are done before i
-    des = new long[words]
-    for c in children(i): or(des, descendantBits[c]); set(des, c)
-    descendantBits[i] = des
-```
-
-Cost is $O(|V|\cdot|V|/64 + |E|\cdot|V|/64)$ time and $2\,|V|\lceil|V|/64\rceil$ words of space. State both in the paper (they are).
-
-**Accessor surface.** Keep every existing public method of `CompiledCausalGraph` (`parentsOf`, `childrenOf`, `topoOrder`, `findVariable`, weights) so nothing else breaks, and add index-level accessors used by WP2/WP3: `int indexOf(String id)`, `String idOf(int i)`, `long[] ancestorBits(int i)`, `long[] descendantBits(int i)`, `boolean reaches(int from, int to)` (one bit test), `IntStream parents(int i)`, `IntStream children(int i)`, `int layer(int i)`. `Set<String>`-returning helpers materialize from a bitset with `BitSet64.toIds`.
-
-**`ReachabilityIndex`.** `ancestors(id)` / `descendants(id)` read the closures; rename the current bodies to `ancestorsDfs` / `descendantsDfs` and keep them package-visible for the parity test and for the DFS baseline in WP5. `hasDirectedPath` becomes `graph.reaches`. `DefaultCausalGraphRuntime` stops allocating a `ReachabilityIndex` per call: hold one per snapshot, built in `compile`.
-
-**`logStructure()`.** Add the layer array and the two closure matrices (as bit strings for $n \le 64$, as popcounts otherwise).
-
-**Tests / done when.**
-- `IndexParityTest`: for the COVID seed DAG, synthetic configs 1–3, and 50 random DAGs with $n \in \{1, 63, 64, 65, 130, 1000\}$: indexed ancestors == DFS ancestors for every node; `ancestorBits[i]` has bit `j` iff `descendantBits[j]` has bit `i` (duality); `reaches(u,v)` == `descendantsDfs(u).contains(v)`; `layer[v] > layer[u]` for every edge.
-- `mvn test -pl plugin` unchanged and green.
-- Micro-check: `causal.ancestors` on `munin`-sized random DAG returns in under 50 µs after warmup (sanity, not the paper number).
+The paper's `\NOTE` blocks of July were accurate for `master` and wrong for the
+repository as a whole. WP1 (September 28) is therefore a second bitset index. We keep
+WP1's version as the base, because its CSR layout, accessor surface (`indexOf`,
+`childrenOf(int)`, `layer`, `topoPosition`, `toIds`), parity test at word boundaries,
+and `Graphs` builder are what WP2 and WP3 were specified against, and we port the
+rest of the August work onto it. Nothing from August is discarded: its patch logic
+becomes the first version of `SnapshotPatcher`, its listener replaces the `master`
+listener, and its tests become the regression suite of WP3.
 
 ---
 
-## WP2. Query processing over the index (Oct 6 – Oct 17)
+## WP1.5. Reconcile with the August branch (Sep 29–30, A)
 
-This is where the paper's algorithmic claims live, so the paper and the code must say the same thing. The three cost tiers the new draft states are: (a) bitset operators, $O(|V|/64)$; (b) Bayes-Ball, $O(|V|+|E|)$ with a constant-factor gain and ancestral masking; (c) identification, one canonical-set construction plus one d-separation test, and polynomial-delay enumeration of minimal sets.
+Branch `feat/index-wp15-reconcile` from `feat/index` after WP1 is merged.
 
-**Files.** `runtime/algorithms/PathAnalyzer.java` (rewrite over bitsets), `runtime/algorithms/DSeparation.java` (new; move Bayes-Ball out of the runtime class), `runtime/algorithms/Adjustment.java` (new), `runtime/DefaultCausalGraphRuntime.java` (delegation only), `api/AdjustmentCandidateResult.java` (extend), `procedures/CausalProcedures.java` (new optional arguments), tests `DSeparationBayesBallTest`, `AdjustmentCandidateTest` (extend), new `AdjustmentCriterionTest`, `MinimalSeparatorTest`.
+1. **Listener and batch.** Cherry-pick, then adapt, from `fix/listener-delete-guard`:
+   `runtime/ChangeBatch.java` (delete `lifecycle/ChangeBatch.java`),
+   `lifecycle/CausalGraphChangeListener.java`, `lifecycle/CausalGraphExtensionFactory.java`,
+   `runtime/RuntimeRegistry.java` (+5 lines), the `Variable.DEFAULT_LATENT`/`DEFAULT_OBSERVED`
+   constants, and the `applyChange` method of `DefaultCausalGraphRuntime`. The cycle
+   check in `beforeCommit` must call WP1's `reaches(int,int)` through `indexOf`; the
+   August code used `getAncestorBits`/`idForIndex`, rename at the call sites.
+2. **Patch.** Do not cherry-pick the private patch constructor of the August
+   `CompiledCausalGraph`. Create `runtime/compile/SnapshotPatcher.java` with
+   `static CompiledCausalGraph apply(CompiledCausalGraph g, ChangeBatch b)` returning
+   `null` for "fall back", and move the August logic into it against the CSR layout
+   (offsets/targets are rebuilt for touched rows; closures widened at word boundaries
+   as the August code does; rows outside the cones shared, never copied). Keep
+   `PatchNotApplicable` as the internal signal. `CompiledCausalGraph` gains one
+   package-private constructor that takes the already-built arrays so the patcher can
+   assemble a snapshot without recomputing anything.
+3. **Tests.** Cherry-pick `IncrementalPatchTest`, `IncrementalListenerCypherTest`,
+   `ListenerPerformanceIT`, `IncrementalMaintenancePerformanceIT`,
+   `ReachabilityPerformanceIT`; port `GraphTestSupport` calls to WP1's `Graphs`;
+   delete the August `ReachabilityIndexParityTest` (WP1's `IndexParityTest` supersedes
+   it, verify every assertion of the old one exists in the new one first). Tag the ITs
+   `slow`.
+4. **Docs and seed.** Take the `CLAUDE.md` schema-constraint paragraph and the
+   uniqueness-constraint statement in `dev/seed-dag.cypher`; keep 78 as the edge
+   count (the August `CLAUDE.md` says 76, which is wrong).
+5. **Done when** `mvn -pl plugin test` is green with the ported tests, the WP1 parity
+   test still passes, and `git diff --stat feat/index` shows no change to
+   `ReachabilityIndex`, `PathAnalyzer`, or the closure build.
 
-### 2a. Path roles as bitset algebra (`PathAnalyzer`)
-
-```
-confounders(t,y)  = anc[t] & anc[y]                       // minus t, y
-mediators(t,y)    = des[t] & anc[y]
-causalNodes(t,y)  = mediators(t,y) | {y if reaches(t,y)}   // cn(t,y), Perković et al.
-forbidden(t,y)    = {t} | OR over c in cn(t,y) of des[c] | cn(t,y)   // de(cn) ∪ {t}
-colliders(x,y)    : for each z not in anc[x]|anc[y]|{x,y}: exists parent in des[x]|{x} and parent in des[y]|{y}
-backdoorVariables : unchanged BFS on the skeleton, but `forbidden` from bitsets and the visited set as long[]
-```
-
-`forbidden` needs one OR per causal node; that is $O(|cn|\cdot|V|/64)$ and is the only place where a loop over a set of nodes remains. Define collider formally in the paper as this set.
-
-### 2b. Masked Bayes-Ball (`DSeparation`)
-
-Signature: `static boolean separated(CompiledCausalGraph g, long[] x, long[] y, long[] z, long[] cutOut)` where `cutOut` marks nodes whose outgoing edges are ignored, and `cutOutTo` (optional, `long[][]` or a predicate) restricts the cut to specific children for the proper backdoor graph (2c).
-
-Two uses of the index: (i) all sets (`x`, `y`, `z`, visited-from-parent, visited-from-child, cutOut) are `long[]`, so membership is one word test and no `State` records are allocated; (ii) **ancestral masking**: d-separation of $X$ and $Y$ given $Z$ depends only on the subgraph induced by $\mathrm{An}(X \cup Y \cup Z)$, so compute `mask = x | y | z | OR anc[v] for v in x|y|z` (one OR per endpoint, $O((|X|+|Y|+|Z|)\,|V|/64)$) and never enqueue a node outside `mask`. On sparse DAGs with small $Z$ this prunes most of the graph; this is the measured constant-factor claim in RQ1, not an asymptotic one. Work queue is an `int[]` ring buffer of size $2n$ (node, direction).
-
-Keep the existing `Set<String>`-based routine as `bayesBallReference` for the parity test.
-
-### 2c. Generalized adjustment criterion and the canonical set (`Adjustment`)
-
-Replace Pearl's backdoor criterion (all out-edges of $T$ cut, all descendants of $T$ excluded) with the generalized adjustment criterion of Shpitser et al. (2010) / Perković et al. (2018), which dagitty implements, so RQ5 can compare exactly:
-
-```
-isValidAdjustment(t, y, z):
-    if (z & forbidden(t,y)) != 0: return false
-    return separated(g, {t}, {y}, z, cutOut = {t}, cutOutOnlyTo = cn(t,y))   // proper backdoor graph
-identifiableByAdjustment(t, y):                                                // van der Zander et al. 2019, constructive criterion
-    adj = (anc[t] | anc[y]) & ~forbidden(t,y) & ~{t,y}
-    return isValidAdjustment(t, y, adj) ? Optional.of(adj) : Optional.empty()
-```
-
-`identifiableByAdjustment` is the new default of `causal.adjustmentCandidate`: one canonical-set construction (bitset ops) plus one masked Bayes-Ball run, replacing the level-by-level enumeration of `combinationsOfSize`, which is exponential and must be deleted.
-
-### 2d. Minimal adjustment sets with polynomial delay
-
-Implement the separator framework of van der Zander, Liśkiewicz, Textor (AIJ 2019) on the proper backdoor graph with $I = \emptyset$ and $R = V \setminus (\mathrm{Forb} \cup \{t,y\})$:
-
-```
-findSep(x, y, I, R):        z = (anc[x]|anc[y]|OR anc[I]) & R & ~{x,y};  return separated(x,y,z) ? z : none
-findMinSep(x, y, I, R):     z' = findSep(...); if none return none
-                            build moral ancestral graph on mask = An(x ∪ y ∪ z') (from bitsets)
-                            z1 = I | (z' & reach(x, moral graph minus (z' \ I)))
-                            z  = I | (z1 & reach(y, moral graph minus (z1 \ I)))
-                            return z
-listMinSep(x, y, I, R, emit):                                          // polynomial delay
-    if findMinSep(x,y,I,R) is none: return
-    pick v in R \ I with v not forced; if none: emit(findMinSep(x,y,I,R)); return
-    listMinSep(x, y, I ∪ {v}, R, emit)
-    listMinSep(x, y, I, R \ {v}, emit)
-```
-
-The moralization step is a traversal over the masked ancestral subgraph; `reach` there is BFS with `long[]` visited. Expose as `causal.adjustmentSets(t, y, {mode: 'canonical' | 'minimal' | 'all-minimal', limit: k})`; the DSL's `RETURN ADJUSTMENT SETS` maps to `all-minimal` with a default limit, `EXPLAIN` returns the canonical set and the forbidden set as the witness. `AdjustmentCandidateResult` gains `canonical`, `forbidden`, `mode`.
-
-Also expose `causal.dsep(x, y, z)` unchanged and add `causal.minimalSeparator(x, y, I, R)` since it falls out of `findMinSep`.
-
-**Tests / done when.**
-- Parity: bitset `PathAnalyzer` == old `PathAnalyzer` on all fixtures; masked Bayes-Ball == `bayesBallReference` on 2,000 random $(X,Y,Z)$ triples per fixture, including $Z$ containing descendants of colliders.
-- `AdjustmentCriterionTest`: hand-built DAGs from Shpitser et al. 2010 and Perković et al. 2018 where the backdoor and generalized criteria differ (a descendant of $T$ off the causal path is a valid adjustment variable); `identifiableByAdjustment` agrees with dagitty's `adjustmentSets(type="canonical")` on every bnlearn network for 200 random $(t,y)$ pairs (the Python round-trip harness of WP5 produces the reference file `test/resources/dagitty-adjustment.json`; the Java test only reads it).
-- `MinimalSeparatorTest`: every emitted set is valid, inclusion-minimal (removing any element breaks validity), and the emitted family equals dagitty's `adjustmentSets(type="minimal")` on the fixtures.
-- No `combinationsOfSize` left in the code base.
+WP3 below assumes this is in place.
 
 ---
 
-## WP3. Incremental maintenance (Oct 13 – Oct 21)
+## WP2. Query processing over the index (Sep 29 – Oct 3, K + Claude Code)
 
-**Files.** `lifecycle/CausalGraphChangeListener.java`, `lifecycle/ChangeBatch.java` (add `activatedEdges`, `deactivatedEdges`, `latentFlips`), `runtime/DefaultCausalGraphRuntime.java` (`applyChange`), new `runtime/compile/SnapshotPatcher.java`, tests `IncrementalParityTest`, `ChangeListenerE2ETest` (embedded Neo4j).
+Unchanged in substance from the first plan; brief in `plans/WP2.md`. Branch
+`feat/index-wp2-queries` from `feat/index`. In parallel with WP1.5; the two touch
+disjoint files (WP2: `algorithms/`, `DefaultCausalGraphRuntime` query methods,
+procedures; WP1.5: `lifecycle/`, `SnapshotPatcher`, `applyChange`). Merge WP1.5 first.
 
-**Change detection (`beforeCommit`).** Add the two property paths that the paper promises and that are `TODO` today: `assignedRelationshipProperties()` with key `active` (false→true = added edge, true→false = removed edge), `assignedNodeProperties()` with key `latent`. Extend `touchesCausalSchema` so a transaction touching only non-`Variable` nodes returns false (today any created node triggers the full scan); that makes the "cheap guard" sentence in §6 true. Pre-commit validation: for every added edge $u \to v$ in the batch, reject the transaction if `reaches(v, u)` in the current snapshot **or** in the batch's own added edges (a batch may create a cycle through two new edges; check with a small DFS over the batch plus closures). Reject edges whose endpoints are not `Variable` nodes. Throwing from `beforeCommit` aborts the transaction, which is the documented Neo4j behavior.
+The three cost tiers the paper states: (a) bitset operators $O(w)$; (b) Bayes-Ball
+$O(|V|+|E|)$ with bitset membership and ancestral masking; (c) identification as one
+canonical-set construction plus one d-separation test, and polynomial-delay
+enumeration of minimal sets.
 
-**Patch (`SnapshotPatcher.apply(CompiledCausalGraph g, ChangeBatch b) -> CompiledCausalGraph`).** Copy-on-write: the new snapshot shares every untouched `long[]` row and CSR array with the old one, so readers on the old snapshot are unaffected (snapshot isolation is preserved without locks).
-
-- *Edge insertion* $u \to v$: rebuild the two CSR arrays (linear; or keep an overflow adjacency per node and merge lazily, decide by measurement), then
-  ```
-  gainDes = des[v] | {v};  for a in an(u) ∪ {u}: des[a] = des[a] | gainDes        // rows: |an(u)|+1
-  gainAnc = anc[u] | {u};  for d in de(v) ∪ {v}: anc[d] = anc[d] | gainAnc        // rows: |de(v)|+1
-  layer: relabel v and de(v) in topological order if layer[v] <= layer[u]
-  ```
-  Work is $(|\mathrm{an}(u)| + |\mathrm{de}(v)| + 2)\cdot\lceil|V|/64\rceil$ word ORs; state this bound in the paper.
-- *Edge deletion* $u \to v$: the affected cone is $C = \mathrm{de}(v) \cup \{v\}$ for ancestor rows and $C' = \mathrm{an}(u) \cup \{u\}$ for descendant rows. Recompute `anc` for $C$ in topological order from the (updated) parents, and `des` for $C'$ in reverse topological order from children; rows outside the cones are unchanged because their closures do not pass through the deleted edge. Cost $O((|C| + |C'|)\cdot|V|/64 + |E_C|\cdot|V|/64)$, which is the "cone recompute" the paper describes; full recompile is the fallback only when $|C| + |C'|$ exceeds a threshold $\theta$ (default $|V|/2$, measured in RQ3).
-- *Variable insertion*: append index $n$, grow every row by one word only when $n \bmod 64 = 0$ (otherwise the spare bits already exist); *variable deletion*: apply deletion of its incident edges, then mark the index free (keep it, do not compact; compaction happens at the next full compile).
-- *`latent` flip*: copy `indexToVar[i]` with the new flag; closures untouched.
-- *Batches*: apply deletions first (cone recompute once for the union of cones), then insertions.
-
-**Wiring.** `afterCommit` calls `((DefaultCausalGraphRuntime) RuntimeRegistry.getInstance()).applyChange(batch)`; `applyChange` is `synchronized` with `compile`/`invalidate`, computes the new snapshot from the current one, and publishes it with one volatile store. If the current snapshot is `null` (never compiled), do nothing; the next query compiles.
-
-**Tests / done when.**
-- `IncrementalParityTest`: 1,000 random edit sequences (insert, delete, activate, deactivate, add/remove variable, latent flip) on each fixture; after every edit the patched snapshot's closures, layers, and `parentsOf/childrenOf` equal a fresh `GraphLoader.load` of the same graph.
-- `ChangeListenerE2ETest`: in embedded Neo4j, a Cypher write that flips `active` changes the next `causal.ancestors` answer without a `causal.compile` call; a write closing a cycle fails with the documented error and leaves the graph unchanged.
-- The existing `invalidate()` path stays as a procedure for manual use.
-
----
-
-## WP4. Server-side model registry and derived worlds (Oct 13 – Oct 17)
-
-The paper's §3.3 now says worlds live in the DBMS; make it so.
-
-**Files.** `runtime/RuntimeRegistry.java` (map `String -> DefaultCausalGraphRuntime`, key `"base"` default), `procedures/CausalProcedures.java` (every read procedure gains an optional last parameter `model` defaulting to the active model; new `causal.models()`, `causal.use(name)`, `causal.intervene(name, [vars])`, `causal.drop(name)`), `dsl/.../CypherTranslator.java` (emit `CALL causal.use`/`causal.intervene` instead of client-side registry), `dsl/.../Neo4jQueryExecutor.java` (delete `hydrateCurrentGraph` and the `StructuralEvaluator` path; keep `ModelRegistry` only for the in-memory backend).
-
-**Derived world for $do(X)$.** `SnapshotPatcher.apply(base, batch = delete all in-edges of every x in X)` produces the derived snapshot; it shares every untouched row with the base, so the cost is the deletion cone recompute of WP3 and memory is only the touched rows. Register it under the canonical name the DSL already uses. Quantitative statements (`causal.linearGaussianInference`) already accept `doValues`; they now also accept `model`.
-
-**Done when.** `DslPluginE2ETest` runs `DEFINE MODEL`, `INTERVENE`, `USE MODEL`, structural queries on the derived world, `RESET`, and `SHOW MODELS` end to end with the Neo4j backend and no client-side graph; the base snapshot's `compiledAt` is unchanged after `INTERVENE`.
+- **2a** `PathAnalyzer` over bitsets: `confounders`, `mediators`, `causalNodes` (cn),
+  `forbidden` (forb), `canonical` (adj), `colliders`, `backdoorVariables` (BFS on the
+  skeleton with `long[]` visited and `forb` as the barrier). Uses WP1's
+  `ancestorBits(int)`/`descendantBits(int)`/`childrenOf(int)`/`parentsOf(int)`.
+- **2b** `DSeparation.separated(g, x, y, z, cutOut, cutOutOnlyTo)` over `long[]`, with
+  the ancestral mask `x|y|z|⋃anc`, an `int[]` ring-buffer queue, and no allocation per
+  state. Keep the `master` Bayes-Ball as `bayesBallReference` for parity.
+- **2c** `Adjustment.identifiableByAdjustment(t, y)`: build `adj`, test it in the
+  proper backdoor graph (cut only `t→c` for `c ∈ cn(t,y)`). This replaces the
+  level-wise `combinationsOfSize` enumeration, which must be deleted.
+- **2d** `Adjustment.listMinimal(t, y, limit, emit)`: `findSep`, `findMinSep`
+  (two reachability passes in the moralized ancestral graph of the mask), `listMinSep`
+  (branch on include/exclude, prune with `findMinSep`). Procedure
+  `causal.adjustmentSets(t, y, mode ∈ {canonical, minimal, all-minimal}, limit)`;
+  `causal.adjustmentCandidate` kept as an alias of `canonical` for one release.
+- **Tests**: parity of every operator against the `master` implementations on all
+  `Graphs` fixtures; `AdjustmentCriterionTest` with the Shpitser et al. 2010 and
+  Perković et al. 2018 DAGs where backdoor and generalized criteria differ;
+  `MinimalSeparatorTest` (valid, inclusion-minimal, family equals the dagitty
+  reference); the dagitty JSON fixture is produced by the WP5 Python script, so WP2
+  ships with a hand-checked fixture of 20 pairs on `alarm` and `hepar2` until WP5
+  replaces it.
 
 ---
 
-## WP5. Benchmark harness, datasets, baselines, correctness validation (Oct 6 – Oct 31, in parallel)
+## WP3. Incremental maintenance: complete the August patch (Oct 1–8, K)
 
-**Layout.** New Maven module `bench/` (JMH) and a Python package `bench/py/` (reference tools). Everything driven by `bench/run_all.sh` that writes `bench/results/*.csv` and `bench/figures/*.pdf`.
+Branch `feat/index-wp3-maintenance` from `feat/index` after WP1.5 and WP2 merge.
+The August patch covers insertions, variable additions, property updates, and
+weights, and falls back on everything else. WP3 removes the fallbacks that the paper
+claims are handled, in this order:
 
-**Datasets** (`bench/datasets/`). (i) bnlearn networks in `.bif`: asia, sachs, child, alarm, hepar2, win95pts, pathfinder, andes, pigs, link, munin (download script with checksums; loader `BifLoader` keeps structure only). (ii) Synthetic DAGs: generator `SyntheticDag(n, m, seed, model ∈ {er, ba})` producing edges oriented by index (ER: each pair with probability $p = m/\binom{n}{2}$; BA: preferential attachment with $m$ edges per node, oriented from newer to older, then reversed so early nodes are sources); grid $n \in \{10^2, 10^{2.5}, 10^3, 10^{3.5}, 10^4\}$, average degree $\in \{2, 4, 8\}$, seeds 0–4. (iii) COVID DAG. A `datasets.csv` with $|V|$, $|E|$, density, longest path, memory of the closures for Table 3.
+1. **Topological relabel on insertion.** The August patch falls back whenever an
+   inserted edge $u \to v$ has `topoPos[u] >= topoPos[v]`, even when the edge is
+   acyclic. Replace with: if `reaches(v, u)` reject (cycle, already caught in
+   `beforeCommit`); else if `topoPos[u] > topoPos[v]`, move $v$ and $\de(v)$ (the
+   affected cone) after $u$ in `topoOrderIdx`/`topoPos` by a local re-sort of the cone
+   in the existing relative order, and recompute `layer` over the cone. Measure how
+   often this case occurs on random edit streams (it is the difference between
+   "incremental" and "incremental except when the curator adds an upstream edge").
+2. **Deletion by cone recompute.** For $u \to v$ removed (or deactivated), recompute
+   `anc` over $C = \de(v) \cup \{v\}$ in topological order from the updated parents
+   and `des` over $C' = \an(u) \cup \{u\}$ in reverse order; rows outside $C \cup C'$
+   are shared. Fall back to full recompile only when $|C| + |C'| > \theta$ (default
+   $|V|/2$, a runtime setting). Batches: apply all deletions as one union of cones,
+   then the insertions.
+3. **Variable removal.** Delete incident edges through step 2, then mark the dense
+   index free (no compaction until the next full compile; `size()` excludes freed
+   indices and `Graphs`/parity tests must cover a snapshot with holes).
+4. **Tests.** Extend `IncrementalPatchTest` with the cases the August version marks
+   as fallback (`testTopologicalViolationFallback` and `testDeactivationFallback`
+   become positive tests); add `IncrementalParityTest`: 1,000 random edit sequences
+   per fixture, after each edit the patched snapshot equals `GraphLoader.load`-style
+   reconstruction from the maps (closures, layers, `topoPos` monotone along edges,
+   adjacency). `IncrementalListenerCypherTest` gains: `active` flip changes the next
+   `causal.ancestors` answer without `causal.compile`; deletion with a large cone
+   triggers the fallback and the answer is still right.
+5. **Done when** the fallback counter (add one to the patcher, exposed through
+   `causal.inspectSnapshot`) is zero on the random edit streams except for cones
+   above $\theta$, and the three August ITs run green under `-Dgroups=slow`.
 
-**Baselines** and what each can answer (this is Table 4 of the paper, the coverage matrix):
-
-| Operator | Causal4j index | DFS baseline | Cypher | GDS | dagitty / pgmpy / causal-learn / DoWhy |
-|---|---|---|---|---|---|
-| ancestors / descendants / reaches | yes | yes | `MATCH (a)-[:CAUSES*]->(b)` | BFS/DFS procs | yes |
-| confounders / mediators / colliders | yes | yes | path patterns | no | yes (dagitty, pgmpy) |
-| d-separation | yes | yes | no | no | yes |
-| adjustment (canonical, minimal) | yes | yes (same algorithm, DFS closures) | no | no | dagitty, pgmpy (backdoor) |
-
-The DFS baseline is the current code path (`ancestorsDfs`, `bayesBallReference`, and the WP2 algorithms run with DFS-computed sets), kept as a switch `-Dcausal.index=off`. The Cypher baseline runs the variable-length pattern in the same embedded Neo4j. The GDS baseline uses `gds.bfs.stream`/`gds.dfs.stream` on a projected graph. The external baseline is a Python script that exports the DAG from Neo4j (`MATCH ... RETURN`), builds the library object, runs the query, and reports (export time, build time, query time) separately.
-
-**Workloads.** Per dataset, 200 random $(t,y)$ pairs with $t$ an ancestor of $y$, and 200 random $(x,y,Z)$ triples with $|Z| \in \{0, 1, 3, 10\}$; the same seeds for every system. JMH: 5 forks, 5 warmup, 10 measurement iterations, report median and p99; memory via `MemoryMXBean` after `System.gc()` and via `-XX:+PrintGCDetails` for the closures' retained size. Hardware, JVM, Neo4j version recorded automatically into `results/environment.json`.
-
-**Experiments, one script each.**
-- RQ1 latency/throughput per operator per system (Fig. 4, log-log vs $|V|$).
-- RQ2 build time and resident memory vs $|V|$ and density, both branches (closures vs. layer-pruned DFS), and the crossover as a function of $|V|$ (Table 5).
-- RQ3 incremental vs recompile: batch sizes $\{1, 10, 100, 1000\}$, edit types {insert, delete, activate flip, latent flip, add/remove variable}, cone size distribution; plus the **mixed workload**: a stream interleaving one edit every $k$ queries ($k \in \{1, 10, 100\}$) and measuring query latency for (i) external round-trip with re-export, (ii) invalidate-and-recompile, (iii) patch (Fig. 5).
-- RQ4 scalability: the synthetic grid.
-- RQ5 correctness: d-separation verdicts vs dagitty and pgmpy; canonical and minimal adjustment sets vs dagitty on every dataset; the JSON produced here is also the fixture WP2's tests read.
-
-**Done when.** `run_all.sh` regenerates every figure and table of §8 from scratch on a clean checkout; the paper's `\TODO` numbers are replaced by the CSV values through a small `results_to_tex.py` that emits `paper/numbers.tex` macros so numbers are never typed by hand.
+If step 2 slips past October 30, the paper reports deletion as recompile-with-cone
+measured against full recompile, which the August code already supports through
+`invalidate()`; the text in `sections/06_incremental.tex` then loses the cone
+recompute paragraph and Table II's maintenance row.
 
 ---
 
-## WP6. Artifact (Nov 1 – Nov 4)
+## WP4. Server-side model registry and derived worlds (Oct 6–9, A)
 
-Public GitHub repository (or Zenodo snapshot with DOI) containing plugin, dsl, bench, datasets script, `run_all.sh`, environment file, and a README that maps every figure and table to the command producing it. Add the AI-generated-content acknowledgement to the paper with the tools used and the sections concerned. Collect ORCIDs for the four authors. Internal review round with the co-authors on November 5–7; buffer November 8–10.
+Unchanged. `RuntimeRegistry` becomes `Map<String, DefaultCausalGraphRuntime>` with
+`"base"` as default; every read procedure gains an optional `model` argument;
+`causal.models()`, `causal.use(name)`, `causal.intervene(name, [vars])`,
+`causal.drop(name)`. `do(X)` is `SnapshotPatcher.apply(base, delete all in-edges of X)`
+from WP3 step 2, so WP4 depends on WP3 step 2 for the sharing claim; until then it can
+use a full copy. The DSL `Neo4jQueryExecutor` drops `hydrateCurrentGraph()` and the
+`StructuralEvaluator` path for the Neo4j backend; `ModelRegistry` stays for the
+in-memory backend only. Done when `DslPluginE2ETest` runs `DEFINE MODEL`, `INTERVENE`,
+`USE MODEL`, structural queries on the derived world, `RESET`, `SHOW MODELS` end to end
+with no client-side graph and an unchanged base `compiledAt`.
 
 ---
+
+## WP5. Benchmark harness, datasets, baselines, correctness (Oct 6–24, A, in parallel)
+
+Unchanged in scope; two adjustments. First, the three August ITs
+(`ReachabilityPerformanceIT`, `IncrementalMaintenancePerformanceIT`,
+`ListenerPerformanceIT`) are the seed of the `bench/` module: move their harness code
+there, replace ad-hoc timing with JMH, and keep them as smoke tests in the plugin.
+Second, WP1 already provides the DFS baseline as `ancestorsDfs`/`descendantsDfs` and
+the `useIndex` flag; the `-Dcausal.index=off` switch is a one-line system-property
+read in `ReachabilityIndex` plus the `bayesBallReference` path of WP2.
+
+Deliverables as before: bnlearn loaders (`.bif`, eleven networks from `asia` to
+`munin`), the seeded ER/BA DAG generator ($10^2$–$10^4$, $\bar d \in \{2,4,8\}$, five
+seeds), Cypher and GDS baselines in the same embedded Neo4j, the Python round-trip
+script for dagitty/pgmpy/causal-learn/DoWhy with export, build, and query time
+separated, the workload files (200 $(T,Y)$ pairs and 200 $(X,Y,Z)$ triples per
+dataset, fixed seeds), the coverage matrix, RQ1–RQ5 scripts including the mixed
+edit/query stream under three policies, and `results_to_tex.py` emitting
+`paper/numbers.tex` so no number is typed by hand. Done when `bench/run_all.sh`
+regenerates every figure and table of §8 from a clean checkout.
+
+---
+
+## WP6. Artifact (Nov 1–4, A)
+
+Unchanged: public repository or Zenodo snapshot, `run_all.sh`, environment file,
+README mapping every figure and table to its command, AI-generated-content
+acknowledgement with tools and sections, ORCIDs. Internal review round November 5–7,
+buffer November 8–10.
+
+---
+
+## Revised timeline
+
+| Week | K | A |
+|---|---|---|
+| Sep 29 – Oct 3 | WP2 | WP1.5, then WP5 datasets and generator |
+| Oct 6 – 10 | WP3 steps 1–2 | WP4, WP5 baselines |
+| Oct 13 – 17 | WP3 steps 3–5 | WP5 harness, RQ1/RQ2/RQ4 sweeps |
+| Oct 20 – 24 | help on WP5 RQ3 (mixed workload) | WP5 RQ3/RQ5, `numbers.tex` |
+| Oct 27 – 31 | paper figures | paper results sections, merge `feat/index` to `master` |
+| Nov 3 – 10 | WP6, internal review, buffer | WP6, internal review, buffer |
+
+The buffer grew by about two weeks compared with the first plan. Spend it on the RQ3
+mixed workload and on the crossover measurement of RQ2, which are the two experiments
+reviewers will not have seen before, not on new DSL surface.
 
 ## Things explicitly not done for this submission
 
-ADMG / latent projection index; front-door and instrumental identification; batched enumeration sharing work across queries; MVCC across multiple writers; new DSL surface beyond the `model` argument and `adjustmentSets` modes. All are listed as future work in the paper.
+ADMG / latent projection index; front-door and instrumental identification; batched
+enumeration sharing work across queries; MVCC across multiple writers; dense-index
+compaction after variable removal; new DSL surface beyond the `model` argument and the
+`adjustmentSets` modes.

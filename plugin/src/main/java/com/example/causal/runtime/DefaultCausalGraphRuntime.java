@@ -1,16 +1,32 @@
 package com.example.causal.runtime;
 
-import com.example.causal.api.*;
+import com.example.causal.api.AdjustmentCandidateResult;
+import com.example.causal.api.CausalGraphRuntime;
+import com.example.causal.api.DSeparationResult;
+import com.example.causal.api.GraphCompileOptions;
+import com.example.causal.api.GraphSnapshot;
+import com.example.causal.api.VariableRef;
+import com.example.causal.dto.CounterfactualRecord;
+import com.example.causal.dto.LinearGaussianRecord;
+import com.example.causal.runtime.algorithms.CounterfactualInference;
 import com.example.causal.runtime.algorithms.LinearGaussianInference;
 import com.example.causal.runtime.algorithms.PathAnalyzer;
 import com.example.causal.runtime.algorithms.ReachabilityIndex;
-import com.example.causal.runtime.algorithms.CounterfactualInference;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
 import com.example.causal.runtime.compile.GraphLoader;
-import com.example.causal.dto.CounterfactualRecord;
-import com.example.causal.dto.LinearGaussianRecord;
+import com.example.causal.runtime.compile.SnapshotPatcher;
 
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * Default implementation of {@link CausalGraphRuntime}.
@@ -56,6 +72,21 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     public synchronized void invalidate() {
         snapshot = null;
         reachability = null;
+    }
+
+    /**
+     * Patch the current snapshot with {@code batch} via {@link SnapshotPatcher}.
+     * Returns false when there is no snapshot or the batch needs a full recompile.
+     */
+    public synchronized boolean applyChange(ChangeBatch batch) {
+        if (snapshot == null) return false;
+        CompiledCausalGraph next = SnapshotPatcher.apply(snapshot, batch);
+        if (next == null) {
+            return false;
+        }
+        snapshot = next;
+        reachability = new ReachabilityIndex(next);
+        return true;
     }
 
     // -------------------------------------------------------------------------
