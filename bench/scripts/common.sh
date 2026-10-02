@@ -16,6 +16,16 @@ mkdir -p "$RUN"
 # JMH options for quick runs come from $JMH_OPTS.
 jmh() { java -Dbench.timeouts="$ROOT/$RUN/timeouts.csv" -jar "$JAR" "$@" ${JMH_OPTS:-}; }
 datasets() { java -cp "$JAR" com.example.causal.bench.run.ListDatasets "$@"; }
+# jmh_each <dir> <benchmark-regex> <datasets,comma,separated> [jmh args...]: one JMH run per
+# dataset into <dir>/<dataset>.json, so an interrupted run resumes per dataset.
+jmh_each() {
+  local dir="$1" bench="$2" ds="$3"; shift 3
+  mkdir -p "$RUN/$dir"
+  for d in ${ds//,/ }; do
+    step "$dir/$d.json" jmh "$bench" -p dataset="$d" "$@" -rf json -rff "$RUN/$dir/$d.json.partial"
+    if [ -f "$RUN/$dir/$d.json.partial" ]; then mv "$RUN/$dir/$d.json.partial" "$RUN/$dir/$d.json"; fi
+  done
+}
 # step <output-file> <command...>: run unless the output already exists in this run.
 step() {
   local out="$RUN/$1"; shift

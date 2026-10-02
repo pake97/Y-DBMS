@@ -78,12 +78,12 @@ Results are never overwritten; both directories are gitignored.
 | Paper element | Produced by | Input in the run directory |
 |---|---|---|
 | Table III (datasets) | WP5a `causal4j-bench stats`, copied to `out/<run>/tables/datasets.tex` | – |
-| RQ1 tier (a) table `tables/rq1_tier_a.tex` | `scripts/rq1_tier_a.sh` (TierABenchmarks index on/off, CypherBenchmarks, GdsBenchmarks) | `tier_a.json`, `cypher.json`, `gds.json`, `timeouts.csv` |
+| RQ1 tier (a) table `tables/rq1_tier_a.tex` | `scripts/rq1_tier_a.sh` (TierABenchmarks index on/off, CypherBenchmarks, GdsBenchmarks) | `tier_a/`, `cypher/`, `gds/` (one JSON per dataset), `timeouts.csv` |
 | RQ1 external round-trip | `scripts/rq1_external.sh` (ServeBolt + `causal4j_bench.roundtrip`: pgmpy, dagitty, causal-learn, DoWhy) | `roundtrip.csv` |
-| RQ2 table `tables/rq2.tex`, Fig. `figures/rq2_crossover.pdf` | `scripts/rq2.sh` (CompileBenchmarks both branches; `run.Rq2` heap + latency) | `compile.json`, `rq2.csv` |
-| RQ4 Fig. `figures/rq4_latency.pdf` | `scripts/rq4.sh` (TierABenchmarks index=on over the synthetic grid) + RQ1 baselines | `rq4.json` |
-| `\speedupTierAvsDfs`, `\speedupTierAvsCypher` | geometric mean over bnlearn + covid × 5 operators of baseline / Causal4j median latency (censored pairs excluded) | `tier_a.json`, `cypher.json` |
-| `\buildMsMunin` | CompileBenchmarks median, munin, closures | `compile.json` |
+| RQ2 table `tables/rq2.tex`, Fig. `figures/rq2_crossover.pdf` | `scripts/rq2.sh` (CompileBenchmarks both branches; `run.Rq2` heap + latency) | `compile/`, `rq2.csv` |
+| RQ4 Fig. `figures/rq4_latency.pdf` | `scripts/rq4.sh` (TierABenchmarks index=on over the synthetic grid) + RQ1 baselines | `rq4/` |
+| `\speedupTierAvsDfs`, `\speedupTierAvsCypher` | geometric mean over bnlearn + covid × 5 operators of baseline / Causal4j median latency (censored pairs excluded) | `tier_a/`, `cypher/` |
+| `\buildMsMunin` | CompileBenchmarks median, munin, closures | `compile/` |
 | `\closureKbMunin` | analytic `2·n·⌈n/64⌉·8` B for munin | – |
 | `\crossoverNodes` (256 MB), `\crossoverNodesSixtyFourMB`, `\crossoverNodesOneGB`, `\crossoverLatencyRatio` | `rq2.csv`: closure heap extrapolated with the measured heap/closure ratio of the largest graph; pruned/closure `reaches` ratio at that graph | `rq2.csv` |
 | RQ3, RQ5, tiers (b)/(c) macros | phase 5b-2; `\TODO{...}` until then | – |

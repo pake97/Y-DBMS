@@ -318,16 +318,17 @@ def main(argv=None):
         raise SystemExit(f"{run} does not exist")
 
     def need(name):
-        p = run / name
-        if not p.exists() and not args.quick:
-            raise SystemExit(f"{p} missing: run the script that produces it (see bench/README.md)")
-        return p if p.exists() else None
+        """All JMH results of one step: <name>/*.json (one per dataset)."""
+        files = sorted((run / name).glob("*.json"))
+        if not files and not args.quick:
+            raise SystemExit(f"{run / name}/ has no results: run the script that produces it (see bench/README.md)")
+        return [r for f in files for r in load_jmh(f)]
 
     censored = load_censored(run)
-    tier_rows = [r for f in ("tier_a.json", "cypher.json", "gds.json") if (p := need(f)) for r in load_jmh(p)]
+    tier_rows = need("tier_a") + need("cypher") + (need("gds") if not args.quick else [])
     lat = lookup(tier_rows, censored)
-    compile_rows = load_jmh(p) if (p := need("compile.json")) else []
-    rq4_rows = load_jmh(p) if (p := need("rq4.json")) else []
+    compile_rows = need("compile") if not args.quick else []
+    rq4_rows = need("rq4") if not args.quick else []
     rq2 = rq2_rows(run)
     if not rq2 and not args.quick:
         raise SystemExit(f"{run / 'rq2.csv'} missing: run bench/scripts/rq2.sh")

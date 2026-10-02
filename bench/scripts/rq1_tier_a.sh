@@ -4,6 +4,6 @@
 source "$(dirname "$0")/common.sh"
 DS=$(datasets family=bnlearn,covid),$(datasets family=synthetic degree=4 seed=0),$(datasets family=synthetic model=er n=1000 degree=2,8 seed=0)
 DS=${DATASETS_A:-$DS}
-step tier_a.json jmh TierABenchmarks -p dataset="$DS" -rf json -rff "$RUN/tier_a.json"
-step cypher.json jmh CypherBenchmarks -p dataset="$DS" -rf json -rff "$RUN/cypher.json"
-step gds.json    jmh GdsBenchmarks    -p dataset="$DS" -rf json -rff "$RUN/gds.json"
+jmh_each tier_a TierABenchmarks "$DS"
+jmh_each cypher CypherBenchmarks "$DS"
+jmh_each gds GdsBenchmarks "$DS"
