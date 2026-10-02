@@ -1,0 +1,14 @@
+{
+ "dataset": "er-n316-d2-s1",
+ "workload": "bench/workloads/er-n316-d2-s1",
+ "workload_sha256": "8bf0f06278cf09b1e6ee1fdf3ae82f574f211c21f74a8b968f531d3563b5e769",
+ "latent": [],
+ "pgmpy": "1.1.2",
+ "dagitty": "0.3.4",
+ "dsep": "pgmpy DAG.is_dconnected (negated), dagitty dseparated; verdicts agree",
+ "canonical": "definition (Perkovic et al. 2018), validated with pgmpy in the proper backdoor graph; equal to dagitty adjustmentSets(type='canonical')",
+ "minimal": "dagitty adjustmentSets(type='minimal', effect='total'); 30 s per pair (timeout: minimal = null, minimal_count = null); families over 1000 sets stored by size only (minimal = null, minimal_count = size)",
+ "minimal_skipped": null,
+ "minimal_timeouts": 0,
+ "minimal_too_many": 0
+}

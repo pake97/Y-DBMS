@@ -1,5 +1,6 @@
 """edges.csv / meta.json I/O shared by every step."""
 import csv
+import gzip
 import json
 import subprocess
 from pathlib import Path
@@ -41,6 +42,18 @@ def read_dataset(d: Path) -> nx.DiGraph:
 def write_json(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, indent=1, sort_keys=False) + "\n")
+
+
+def write_rows_json(path: Path, head: dict, key: str, rows) -> None:
+    """{**head, key: rows} with one compact row per line; gzipped (mtime 0, so
+    byte-reproducible) when `path` ends in .gz."""
+    body = (json.dumps(head)[:-1] + (", " if head else "") + f'"{key}": [\n'
+            + ",\n".join(json.dumps(r, separators=(",", ":")) for r in rows) + "\n]}\n")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix == ".gz":
+        path.write_bytes(gzip.compress(body.encode(), mtime=0))
+    else:
+        path.write_text(body)
 
 
 def read_json(path: Path):

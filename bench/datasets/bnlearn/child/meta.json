@@ -1,0 +1,30 @@
+{
+ "source": "bnlearn",
+ "name": "child",
+ "url": "https://www.bnlearn.com/bnrepository/child/child.bif.gz",
+ "sha256": "2bc3236dcbdbf9c9f1bbdeb060aa93c0bdee389d23a549b7248b9d89ed8a980c",
+ "n": 20,
+ "m": 25,
+ "nodes": [
+  "BirthAsphyxia",
+  "HypDistrib",
+  "HypoxiaInO2",
+  "CO2",
+  "ChestXray",
+  "Grunting",
+  "LVHreport",
+  "LowerBodyO2",
+  "RUQO2",
+  "CO2Report",
+  "XrayReport",
+  "Disease",
+  "GruntingReport",
+  "Age",
+  "LVH",
+  "DuctFlow",
+  "CardiacMixing",
+  "LungParench",
+  "LungFlow",
+  "Sick"
+ ]
+}

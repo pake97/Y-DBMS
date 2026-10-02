@@ -121,3 +121,16 @@ def test_read_dataset_roundtrip(tmp_path):
     write_edges(tmp_path / "edges.csv", g)
     (tmp_path / "meta.json").write_text(f'{{"n": 100, "m": {g.number_of_edges()}}}')
     assert set(read_dataset(tmp_path).edges) == set(g.edges)
+
+
+@pytest.mark.parametrize("suffix", [".json", ".json.gz"])
+def test_rows_json_roundtrips_and_is_byte_stable(tmp_path, suffix):
+    import gzip, json
+    from causal4j_bench.io import write_rows_json
+    rows = [{"t": "a", "y": "b", "minimal": [["c"]]}, {"t": "a", "y": "c", "minimal": None}]
+    a, b = tmp_path / f"a{suffix}", tmp_path / f"b{suffix}"
+    write_rows_json(a, {"dataset": "toy"}, "pairs", rows)
+    write_rows_json(b, {"dataset": "toy"}, "pairs", rows)
+    assert a.read_bytes() == b.read_bytes()
+    raw = gzip.decompress(a.read_bytes()) if suffix.endswith(".gz") else a.read_bytes()
+    assert json.loads(raw) == {"dataset": "toy", "pairs": rows}

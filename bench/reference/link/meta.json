@@ -1,0 +1,14 @@
+{
+ "dataset": "link",
+ "workload": "bench/workloads/link",
+ "workload_sha256": "49fc7cb5a1170f6496e7506c50afba03496ca3b08d846d2729df033c234914bc",
+ "latent": [],
+ "pgmpy": "1.1.2",
+ "dagitty": "0.3.4",
+ "dsep": "pgmpy DAG.is_dconnected (negated), dagitty dseparated; verdicts agree",
+ "canonical": "definition (Perkovic et al. 2018), validated with pgmpy in the proper backdoor graph; equal to dagitty adjustmentSets(type='canonical')",
+ "minimal": "dagitty adjustmentSets(type='minimal', effect='total'); 30 s per pair (timeout: minimal = null, minimal_count = null); families over 1000 sets stored by size only (minimal = null, minimal_count = size)",
+ "minimal_skipped": null,
+ "minimal_timeouts": 0,
+ "minimal_too_many": 5
+}

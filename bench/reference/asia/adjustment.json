@@ -1,0 +1,20 @@
+{"dataset": "asia", "dag": "bench/datasets/bnlearn/asia/edges.csv", "pairs": [
+{"t":"asia","y":"tub","canonical":[],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"asia","y":"either","canonical":["smoke","lung"],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"asia","y":"xray","canonical":["smoke","lung"],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"asia","y":"dysp","canonical":["smoke","lung","bronc"],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"tub","y":"either","canonical":["asia","smoke","lung"],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"tub","y":"xray","canonical":["asia","smoke","lung"],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"tub","y":"dysp","canonical":["asia","smoke","lung","bronc"],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"smoke","y":"lung","canonical":[],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"smoke","y":"bronc","canonical":[],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"smoke","y":"either","canonical":["asia","tub"],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"smoke","y":"xray","canonical":["asia","tub"],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"smoke","y":"dysp","canonical":["asia","tub"],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"lung","y":"either","canonical":["asia","tub","smoke"],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"lung","y":"xray","canonical":["asia","tub","smoke"],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"lung","y":"dysp","canonical":["asia","tub","smoke","bronc"],"minimal":[["smoke"],["bronc"]],"minimal_count":2,"identifiable":true},
+{"t":"bronc","y":"dysp","canonical":["asia","tub","smoke","lung","either"],"minimal":[["smoke"],["lung"],["either"]],"minimal_count":3,"identifiable":true},
+{"t":"either","y":"xray","canonical":["asia","tub","smoke","lung"],"minimal":[[]],"minimal_count":1,"identifiable":true},
+{"t":"either","y":"dysp","canonical":["asia","tub","smoke","lung","bronc"],"minimal":[["smoke"],["lung"],["bronc"]],"minimal_count":3,"identifiable":true}
+]}

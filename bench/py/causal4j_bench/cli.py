@@ -9,7 +9,7 @@ from pathlib import Path
 import networkx as nx
 
 from . import DATASETS, REFERENCE, REPO, WORKLOADS, bif, reference, stats, synthetic, workloads
-from .io import git_commit, read_csv, read_dataset, read_json, write_csv, write_edges, write_json
+from .io import git_commit, read_csv, read_dataset, read_json, write_csv, write_edges, write_json, write_rows_json
 
 BNLEARN = ["asia", "sachs", "child", "alarm", "hepar2", "win95pts", "pathfinder",
            "andes", "pigs", "link", "munin"]
@@ -146,8 +146,10 @@ def cmd_reference(only, use_dagitty, force=False):
                                                 with_minimal=with_minimal)
         out = REFERENCE / name
         dag = str((d / "edges.csv").relative_to(REPO))
-        write_json(out / "dsep.json", {"dataset": name, "dag": dag, "triples": dsep})
-        write_json(out / "adjustment.json", {"dataset": name, "dag": dag, "pairs": adj})
+        ext = ".json.gz" if family == "synthetic" else ".json"  # synthetic families are large
+        head = {"dataset": name, "dag": dag}
+        write_rows_json(out / f"dsep{ext}", head, "triples", dsep)
+        write_rows_json(out / f"adjustment{ext}", head, "pairs", adj)
         write_json(out / "meta.json", {
             "dataset": name,
             "workload": str(w.relative_to(REPO)),

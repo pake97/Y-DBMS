@@ -1,0 +1,18 @@
+{
+ "dataset": "er-n10000-d8-s3",
+ "seed": 20261111,
+ "pairs": 200,
+ "triples_per_z_size": 50,
+ "z_sizes": [
+  0,
+  1,
+  3,
+  10
+ ],
+ "z_sizes_requested": [
+  0,
+  1,
+  3,
+  10
+ ]
+}

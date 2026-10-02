@@ -1,0 +1,21 @@
+{
+ "source": "bnlearn",
+ "name": "sachs",
+ "url": "https://www.bnlearn.com/bnrepository/sachs/sachs.bif.gz",
+ "sha256": "ed1830fbde101ed50cce3c7a3c8cbf1d2f5225531cf35ff09fb3cec0af101bce",
+ "n": 11,
+ "m": 17,
+ "nodes": [
+  "Akt",
+  "Erk",
+  "Jnk",
+  "Mek",
+  "P38",
+  "PIP2",
+  "PIP3",
+  "PKA",
+  "PKC",
+  "Plcg",
+  "Raf"
+ ]
+}
