@@ -1,11 +1,9 @@
 package com.example.causal.testsupport;
 
-import com.example.causal.runtime.algorithms.TopologicalSorter;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
+import com.example.causal.runtime.compile.GraphBuilder;
 import com.example.causal.runtime.model.Variable;
 
-import java.lang.reflect.Constructor;
-import java.time.Instant;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -70,26 +68,8 @@ public final class Graphs {
     }
 
     private static CompiledCausalGraph build(Set<String> nodes, List<String[]> edges) {
-        Map<String, Set<String>> forward = new LinkedHashMap<>();
-        Map<String, Set<String>> reverse = new LinkedHashMap<>();
-        Map<String, Variable> variableById = new LinkedHashMap<>();
-        for (String id : nodes) {
-            forward.put(id, new LinkedHashSet<>());
-            reverse.put(id, new LinkedHashSet<>());
-            variableById.put(id, Variable.from(id, id, true, false, 0.0, 1.0));
-        }
-        for (String[] e : edges) {
-            forward.get(e[0]).add(e[1]);
-            reverse.get(e[1]).add(e[0]);
-        }
-        List<String> topoOrder = TopologicalSorter.sort(nodes, forward);
-        try {
-            Constructor<CompiledCausalGraph> constructor = CompiledCausalGraph.class.getDeclaredConstructor(
-                    Map.class, Map.class, Map.class, List.class, Map.class, Instant.class);
-            constructor.setAccessible(true);
-            return constructor.newInstance(variableById, forward, reverse, topoOrder, Map.of(), Instant.now());
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("unable to build test compiled graph", e);
-        }
+        List<Variable> vars = new ArrayList<>();
+        for (String id : nodes) vars.add(Variable.from(id, id, true, false, 0.0, 1.0));
+        return GraphBuilder.build(vars, edges, Map.of());
     }
 }
