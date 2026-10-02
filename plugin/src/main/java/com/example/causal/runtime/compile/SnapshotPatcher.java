@@ -26,6 +26,9 @@ public final class SnapshotPatcher {
 
     /** Returns the patched snapshot, or null when the batch must be applied by a full recompile. */
     public static CompiledCausalGraph apply(CompiledCausalGraph old, ChangeBatch batch) {
+        if (!old.hasClosures()) {
+            return null; // layer-pruned snapshot: nothing to patch incrementally, recompile
+        }
         if (!batch.removedVariables().isEmpty() || !batch.removedEdges().isEmpty()) {
             return null; // non-local changes, fallback to recompile
         }
