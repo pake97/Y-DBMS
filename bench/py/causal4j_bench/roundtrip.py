@@ -4,11 +4,14 @@ build each library's graph object, run the workload, and time the three phases.
 usage: python -m causal4j_bench.roundtrip <dataset> <out.csv> [--libs pgmpy,dagitty,causallearn,dowhy]
 Reads BOLT_URI (set by the Java ServeBolt driver). Appends one CSV row per
 (library, operator): export_ms, build_ms, queries, query_ms_median, query_ms_p99, censored.
-A (library, operator) stops after BUDGET_S seconds of queries and is marked censored.
+A (library, operator) stops after BUDGET_S seconds of queries, or as soon as one query
+exceeds BUDGET_S (SIGALRM; DoWhy's identification can run for hours on andes), and is
+marked censored. A query inside R (dagitty) is only interrupted when it returns to Python.
 """
 import argparse
 import csv
 import os
+import signal
 import statistics
 import time
 from pathlib import Path
@@ -22,6 +25,14 @@ BUDGET_S = 60.0
 EXPORT = ("MATCH (a:Variable)-[r:CAUSES]->(b:Variable) WHERE coalesce(r.active, true) "
           "RETURN a.id AS a, b.id AS b")
 NODES = "MATCH (v:Variable) RETURN v.id AS id, coalesce(v.latent, false) AS latent ORDER BY id"
+class QueryTimeout(Exception):
+    pass
+
+
+def _alarm(signum, frame):
+    raise QueryTimeout()
+
+
 HEADER = ["library", "dataset", "operator", "export_ms", "build_ms", "queries",
           "query_ms_median", "query_ms_p99", "censored"]
 
@@ -156,7 +167,16 @@ def main(argv=None):
                 times, spent, censored = [], 0.0, False
                 for item in items:
                     s = time.perf_counter()
-                    fn(obj, item)
+                    signal.signal(signal.SIGALRM, _alarm)
+                    signal.setitimer(signal.ITIMER_REAL, BUDGET_S)
+                    try:
+                        fn(obj, item)
+                    except QueryTimeout:
+                        censored = True
+                        times.append(BUDGET_S * 1e3)
+                        break
+                    finally:
+                        signal.setitimer(signal.ITIMER_REAL, 0)
                     dt = time.perf_counter() - s
                     times.append(dt * 1e3)
                     spent += dt

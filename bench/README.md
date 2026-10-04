@@ -96,5 +96,9 @@ transaction with a 60 s timeout; a timed-out query goes to `timeouts.csv`, and a
 operator) with a timeout is drawn as an open marker at 60 s and excluded from speedups.
 The external round-trip stops a (library, operator) after 60 s of queries (`censored`).
 
-**Wall time.** Full `run_all.sh` on the reference machine: _to be recorded after the
-first full run_ (`bench/results/<run>/wall_time.txt`).
+**Wall time.** Run `20261002T201303Z-4fb92af` (Apple M3 Max, 16 cores, 128 GB, JDK 21,
+forks at `-Xmx4g`): about **48 h** of measurement. RQ1 tier (a) + Cypher + GDS + RQ2:
+23.6 h; RQ4 (150 graphs × 5 operators × 3 forks): 22.7 h; external round-trip: 1.6 h.
+The run was resumed once after the round-trip hung inside DoWhy (now cut by a per-query
+timeout), so its `wall_time.txt` covers only the resumed part. Do not use the machine
+for other work during a run: timings are single-machine and noise-sensitive.

@@ -214,7 +214,7 @@ def _plt():
 def rq4_figure(lat, rq4_rows, out: Path):
     """Latency vs |V| on ER d=4: Causal4j (median over seeds 0-4) and the seed-0 baselines."""
     plt = _plt()
-    fig, axes = plt.subplots(1, 2, figsize=(3.4, 1.9), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(3.4, 2.1), sharey=True)
     seeds = defaultdict(list)
     for r in rq4_rows:
         m = meta(r["dataset"])
@@ -247,8 +247,9 @@ def rq4_figure(lat, rq4_rows, out: Path):
         ax.set_xlabel("$|V|$")
         ax.grid(True, which="major", lw=0.3, color="0.85")
     axes[0].set_ylabel("median latency (µs)")
-    axes[0].legend(frameon=False, loc="upper left")
-    fig.tight_layout(pad=0.3)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, frameon=False, loc="lower center", ncol=len(labels), fontsize=7)
+    fig.tight_layout(pad=0.3, rect=(0, 0.08, 1, 1))
     fig.savefig(out)
     plt.close(fig)
 
