@@ -27,17 +27,17 @@ TIMEOUT_US = 60e6
 SYSTEMS = {"TierABenchmarks": None, "CypherBenchmarks": "cypher", "GdsBenchmarks": "gds",
            "ProcedureBenchmarks": "procedure"}
 OPERATORS = ["ancestors", "descendants", "reaches", "confounders", "mediators"]
-SYSTEM_LABEL = {"causal4j": "Causal4j", "procedure": "Causal4j (procedure)", "dfs": "DFS",
-                "cypher": "Cypher", "gds": "GDS"}
+SYSTEM_LABEL = {"causal4j": "Causal4j", "procedure": "Causal4j (procedure)",
+                "procids": "Causal4j (procedure, ids)", "dfs": "DFS", "cypher": "Cypher", "gds": "GDS"}
 # Systems of the paper table, per operator, in order; "read" is the closure read alone
 # (TierABenchmarks.ancestorsCount). descendants mirrors ancestors and is kept in the CSV only.
 TABLE_BLOCKS = [
-    ("ancestors", ["read", "causal4j", "procedure", "dfs", "cypher", "gds"]),
+    ("ancestors", ["read", "causal4j", "procedure", "procids", "dfs", "cypher", "gds"]),
     ("reaches", ["causal4j", "procedure", "dfs", "cypher", "gds"]),
-    ("confounders", ["causal4j", "procedure", "dfs", "cypher"]),
-    ("mediators", ["causal4j", "procedure", "dfs", "cypher"]),
+    ("confounders", ["causal4j", "procedure", "procids", "dfs", "cypher"]),
+    ("mediators", ["causal4j", "procedure", "procids", "dfs", "cypher"]),
 ]
-COLUMN_LABEL = {"read": "read", "causal4j": "in-proc.", "procedure": "proc.",
+COLUMN_LABEL = {"read": "read", "causal4j": "in-proc.", "procedure": "proc.", "procids": "proc. (ids)",
                 "dfs": "DFS", "cypher": "Cypher", "gds": "GDS"}
 BNLEARN = ["asia", "sachs", "child", "alarm", "hepar2", "win95pts", "pathfinder",
            "andes", "pigs", "link", "munin"]
@@ -62,6 +62,8 @@ def load_jmh(path: Path):
                 system = "pruned"
             if op in ("ancestorsBits", "ancestorsCount"):
                 system, op = ("read", "ancestors") if op == "ancestorsCount" else ("bits", "ancestors")
+        if cls == "ProcedureBenchmarks" and op.endswith("Ids"):
+            system, op = "procids", op[:-3]  # causal.*Ids: one id column, no node binding
         pm = b["primaryMetric"]
         scale = {"us/op": 1.0, "ms/op": 1e3, "ns/op": 1e-3, "s/op": 1e6}[pm["scoreUnit"]]
         rows.append({"system": system, "dataset": params.get("dataset"), "operator": op,
@@ -408,6 +410,11 @@ def main(argv=None):
     pruned_rows = need("rq2_pruned") if not args.quick else []
     # tier (a) first, then RQ4 (Causal4j index=on for the remaining synthetic graphs), then pruned
     lat = lookup(tier_rows + rq4_rows + pruned_rows, censored)
+    # reaches has no ids variant (causal.hasDirectedPath returns a boolean): its ids
+    # procedure is the procedure itself, so the ids aggregates cover all 5 operators.
+    for (s_, ds, op), v in list(lat.items()):
+        if s_ == "procedure" and op == "reaches":
+            lat.setdefault(("procids", ds, op), v)
     compile_rows = need("compile") if not args.quick else []
     rq2 = rq2_rows(runs)
     if not rq2 and not args.quick:
@@ -440,12 +447,17 @@ def main(argv=None):
                         and math.isfinite(lat[(baseline, ds, op)]) and math.isfinite(lat[(system, ds, op)])])
 
     values = {}
-    s_dfs, s_cy, s_pc = speedup("dfs"), speedup("cypher"), speedup("cypher", "procedure")
+    s_dfs, s_cy = speedup("dfs"), speedup("cypher")
+    s_ids, s_nodes = speedup("cypher", "procids"), speedup("cypher", "procedure")
     values["speedupTierAvsDfs"] = fmt_x(s_dfs) if s_dfs else "\\TODO{x}"
     values["speedupTierAvsCypher"] = fmt_x(s_cy) if s_cy else "\\TODO{x}"
-    values["speedupProcedureVsCypher"] = fmt_x(s_pc) if s_pc else "\\TODO{x}"
-    overhead = [lat[("procedure", "munin", op)] - lat[("causal4j", "munin", op)] for op in OPERATORS
-                if ("procedure", "munin", op) in lat and ("causal4j", "munin", op) in lat]
+    # The paper's procedure comparison uses the ids variants (what RETURN variable.id needs);
+    # the node-returning procedures are reported alongside.
+    values["speedupProcedureVsCypher"] = fmt_x(s_ids) if s_ids else "\\TODO{x}"
+    values["speedupProcedureNodesVsCypher"] = fmt_x(s_nodes) if s_nodes else "\\TODO{x}"
+    # Fixed cost of answering through Neo4j: ids procedure minus in-process, median over 5 operators.
+    overhead = [lat[("procids", "munin", op)] - lat[("causal4j", "munin", op)] for op in OPERATORS
+                if ("procids", "munin", op) in lat and ("causal4j", "munin", op) in lat]
     values["procedureOverheadUs"] = fmt_us(statistics.median(overhead)) if overhead else "\\TODO{x}"
     read = lat.get(("read", "munin", "ancestors"))
     values["closureReadUsMunin"] = fmt_us(read) if read is not None else "\\TODO{x}"

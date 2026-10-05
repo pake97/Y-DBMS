@@ -34,6 +34,16 @@ public class ProcedureBenchmarks {
             "MATCH (a:Variable {id:$t}), (b:Variable {id:$y}) CALL causal.confounders(a, b) YIELD variable RETURN variable.id";
     public static final String MEDIATORS =
             "MATCH (a:Variable {id:$t}), (b:Variable {id:$y}) CALL causal.mediators(a, b) YIELD variable RETURN variable.id";
+    // Id-returning variants: same answers, one `id` column, no node binding. reaches has none
+    // (causal.hasDirectedPath already returns a boolean).
+    public static final String ANCESTOR_IDS =
+            "MATCH (v:Variable {id:$id}) CALL causal.ancestorIds([v]) YIELD id RETURN id";
+    public static final String DESCENDANT_IDS =
+            "MATCH (v:Variable {id:$id}) CALL causal.descendantIds([v]) YIELD id RETURN id";
+    public static final String CONFOUNDER_IDS =
+            "MATCH (a:Variable {id:$t}), (b:Variable {id:$y}) CALL causal.confounderIds(a, b) YIELD id RETURN id";
+    public static final String MEDIATOR_IDS =
+            "MATCH (a:Variable {id:$t}), (b:Variable {id:$y}) CALL causal.mediatorIds(a, b) YIELD id RETURN id";
 
     @Param({"asia", "alarm"})
     public String dataset;
@@ -69,6 +79,11 @@ public class ProcedureBenchmarks {
     @Benchmark public long reaches()     { Workloads.Pair p = pair(); return count("reaches", p, REACHES, Map.of("u", p.t(), "v", p.y())); }
     @Benchmark public long confounders() { Workloads.Pair p = pair(); return count("confounders", p, CONFOUNDERS, Map.of("t", p.t(), "y", p.y())); }
     @Benchmark public long mediators()   { Workloads.Pair p = pair(); return count("mediators", p, MEDIATORS, Map.of("t", p.t(), "y", p.y())); }
+
+    @Benchmark public long ancestorsIds()   { Workloads.Pair p = pair(); return count("ancestorsIds", p, ANCESTOR_IDS, Map.of("id", p.y())); }
+    @Benchmark public long descendantsIds() { Workloads.Pair p = pair(); return count("descendantsIds", p, DESCENDANT_IDS, Map.of("id", p.t())); }
+    @Benchmark public long confoundersIds() { Workloads.Pair p = pair(); return count("confoundersIds", p, CONFOUNDER_IDS, Map.of("t", p.t(), "y", p.y())); }
+    @Benchmark public long mediatorsIds()   { Workloads.Pair p = pair(); return count("mediatorsIds", p, MEDIATOR_IDS, Map.of("t", p.t(), "y", p.y())); }
 
     /** Answer of one procedure query as an int (size, or 1/0 for reaches), for the agreement test. */
     public static long answer(EmbeddedNeo4j neo, String cypher, Map<String, Object> params) {

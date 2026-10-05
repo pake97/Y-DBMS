@@ -45,6 +45,10 @@ class BaselineAgreementTest {
                         ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.ANCESTORS, Map.of("id", id)), "procedure an(" + id + ")");
                 assertEquals(idx.descendants(id).size(),
                         ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.DESCENDANTS, Map.of("id", id)), "procedure de(" + id + ")");
+                assertEquals(idx.ancestors(id).size(),
+                        ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.ANCESTOR_IDS, Map.of("id", id)), "ancestorIds(" + id + ")");
+                assertEquals(idx.descendants(id).size(),
+                        ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.DESCENDANT_IDS, Map.of("id", id)), "descendantIds(" + id + ")");
             }
             for (Workloads.Pair p : Workloads.pairs(dataset)) {
                 assertEquals(1, cy.reaches(p.t(), p.y()));
@@ -60,6 +64,10 @@ class BaselineAgreementTest {
                         ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.CONFOUNDERS, ty), "procedure confounders " + p);
                 assertEquals(pa.mediators(p.t(), p.y()).size(),
                         ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.MEDIATORS, ty), "procedure mediators " + p);
+                assertEquals(pa.confounders(p.t(), p.y()).size(),
+                        ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.CONFOUNDER_IDS, ty), "confounderIds " + p);
+                assertEquals(pa.mediators(p.t(), p.y()).size(),
+                        ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.MEDIATOR_IDS, ty), "mediatorIds " + p);
             }
         }
     }
