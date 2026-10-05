@@ -67,6 +67,7 @@ build it if it is missing. Python steps need the conda env above plus
 ```bash
 bench/run_all.sh                      # everything, then results_to_tex; prints the run id
 RUN_ID=<id> bench/run_all.sh          # resume an interrupted run (finished steps are skipped)
+BASE_RUN=<id> bench/run_all.sh        # new run that reuses every output <id> already has; results_to_tex merges them
 bench/run_quick.sh                    # CI subset, < 5 min
 bench/export_paper.sh <run-id>        # copy tables/figures/numbers.tex into ../Causal4j-paper (never commits)
 ```
@@ -78,15 +79,21 @@ Results are never overwritten; both directories are gitignored.
 | Paper element | Produced by | Input in the run directory |
 |---|---|---|
 | Table III (datasets) | WP5a `causal4j-bench stats`, copied to `out/<run>/tables/datasets.tex` | – |
-| RQ1 tier (a) table `tables/rq1_tier_a.tex` | `scripts/rq1_tier_a.sh` (TierABenchmarks index on/off, CypherBenchmarks, GdsBenchmarks) | `tier_a/`, `cypher/`, `gds/` (one JSON per dataset), `timeouts.csv` |
+| RQ1 tier (a) table `tables/rq1_tier_a.tex` (Table V; descendants only in `rq1_tier_a.csv`) | `scripts/rq1_tier_a.sh`: TierABenchmarks index on/off (in-process, DFS), `ancestorsBits/Count` (closure read, AverageTime ns), ProcedureBenchmarks (CALL causal.* in embedded Neo4j), CypherBenchmarks, GdsBenchmarks | `tier_a/`, `closure_read/`, `procedure/`, `cypher/`, `gds/` (one JSON per dataset), `timeouts.csv` |
 | RQ1 external round-trip | `scripts/rq1_external.sh` (ServeBolt + `causal4j_bench.roundtrip`: pgmpy, dagitty, causal-learn, DoWhy) | `roundtrip.csv` |
-| RQ2 table `tables/rq2.tex`, Fig. `figures/rq2_crossover.pdf` | `scripts/rq2.sh` (CompileBenchmarks both branches; `run.Rq2` heap + latency) | `compile/`, `rq2.csv` |
+| RQ2 table `tables/rq2.tex`, Fig. `figures/rq2_crossover.pdf` | `scripts/rq2.sh`: CompileBenchmarks both branches; `run.Rq2` heap; latency from TierABenchmarks (closures: the RQ1/RQ4 runs; pruned: `budget=0`) | `compile/`, `rq2.csv`, `rq2_pruned/`, `tier_a/`, `rq4/` |
 | RQ4 Fig. `figures/rq4_latency.pdf` | `scripts/rq4.sh` (TierABenchmarks index=on over the synthetic grid) + RQ1 baselines | `rq4/` |
-| `\speedupTierAvsDfs`, `\speedupTierAvsCypher` | geometric mean over bnlearn + covid × 5 operators of baseline / Causal4j median latency (censored pairs excluded) | `tier_a/`, `cypher/` |
+| `\speedupTierAvsDfs`, `\speedupTierAvsCypher`, `\speedupProcedureVsCypher` | geometric mean over bnlearn + covid × 5 operators of baseline / Causal4j median latency (in-process, resp. procedure; censored pairs excluded) | `tier_a/`, `procedure/`, `cypher/` |
+| `\procedureOverheadUs` | median over the 5 operators on munin of procedure − in-process median latency | `procedure/`, `tier_a/` |
+| `\closureReadUsMunin` | `ancestorsCount` on munin (popcount of one closure row, AverageTime) | `closure_read/` |
 | `\buildMsMunin` | CompileBenchmarks median, munin, closures | `compile/` |
 | `\closureKbMunin` | analytic `2·n·⌈n/64⌉·8` B for munin | – |
 | `\crossoverNodes` (256 MB), `\crossoverNodesSixtyFourMB`, `\crossoverNodesOneGB`, `\crossoverLatencyRatio` | `rq2.csv`: closure heap extrapolated with the measured heap/closure ratio of the largest graph; pruned/closure `reaches` ratio at that graph | `rq2.csv` |
-| RQ3, RQ5, tiers (b)/(c) macros | phase 5b-2; `\TODO{...}` until then | – |
+| RQ3, RQ5, tiers (b)/(c) macros | phase 5b-2 | – |
+
+`numbers.tex` defines every macro listed in the paper's `numbers-defaults.tex` (read from
+`--paper-dir`, default `../Causal4j-paper`): the measured value, or that file's `\TODO`
+default. `export_paper.sh` ends with `latexmk` in the paper directory and prints the page count.
 
 **Protocol.** Pure-Java benchmarks: `SampleTime`, 3 forks, 5 × 1 s warm-up, 10 × 1 s
 measurement. Embedded-DBMS baselines: 1 fork, 3 + 5 iterations. Forks get `-Xmx4g`.
