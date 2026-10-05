@@ -6,8 +6,9 @@
 // Or manually: cypher-shell -u neo4j -p <password> -f dev/seed-dag.cypher
 // =============================================================================
 
-// --- 1. Clear existing causal graph data ---
+// --- 1. Clear existing causal graph data & establish constraints ---
 MATCH (v:Variable) DETACH DELETE v;
+CREATE CONSTRAINT variable_id_unique IF NOT EXISTS FOR (v:Variable) REQUIRE v.id IS UNIQUE;
 
 // --- 2. Create Variable nodes ---
 UNWIND [

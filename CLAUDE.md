@@ -9,6 +9,8 @@ A monorepo containing two Maven modules:
 - **`plugin/`** — Neo4j procedures/functions plugin (JAR dropped into `plugins/`). Compiles a causal DAG stored in Neo4j into an in-memory representation and exposes structural queries (ancestors, descendants, d-separation, adjustment sets) as Cypher-callable procedures. Backend runtime for a future causal-analysis DSL.
 - **`dsl/`** — Future DSL/parser/planner. Depends only on `com.example.causal.api.*` from the plugin module.
 
+The current work plan (work packages, owners, deadlines) is in `CODE-PLAN.md`.
+
 ## Commands
 
 ```bash
@@ -71,8 +73,13 @@ dev/
 ## Neo4j graph schema
 
 ```
-(:Variable {id, name, observed, latent}) -[:CAUSES {active}]-> (:Variable)
+(:Variable {id, name, observed, latent}) -[:CAUSES {active, weight}]-> (:Variable)
 ```
+
+**Constraints:**
+- The schema strictly enforces at most one `CAUSES` relationship between any pair of nodes (regardless of `active` status). The `CausalGraphChangeListener` will throw an error if a parallel edge is created.
+- **Important:** To update an edge, use `MERGE (a)-[r:CAUSES]->(b) SET r.active = true, r.weight = 0.8`. Do NOT use inline properties with `MERGE (a)-[:CAUSES {active:true}]->(b)` as this will attempt to create a parallel edge and the transaction listener will reject it.
+- A uniqueness constraint should be defined on the `:Variable(id)` property.
 
 Only `active=true` CAUSES relationships are loaded. The `id` property is the
 canonical key used by `VariableRef`.

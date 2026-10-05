@@ -1,0 +1,66 @@
+package com.example.causal.runtime.algorithms;
+
+import com.example.causal.runtime.compile.CompiledCausalGraph;
+import com.example.causal.testsupport.Graphs;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import java.util.*;
+
+/**
+ * Benchmark, not a regression test — tagged {@code slow} (excluded from CI). Run with
+ * {@code mvn test -pl plugin -Dgroups=slow}, or alone with:
+ * {@code mvn test -pl plugin -Dtest=ReachabilityPerformanceIT}
+ */
+@Tag("slow")
+public class ReachabilityPerformanceIT {
+
+    @Test
+    public void testPerformance() {
+        int numNodes = 2000;
+        int maxOutDegree = 15;
+        
+        System.out.println("Generating DAG with " + numNodes + " variables...");
+        List<String> edges = new ArrayList<>();
+        for (int i = 0; i < numNodes; i++) {
+            for (int j = i + 1; j < Math.min(numNodes, i + 1 + maxOutDegree); j++) {
+                edges.add("V" + i + "->V" + j);
+            }
+        }
+        System.out.println("Generated " + edges.size() + " edges.");
+
+        System.out.println("\n--- COMPILATION PHASE (parse + topo sort + compile) ---");
+        long compileStart = System.currentTimeMillis();
+        CompiledCausalGraph graph = Graphs.fromEdges(edges);
+        long compileEnd = System.currentTimeMillis();
+        System.out.println("Graph Compilation Time: " + (compileEnd - compileStart) + " ms");
+
+        System.out.println("\n--- QUERY PHASE ---");
+        ReachabilityIndex index = new ReachabilityIndex(graph);
+        List<String> nodes = graph.topoOrder();
+        
+        // JIT Warmup (1 iteration)
+        for (String node : nodes) {
+            index.ancestors(node);
+            index.descendants(node);
+        }
+
+        long queryStart = System.currentTimeMillis();
+        int iterations = 10;
+        for (int i = 0; i < iterations; i++) {
+            for (String node : nodes) {
+                index.ancestors(node);
+                index.descendants(node);
+            }
+        }
+        long queryEnd = System.currentTimeMillis();
+        
+        long totalQueries = iterations * nodes.size() * 2;
+        long totalTime = queryEnd - queryStart;
+        
+        System.out.println("Total Queries Executed: " + totalQueries);
+        System.out.println("Total Query Time: " + totalTime + " ms");
+        System.out.println("Average Query Time: " + (totalTime > 0 ? ((double)totalTime / totalQueries) : 0.0) + " ms per query");
+        System.out.println("========================================\n");
+    }
+
+}

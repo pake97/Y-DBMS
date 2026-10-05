@@ -4,8 +4,12 @@ import com.example.causal.procedures.CausalFunctions;
 import com.example.causal.procedures.CausalProcedures;
 import com.example.causal.runtime.RuntimeRegistry;
 import com.example.causal.runtime.algorithms.ReachabilityIndex;
+import com.example.causal.runtime.ChangeBatch;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
+import com.example.causal.runtime.compile.SnapshotPatcher;
+import com.example.causal.runtime.model.Variable;
 import com.example.causal.testsupport.Graphs;
+import com.example.causal.testsupport.SeedDagSupport;
 import com.example.causal.testsupport.SyntheticDataSupport;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -75,6 +79,82 @@ class IndexParityTest {
             assertTrue(g.size() > 0);
             assertParity(g);
         }
+    }
+
+    /** The seed DAG through Neo4j + GraphLoader (ported from ReachabilityIndexParityTest). */
+    @Test
+    void seedDagThroughGraphLoader() {
+        try (Neo4j neo4j = Neo4jBuilders.newInProcessBuilder()
+                .withProcedure(CausalProcedures.class)
+                .withFunction(CausalFunctions.class)
+                .build()) {
+            SeedDagSupport.load(neo4j.defaultDatabaseService());
+            SeedDagSupport.compile(neo4j.defaultDatabaseService());
+            CompiledCausalGraph g = (CompiledCausalGraph) RuntimeRegistry.getInstance().currentSnapshot();
+            assertEquals(25, g.size());
+            assertParity(g);
+        } finally {
+            RuntimeRegistry.setInstance(null);
+        }
+    }
+
+    static Stream<Arguments> patchFixtures() {
+        List<Arguments> out = new ArrayList<>();
+        // (n, added nodes): 62+4 and 64+2 cross the 64-bit word boundary (rows widen); the rest do not
+        for (int[] nk : new int[][]{{1, 1}, {10, 0}, {60, 3}, {62, 4}, {64, 2}, {130, 5}})
+            for (long seed = 0; seed <= 2; seed++)
+                out.add(Arguments.of(nk[0], nk[1], seed));
+        return out.stream();
+    }
+
+    /**
+     * A snapshot produced by {@link SnapshotPatcher#apply} equals one built from
+     * scratch from the same edge list: closures, layers, CSR, topoPos along edges.
+     */
+    @ParameterizedTest(name = "patch(n={0}, +{1} nodes, seed={2}) == rebuild")
+    @MethodSource("patchFixtures")
+    void patchedSnapshotEqualsRebuild(int n, int added, long seed) {
+        CompiledCausalGraph random = Graphs.randomDag(n, 0.1, seed);
+        List<int[]> edges = new ArrayList<>();
+        for (int i = 0; i < n; i++) for (int c : random.childrenOf(i)) edges.add(new int[]{i, c});
+        CompiledCausalGraph old = Graphs.fromEdges(n, edges.toArray(new int[0][]));
+
+        // Forward edges only (old -> later old, old -> new): the patcher's non-fallback domain.
+        Random rnd = new Random(seed);
+        ChangeBatch.Builder batch = ChangeBatch.builder();
+        for (int i = n; i < n + added; i++) batch.addedVariable(Variable.from("v" + i, "v" + i, true, false, 0.0, 1.0));
+        Set<Long> present = new HashSet<>();
+        for (int[] e : edges) present.add(((long) e[0] << 32) | e[1]);
+        List<int[]> newEdges = new ArrayList<>();
+        for (int t = 0; t < 3 * n + 5 && newEdges.size() < n / 4 + added + 1; t++) {
+            int u = rnd.nextInt(n), v = rnd.nextInt(n + added);
+            boolean forward = v >= n || old.topoPosition(u) < old.topoPosition(v);
+            if (u != v && forward && present.add(((long) u << 32) | v)) newEdges.add(new int[]{u, v});
+        }
+        for (int[] e : newEdges) batch.addedEdge("v" + e[0], "v" + e[1]);
+
+        CompiledCausalGraph patched = SnapshotPatcher.apply(old, batch.build());
+        assertNotNull(patched, "forward-only batch must not fall back");
+        List<int[]> all = new ArrayList<>(edges);
+        all.addAll(newEdges);
+        CompiledCausalGraph rebuilt = Graphs.fromEdges(n + added, all.toArray(new int[0][]));
+
+        assertEquals(rebuilt.size(), patched.size());
+        assertEquals(rebuilt.wordCount(), patched.wordCount());
+        for (int i = 0; i < patched.size(); i++) {
+            assertEquals(rebuilt.idOf(i), patched.idOf(i));
+            assertArrayEquals(rebuilt.ancestorBits(i), patched.ancestorBits(i), "an(" + i + ")");
+            assertArrayEquals(rebuilt.descendantBits(i), patched.descendantBits(i), "de(" + i + ")");
+            assertEquals(rebuilt.layer(i), patched.layer(i), "layer(" + i + ")");
+            assertArrayEquals(rebuilt.childrenOf(i), patched.childrenOf(i), "children(" + i + ")");
+            assertArrayEquals(rebuilt.parentsOf(i), patched.parentsOf(i), "parents(" + i + ")");
+            assertEquals(new ArrayList<>(rebuilt.childrenOf(rebuilt.idOf(i))),
+                         new ArrayList<>(patched.childrenOf(patched.idOf(i))));
+            for (int c : patched.childrenOf(i)) {
+                assertTrue(patched.topoPosition(c) > patched.topoPosition(i), "topoPos " + i + "->" + c);
+            }
+        }
+        assertParity(patched);
     }
 
     static void assertParity(CompiledCausalGraph g) {

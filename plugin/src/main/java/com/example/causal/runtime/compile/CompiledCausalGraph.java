@@ -29,6 +29,9 @@ import java.util.logging.Logger;
  * bytes: 250 KB at n = 1000, 25 MB at n = 10 000). Every array is filled in
  * the constructor and never written again. See {@code CODE-PLAN.md} (WP1).
  *
+ * <p>{@link SnapshotPatcher} derives a new snapshot from an old one plus a
+ * {@code ChangeBatch}, sharing unchanged closure rows by reference.
+ *
  * <p>{@link #logStructure()} dumps all of this; it runs on every compile.
  */
 public final class CompiledCausalGraph implements GraphSnapshot {
@@ -36,6 +39,8 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     private static final Logger LOG = Logger.getLogger(CompiledCausalGraph.class.getName());
 
     private final Instant compiledAt;
+    /** {@code compiledAt} of the snapshot this one was patched from, or null if built from scratch. */
+    private final Instant patchedFrom;
     private final Map<String, Variable> variableById;
     private final Map<String, Set<String>> forwardAdj;
     private final Map<String, Set<String>> reverseAdj;
@@ -77,6 +82,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         this.topoOrder    = Collections.unmodifiableList(new ArrayList<>(topoOrder));
         this.edgeWeights  = Collections.unmodifiableMap(deepCopyWeights(edgeWeights));
         this.compiledAt   = compiledAt;
+        this.patchedFrom  = null;
 
         // 1. dense index in loader order
         this.n = this.variableById.size();
@@ -139,6 +145,77 @@ public final class CompiledCausalGraph implements GraphSnapshot {
 
         this.parameterized = computeParameterized();
     }
+
+    /**
+     * Assembly constructor for {@link SnapshotPatcher}: stores every field as
+     * given, without copying or recomputing. The caller owns immutability:
+     * maps must be unmodifiable and no array may be written afterwards.
+     */
+    CompiledCausalGraph(
+            Map<String, Variable> variableById,
+            Map<String, Set<String>> forwardAdj,
+            Map<String, Set<String>> reverseAdj,
+            List<String> topoOrder,
+            Map<String, Map<String, Double>> edgeWeights,
+            int n,
+            Map<String, Integer> nameToIndex,
+            Variable[] indexToVar,
+            int[] fwdOffset, int[] fwdTarget,
+            int[] revOffset, int[] revTarget,
+            int[] topoOrderIdx, int[] topoPos, int[] topoLayer,
+            int words,
+            long[][] ancestorBits, long[][] descendantBits,
+            Instant compiledAt,
+            Instant patchedFrom
+    ) {
+        check(variableById.size() == n && nameToIndex.size() == n && indexToVar.length == n
+                && topoOrder.size() == n, "variable count");
+        check(fwdOffset.length == n + 1 && revOffset.length == n + 1, "CSR offsets");
+        check(fwdOffset[n] == fwdTarget.length && revOffset[n] == revTarget.length
+                && fwdTarget.length == revTarget.length, "CSR targets");
+        check(topoOrderIdx.length == n && topoPos.length == n && topoLayer.length == n, "order arrays");
+        check(words == BitSet64.words(n) && ancestorBits.length == n && descendantBits.length == n, "closures");
+        for (int i = 0; i < n; i++) {
+            check(ancestorBits[i].length == words && descendantBits[i].length == words, "closure row " + i);
+        }
+        this.variableById = variableById;
+        this.forwardAdj = forwardAdj;
+        this.reverseAdj = reverseAdj;
+        this.topoOrder = topoOrder;
+        this.edgeWeights = edgeWeights;
+        this.n = n;
+        this.nameToIndex = nameToIndex;
+        this.indexToVar = indexToVar;
+        this.fwdOffset = fwdOffset;
+        this.fwdTarget = fwdTarget;
+        this.revOffset = revOffset;
+        this.revTarget = revTarget;
+        this.topoOrderIdx = topoOrderIdx;
+        this.topoPos = topoPos;
+        this.topoLayer = topoLayer;
+        this.words = words;
+        this.ancestorBits = ancestorBits;
+        this.descendantBits = descendantBits;
+        this.compiledAt = compiledAt;
+        this.patchedFrom = patchedFrom;
+        this.parameterized = computeParameterized();
+    }
+
+    private static void check(boolean ok, String what) {
+        if (!ok) throw new IllegalStateException("inconsistent snapshot arrays: " + what);
+    }
+
+    // Package-private views for SnapshotPatcher (all unmodifiable or never written).
+    Map<String, Variable> variableMap()                 { return variableById; }
+    Map<String, Set<String>> forwardMap()               { return forwardAdj; }
+    Map<String, Set<String>> reverseMap()               { return reverseAdj; }
+    Map<String, Map<String, Double>> edgeWeightMap()    { return edgeWeights; }
+    Map<String, Integer> indexMap()                     { return nameToIndex; }
+    Variable[] variableArray()                          { return indexToVar; }
+    int[] topoOrderArray()                              { return topoOrderIdx; }
+    int[] layerArray()                                  { return topoLayer; }
+    long[][] ancestorRows()                             { return ancestorBits; }
+    long[][] descendantRows()                           { return descendantBits; }
 
     /** Fill {@code offset} and return the target array for one adjacency direction. */
     private int[] csr(Map<String, Set<String>> adj, int[] offset) {
@@ -307,6 +384,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         sb.append("\n  variables : ").append(variableById.size());
         sb.append("\n  edges     : ").append(forwardAdj.values().stream().mapToInt(Set::size).sum());
         sb.append("\n  compiled  : ").append(compiledAt);
+        if (patchedFrom != null) sb.append("  (SnapshotPatcher: patched from ").append(patchedFrom).append(')');
 
         sb.append("\n\n── Topological order (index : id) ──────────────────────────");
         for (int i = 0; i < topoOrder.size(); i++) {
