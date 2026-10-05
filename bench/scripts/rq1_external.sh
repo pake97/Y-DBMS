@@ -7,7 +7,7 @@ DS=${DATASETS_EXT:-$(datasets family=bnlearn,covid),$(datasets family=synthetic 
 mkdir -p "$RUN/roundtrip"
 for ds in ${DS//,/ }; do
   out="$RUN/roundtrip/$ds.csv"
-  if [ -s "$out" ]; then echo "skip $out (exists)"; continue; fi
+  if have "roundtrip/$ds.csv"; then echo "skip roundtrip/$ds.csv (exists)"; continue; fi
   rm -f "$out.partial"
   java -Xmx4g -cp "$JAR" com.example.causal.bench.run.ServeBolt "$ds" \
     "$PYTHON" -m causal4j_bench.roundtrip "$ds" "$out.partial"

@@ -1,8 +1,10 @@
 """Turn a bench/results/<run-id> directory into the paper's tables, figures and macros.
 
-usage: python -m causal4j_bench.results_to_tex <run-id> [--quick] [--paper-dir ../Causal4j-paper]
+usage: python -m causal4j_bench.results_to_tex <run-id> [--base <run-id> ...] [--quick] [--paper-dir ../Causal4j-paper]
 
-Writes bench/out/<run-id>/{tables/*.tex, figures/*.pdf, numbers.tex}. Medians and
+Writes bench/out/<run-id>/{tables/*.tex, tables/rq1_tier_a.csv, figures/*.pdf, numbers.tex}.
+A run may reuse earlier runs (bench/results/<run>/base_runs.txt, written by BASE_RUN=, or
+--base): results are merged per (step, dataset) file and per CSV row, newest run first. Medians and
 p99 come from the JMH sample histograms. A (system, dataset, operator) with any
 entry in timeouts.csv is censored: drawn as an open marker at the 60 s timeout
 and excluded from speedups. With --quick (CI) missing inputs are skipped; without
@@ -22,27 +24,33 @@ from pathlib import Path
 from . import BENCH, REPO
 
 TIMEOUT_US = 60e6
-SYSTEMS = {"TierABenchmarks": None, "CypherBenchmarks": "cypher", "GdsBenchmarks": "gds"}
+SYSTEMS = {"TierABenchmarks": None, "CypherBenchmarks": "cypher", "GdsBenchmarks": "gds",
+           "ProcedureBenchmarks": "procedure"}
 OPERATORS = ["ancestors", "descendants", "reaches", "confounders", "mediators"]
-SYSTEM_LABEL = {"causal4j": "Causal4j", "dfs": "DFS", "cypher": "Cypher", "gds": "GDS"}
+SYSTEM_LABEL = {"causal4j": "Causal4j", "procedure": "Causal4j (procedure)", "dfs": "DFS",
+                "cypher": "Cypher", "gds": "GDS"}
+# Systems of the paper table, per operator, in order; "read" is the closure read alone
+# (TierABenchmarks.ancestorsCount). descendants mirrors ancestors and is kept in the CSV only.
+TABLE_BLOCKS = [
+    ("ancestors", ["read", "causal4j", "procedure", "dfs", "cypher", "gds"]),
+    ("reaches", ["causal4j", "procedure", "dfs", "cypher", "gds"]),
+    ("confounders", ["causal4j", "procedure", "dfs", "cypher"]),
+    ("mediators", ["causal4j", "procedure", "dfs", "cypher"]),
+]
+COLUMN_LABEL = {"read": "read", "causal4j": "in-proc.", "procedure": "proc.",
+                "dfs": "DFS", "cypher": "Cypher", "gds": "GDS"}
 BNLEARN = ["asia", "sachs", "child", "alarm", "hepar2", "win95pts", "pathfinder",
            "andes", "pigs", "link", "munin"]
 
-# Every macro the paper may use. Phase 5b-2 (RQ3, RQ5, tiers b/c) values stay \TODO.
-TODO_MACROS = {
-    "numDsepQueries": "N", "numDsepAgree": "N", "numPairs": "N", "numCanonicalAgree": "N",
-    "numPairsNotIdentifiable": "N", "numFamiliesCompared": "N", "numFamiliesEqual": "N",
-    "numFamiliesChecked": "N",
-    "patchVsRecompileInsert": "x", "patchVsRecompileDelete": "x", "fallbackThreshold": "N",
-    "mixedWorkloadSpeedup": "x", "speedupDsepMasked": "x", "speedupDecideVsEnumeration": "x",
-}
-MACRO_PATTERN = re.compile(r"\\(?:num|speedup|build|closure|crossover|patch|fallback|mixed)[A-Za-z]*")
+# \providecommand{\name}{default} lines of the paper's numbers-defaults.tex.
+PROVIDE = re.compile(r"^\\providecommand\{\\([A-Za-z]+)\}\{(.*)\}\s*$", re.M)
 
 
 # ── loading ─────────────────────────────────────────────────────────────────
 
 def load_jmh(path: Path):
-    """Rows {system, dataset, operator, median_us, p99_us, extra params}."""
+    """Rows {system, dataset, operator, median_us, p99_us, extra params}. TierABenchmarks rows map
+    to causal4j (index on), dfs (index off), pruned (budget=0), and read (ancestorsBits/Count)."""
     rows = []
     for b in json.loads(path.read_text()):
         cls, op = b["benchmark"].split(".")[-2:]
@@ -50,6 +58,10 @@ def load_jmh(path: Path):
         system = SYSTEMS.get(cls, cls)
         if cls == "TierABenchmarks":
             system = "causal4j" if params.get("index") == "on" else "dfs"
+            if params.get("budget", "unlimited") != "unlimited":
+                system = "pruned"
+            if op in ("ancestorsBits", "ancestorsCount"):
+                system, op = ("read", "ancestors") if op == "ancestorsCount" else ("bits", "ancestors")
         pm = b["primaryMetric"]
         scale = {"us/op": 1.0, "ms/op": 1e3, "ns/op": 1e-3, "s/op": 1e6}[pm["scoreUnit"]]
         rows.append({"system": system, "dataset": params.get("dataset"), "operator": op,
@@ -59,12 +71,39 @@ def load_jmh(path: Path):
     return rows
 
 
-def load_censored(run: Path):
-    p = run / "timeouts.csv"
-    if not p.exists():
-        return set()
-    with open(p, newline="") as f:
-        return {(r["system"], r["dataset"], r["operator"]) for r in csv.DictReader(f)}
+def runs_of(run: Path, extra_bases):
+    """This run, then its base runs (base_runs.txt, then --base), newest first."""
+    bases = list(extra_bases)
+    if (run / "base_runs.txt").exists():
+        bases = [b.strip() for b in (run / "base_runs.txt").read_text().split() if b.strip()] + bases
+    out = [run]
+    for b in bases:
+        d = BENCH / "results" / b
+        if not d.is_dir():
+            raise SystemExit(f"base run {d} does not exist")
+        if d not in out:
+            out.append(d)
+    return out
+
+
+def merged_files(runs, step):
+    """<step>/*.json and <step>/*.csv across runs; for each file name the newest run wins."""
+    seen = {}
+    for r in runs:
+        for f in sorted((r / step).glob("*")) if (r / step).is_dir() else []:
+            if f.suffix in (".json", ".csv") and f.name not in seen:
+                seen[f.name] = f
+    return [seen[k] for k in sorted(seen)]
+
+
+def load_censored(runs):
+    out = set()
+    for run in runs:
+        p = run / "timeouts.csv"
+        if p.exists():
+            with open(p, newline="") as f:
+                out |= {(r["system"], r["dataset"], r["operator"]) for r in csv.DictReader(f)}
+    return out
 
 
 def meta(dataset):
@@ -82,6 +121,8 @@ def fmt_us(v):
         return "--"
     if v == math.inf:
         return "t/o"
+    if v < 0.1:
+        return f"{v:.3f}"  # closure reads take a few ns
     return f"{v:.2f}" if v < 10 else f"{v:.1f}" if v < 100 else f"{v:,.0f}".replace(",", "\\,")
 
 
@@ -106,22 +147,31 @@ def label(dataset):
 # ── tables ──────────────────────────────────────────────────────────────────
 
 def lookup(rows, censored):
-    """(system, dataset, operator) -> median µs, inf if censored."""
+    """(system, dataset, operator) -> median µs, inf if censored; the first row per key wins."""
     out = {}
     for r in rows:
         key = (r["system"], r["dataset"], r["operator"])
-        out[key] = math.inf if key in censored else r["median_us"]
+        out.setdefault(key, math.inf if key in censored else r["median_us"])
     return out
 
 
 def rq1_table(lat, datasets):
-    cols = [(op, s) for op in OPERATORS for s in ("causal4j", "dfs", "cypher", "gds")
-            if not (s == "gds" and op in ("confounders", "mediators"))]
-    head1 = " & ".join(f"\\multicolumn{{{sum(1 for o, _ in cols if o == op)}}}{{c}}{{{op}}}" for op in OPERATORS)
-    head2 = " & ".join(SYSTEM_LABEL[s] for _, s in cols)
+    """Table V: per operator block, the systems of TABLE_BLOCKS that have data."""
+    blocks = [(op, [s for s in systems if any(k[0] == s and k[2] == op for k in lat)])
+              for op, systems in TABLE_BLOCKS]
+    blocks = [(op, systems) for op, systems in blocks if systems]
+    cols = [(op, s) for op, systems in blocks for s in systems]
+    head1 = " & ".join(f"\\multicolumn{{{len(systems)}}}{{c}}{{{op}}}" for op, systems in blocks)
+    head2 = " & ".join(COLUMN_LABEL[s] for _, s in cols)
+    rules, c = [], 2
+    for _, systems in blocks:
+        rules.append(f"\\cmidrule(lr){{{c}-{c + len(systems) - 1}}}")
+        c += len(systems)
     lines = ["% Generated by causal4j-bench results_to_tex. Median latency in µs; t/o = 60 s timeout.",
+             "% read: closure row popcount (O(w)); in-proc.: Causal4j in the JVM, ids materialized;",
+             "% proc.: CALL causal.* through embedded Neo4j. descendants is in rq1_tier_a.csv only.",
              f"\\begin{{tabular}}{{@{{}}l{'r' * len(cols)}@{{}}}}", "\\toprule",
-             f"DAG & {head1} \\\\", f" & {head2} \\\\", "\\midrule"]
+             f"DAG & {head1} \\\\", " ".join(rules), f" & {head2} \\\\", "\\midrule"]
     for ds in datasets:
         if not any(k[1] == ds for k in lat):
             continue
@@ -131,15 +181,37 @@ def rq1_table(lat, datasets):
     return "\n".join(lines) + "\n"
 
 
-def rq2_rows(run):
-    p = run / "rq2.csv"
-    if not p.exists():
-        return []
-    with open(p, newline="") as f:
-        return list(csv.DictReader(f))
+def rq1_csv(rows, censored, path: Path):
+    """Every tier (a) measurement, including descendants and the in-process ancestorsBits."""
+    seen = set()
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f, lineterminator="\n")
+        w.writerow(["system", "dataset", "operator", "median_us", "p99_us", "censored"])
+        for r in sorted(rows, key=lambda r: (r["dataset"], r["operator"], r["system"])):
+            key = (r["system"], r["dataset"], r["operator"])
+            if key in seen:
+                continue
+            seen.add(key)
+            w.writerow([*key, f"{r['median_us']:.4f}", f"{r['p99_us']:.4f}", key in censored])
 
 
-def rq2_table(rq2, compile_rows):
+def rq2_rows(runs):
+    """rq2.csv rows from the newest run that has the dataset."""
+    out, seen = [], set()
+    for run in runs:
+        p = run / "rq2.csv"
+        if p.exists():
+            with open(p, newline="") as f:
+                for row in csv.DictReader(f):
+                    if (row["dataset"], row["branch"]) not in seen:
+                        seen.add((row["dataset"], row["branch"]))
+                        out.append(row)
+    return out
+
+
+def rq2_table(rq2, compile_rows, lat):
+    """Build (JMH), heap and closure size per branch; ancestors/reaches latency from the same
+    JMH class as RQ1: closures = TierABenchmarks index=on, pruned = the same with budget=0."""
     build = {(r["dataset"], r["branch"]): r["median_us"] / 1e3 for r in compile_rows}
     by = defaultdict(dict)
     for r in rq2:
@@ -162,8 +234,8 @@ def rq2_table(rq2, compile_rows):
             fmt_us(build.get((ds, "closures"))), fmt_us(build.get((ds, "pruned"))),
             f"{int(c['heap_bytes']) / 1e3:,.0f}".replace(",", "\\,"),
             f"{int(c['closure_bytes']) / 1e3:,.1f}".replace(",", "\\,"),
-            fmt_us(float(c["ancestors_us_median"])), fmt_us(float(p["ancestors_us_median"])),
-            fmt_us(float(c["reaches_us_median"])), fmt_us(float(p["reaches_us_median"])),
+            fmt_us(lat.get(("causal4j", ds, "ancestors"))), fmt_us(lat.get(("pruned", ds, "ancestors"))),
+            fmt_us(lat.get(("causal4j", ds, "reaches"))), fmt_us(lat.get(("pruned", ds, "reaches"))),
         ]) + " \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"]
     return "\n".join(lines) + "\n"
@@ -287,22 +359,22 @@ def rq2_figure(rq2, out: Path):
 
 def numbers(values: dict) -> str:
     lines = ["% Generated by causal4j-bench results_to_tex; overwritten by bench/export_paper.sh.",
-             "% A \\TODO{...} value is filled by a later phase of the benchmark (WP5b-2)."]
+             "% Defines every macro of the paper's numbers-defaults.tex: the measured value, or that",
+             "% file's \\TODO default when this run does not measure it (yet)."]
     for k, v in values.items():
         lines.append(f"\\providecommand{{\\{k}}}{{{v}}}")
     return "\n".join(lines) + "\n"
 
 
-def check_paper_macros(defined, paper_dir: Path):
-    if not (paper_dir / "sections").is_dir():
-        print(f"warning: {paper_dir}/sections not found; macro check skipped", file=sys.stderr)
-        return
-    used = set()
-    for tex in (paper_dir / "sections").glob("*.tex"):
-        used |= {m[1:] for m in MACRO_PATTERN.findall(tex.read_text())}
-    missing = sorted(used - set(defined))
-    if missing:
-        raise SystemExit(f"numbers.tex is missing macros used by the paper: {', '.join(missing)}")
+def paper_defaults(paper_dir: Path, quick: bool):
+    """Macro name -> default from <paper>/numbers-defaults.tex (the list of macros the paper uses)."""
+    p = paper_dir / "numbers-defaults.tex"
+    if not p.exists():
+        if quick:
+            print(f"warning: {p} not found; emitting measured macros only", file=sys.stderr)
+            return {}
+        raise SystemExit(f"{p} not found: pass --paper-dir <paper checkout>")
+    return dict(PROVIDE.findall(p.read_text()))
 
 
 # ── main ────────────────────────────────────────────────────────────────────
@@ -310,6 +382,7 @@ def check_paper_macros(defined, paper_dir: Path):
 def main(argv=None):
     a = argparse.ArgumentParser()
     a.add_argument("run_id")
+    a.add_argument("--base", action="append", default=[], help="earlier run to merge (repeatable)")
     a.add_argument("--quick", action="store_true", help="tolerate missing inputs (CI subset)")
     a.add_argument("--paper-dir", default=str(REPO.parent / "Causal4j-paper"))
     args = a.parse_args(argv)
@@ -318,19 +391,25 @@ def main(argv=None):
     if not run.is_dir():
         raise SystemExit(f"{run} does not exist")
 
-    def need(name):
-        """All JMH results of one step: <name>/*.json (one per dataset)."""
-        files = sorted((run / name).glob("*.json"))
-        if not files and not args.quick:
-            raise SystemExit(f"{run / name}/ has no results: run the script that produces it (see bench/README.md)")
+    runs = runs_of(run, args.base)
+    print("runs: " + ", ".join(r.name for r in runs))
+
+    def need(name, optional=False):
+        """All JMH results of one step across the runs: <name>/<dataset>.json, newest run first."""
+        files = [f for f in merged_files(runs, name) if f.suffix == ".json"]
+        if not files and not (args.quick or optional):
+            raise SystemExit(f"no run has {name}/ results: run the script that produces it (see bench/README.md)")
         return [r for f in files for r in load_jmh(f)]
 
-    censored = load_censored(run)
-    tier_rows = need("tier_a") + need("cypher") + (need("gds") if not args.quick else [])
-    lat = lookup(tier_rows, censored)
-    compile_rows = need("compile") if not args.quick else []
+    censored = load_censored(runs)
+    tier_rows = (need("tier_a") + need("closure_read", optional=args.quick) + need("procedure", optional=args.quick)
+                 + need("cypher") + (need("gds") if not args.quick else []))
     rq4_rows = need("rq4") if not args.quick else []
-    rq2 = rq2_rows(run)
+    pruned_rows = need("rq2_pruned") if not args.quick else []
+    # tier (a) first, then RQ4 (Causal4j index=on for the remaining synthetic graphs), then pruned
+    lat = lookup(tier_rows + rq4_rows + pruned_rows, censored)
+    compile_rows = need("compile") if not args.quick else []
+    rq2 = rq2_rows(runs)
     if not rq2 and not args.quick:
         raise SystemExit(f"{run / 'rq2.csv'} missing: run bench/scripts/rq2.sh")
 
@@ -346,22 +425,30 @@ def main(argv=None):
         quick_extra = [r["dataset"] for r in tier_rows if args.quick]
         (out / "tables" / "rq1_tier_a.tex").write_text(
             rq1_table(lat, list(dict.fromkeys(tier_datasets + quick_extra))))
+        rq1_csv(tier_rows, censored, out / "tables" / "rq1_tier_a.csv")
     if rq2:
-        (out / "tables" / "rq2.tex").write_text(rq2_table(rq2, compile_rows))
+        (out / "tables" / "rq2.tex").write_text(rq2_table(rq2, compile_rows, lat))
         rq2_figure(rq2, out / "figures" / "rq2_crossover.pdf")
     if tier_rows or rq4_rows:
         rq4_figure(lat, rq4_rows, out / "figures" / "rq4_latency.pdf")
 
-    def speedup(baseline):
-        return geomean([lat[("dfs" if baseline == "dfs" else baseline, ds, op)] / lat[("causal4j", ds, op)]
+    def speedup(baseline, system="causal4j"):
+        """Geometric mean over bnlearn + covid x 5 operators of baseline / system median latency."""
+        return geomean([lat[(baseline, ds, op)] / lat[(system, ds, op)]
                         for ds in BNLEARN + ["covid"] for op in OPERATORS
-                        if ("causal4j", ds, op) in lat and (baseline, ds, op) in lat
-                        and math.isfinite(lat[(baseline, ds, op)])])
+                        if (system, ds, op) in lat and (baseline, ds, op) in lat
+                        and math.isfinite(lat[(baseline, ds, op)]) and math.isfinite(lat[(system, ds, op)])])
 
     values = {}
-    s_dfs, s_cy = speedup("dfs"), speedup("cypher")
+    s_dfs, s_cy, s_pc = speedup("dfs"), speedup("cypher"), speedup("cypher", "procedure")
     values["speedupTierAvsDfs"] = fmt_x(s_dfs) if s_dfs else "\\TODO{x}"
     values["speedupTierAvsCypher"] = fmt_x(s_cy) if s_cy else "\\TODO{x}"
+    values["speedupProcedureVsCypher"] = fmt_x(s_pc) if s_pc else "\\TODO{x}"
+    overhead = [lat[("procedure", "munin", op)] - lat[("causal4j", "munin", op)] for op in OPERATORS
+                if ("procedure", "munin", op) in lat and ("causal4j", "munin", op) in lat]
+    values["procedureOverheadUs"] = fmt_us(statistics.median(overhead)) if overhead else "\\TODO{x}"
+    read = lat.get(("read", "munin", "ancestors"))
+    values["closureReadUsMunin"] = fmt_us(read) if read is not None else "\\TODO{x}"
     munin_build = next((r["median_us"] / 1e3 for r in compile_rows
                         if r["dataset"] == "munin" and r["branch"] == "closures"), None)
     values["buildMsMunin"] = f"{munin_build:.1f}" if munin_build else "\\TODO{ms}"
@@ -371,16 +458,26 @@ def main(argv=None):
     for budget, name in ((64e6, "SixtyFourMB"), (1e9, "OneGB")):
         n, _ = crossover(rq2, budget) if rq2 else (None, None)
         values[f"crossoverNodes{name}"] = f"{n:,}".replace(",", "{,}") if n else "\\TODO{N}"
-    big = max((r for r in rq2 if r["branch"] == "pruned"), key=lambda r: int(r["n"]), default=None)
-    if big:
-        c = next(r for r in rq2 if r["dataset"] == big["dataset"] and r["branch"] == "closures")
-        values["crossoverLatencyRatio"] = fmt_x(float(big["reaches_us_median"]) / max(1e-9, float(c["reaches_us_median"])))
+    # pruned / closure reaches (JMH) at the largest graph measured on both branches
+    both = [r["dataset"] for r in rq2 if r["branch"] == "closures"
+            and ("pruned", r["dataset"], "reaches") in lat and ("causal4j", r["dataset"], "reaches") in lat]
+    if both:
+        big = max(both, key=lambda d: meta(d)["n"])
+        values["crossoverLatencyRatio"] = fmt_x(lat[("pruned", big, "reaches")] / lat[("causal4j", big, "reaches")])
     else:
         values["crossoverLatencyRatio"] = "\\TODO{x}"
-    for k, v in TODO_MACROS.items():
-        values.setdefault(k, f"\\TODO{{{v}}}")
 
-    check_paper_macros(values, Path(args.paper_dir))
+    # Every macro the paper defines a default for, in its order; measured value or its default.
+    defaults = paper_defaults(Path(args.paper_dir), args.quick)
+    measured = {k: v for k, v in values.items() if not v.startswith("\\TODO")}
+    unknown = sorted(set(values) - set(defaults)) if defaults else []
+    if unknown:
+        print(f"warning: computed macros the paper does not declare: {', '.join(unknown)}", file=sys.stderr)
+    final = {k: measured.get(k, d) for k, d in defaults.items()} if defaults else values
+    missing = [k for k in defaults if k not in final]
+    if missing:
+        raise SystemExit(f"numbers.tex would miss macros: {', '.join(missing)}")
+    values = final
     (out / "numbers.tex").write_text(numbers(values))
     print(f"wrote {out}")
     for k, v in values.items():

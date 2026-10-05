@@ -11,6 +11,14 @@ export RUN_ID=${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD)
 RUN=bench/results/$RUN_ID
 mkdir -p "$RUN"
 [ -f "$RUN/environment.json" ] || java -cp "$JAR" com.example.causal.bench.run.Environment "$RUN/environment.json"
+# BASE_RUN=<id>[,<id>...]: reuse every output an earlier run already has (step skips it here)
+# and record it in base_runs.txt, which results_to_tex reads to merge the runs (newest wins).
+if [ -n "${BASE_RUN:-}" ]; then
+  for b in ${BASE_RUN//,/ }; do
+    [ -d "bench/results/$b" ] || { echo "BASE_RUN $b not found under bench/results" >&2; exit 1; }
+    grep -qx "$b" "$RUN/base_runs.txt" 2>/dev/null || echo "$b" >> "$RUN/base_runs.txt"
+  done
+fi
 
 # JMH with the timeout side-CSV wired in (forks inherit -D from this JVM). Extra
 # JMH options for quick runs come from $JMH_OPTS.
@@ -26,9 +34,17 @@ jmh_each() {
     if [ -f "$RUN/$dir/$d.json.partial" ]; then mv "$RUN/$dir/$d.json.partial" "$RUN/$dir/$d.json"; fi
   done
 }
-# step <output-file> <command...>: run unless the output already exists in this run.
+# have <relative-path>: true if this run or one of its base runs already has the output.
+have() {
+  if [ -s "$RUN/$1" ]; then return 0; fi
+  if [ -f "$RUN/base_runs.txt" ]; then
+    while read -r b; do [ -s "bench/results/$b/$1" ] && return 0; done < "$RUN/base_runs.txt"
+  fi
+  return 1
+}
+# step <output-file> <command...>: run unless the output exists in this run or a base run.
 step() {
-  local out="$RUN/$1"; shift
-  if [ -s "$out" ]; then echo "skip $out (exists)"; return; fi
-  echo "== $out"; "$@"
+  local rel="$1"; shift
+  if have "$rel"; then echo "skip $rel (exists)"; return; fi
+  echo "== $RUN/$rel"; "$@"
 }

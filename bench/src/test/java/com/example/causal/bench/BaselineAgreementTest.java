@@ -8,11 +8,14 @@ import com.example.causal.bench.db.CypherBaseline;
 import com.example.causal.bench.db.EmbeddedNeo4j;
 import com.example.causal.bench.db.GdsBaseline;
 import com.example.causal.bench.graph.SnapshotFactory;
+import com.example.causal.bench.jmh.ProcedureBenchmarks;
 import com.example.causal.runtime.algorithms.PathAnalyzer;
 import com.example.causal.runtime.algorithms.ReachabilityIndex;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -38,6 +41,10 @@ class BaselineAgreementTest {
                 assertEquals(idx.descendants(id).size(), cy.descendants(id), "cypher de(" + id + ")");
                 assertEquals(idx.ancestors(id).size(), gds.ancestors(id), "gds an(" + id + ")");
                 assertEquals(idx.descendants(id).size(), gds.descendants(id), "gds de(" + id + ")");
+                assertEquals(idx.ancestors(id).size(),
+                        ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.ANCESTORS, Map.of("id", id)), "procedure an(" + id + ")");
+                assertEquals(idx.descendants(id).size(),
+                        ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.DESCENDANTS, Map.of("id", id)), "procedure de(" + id + ")");
             }
             for (Workloads.Pair p : Workloads.pairs(dataset)) {
                 assertEquals(1, cy.reaches(p.t(), p.y()));
@@ -46,6 +53,13 @@ class BaselineAgreementTest {
                 assertEquals(0, gds.reaches(p.y(), p.t()), "no path back in a DAG");
                 assertEquals(pa.confounders(p.t(), p.y()).size(), cy.confounders(p.t(), p.y()), "confounders " + p);
                 assertEquals(pa.mediators(p.t(), p.y()).size(), cy.mediators(p.t(), p.y()), "mediators " + p);
+                Map<String, Object> ty = Map.of("t", p.t(), "y", p.y());
+                assertEquals(1, ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.REACHES, Map.of("u", p.t(), "v", p.y())));
+                assertEquals(0, ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.REACHES, Map.of("u", p.y(), "v", p.t())));
+                assertEquals(pa.confounders(p.t(), p.y()).size(),
+                        ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.CONFOUNDERS, ty), "procedure confounders " + p);
+                assertEquals(pa.mediators(p.t(), p.y()).size(),
+                        ProcedureBenchmarks.answer(neo, ProcedureBenchmarks.MEDIATORS, ty), "procedure mediators " + p);
             }
         }
     }
