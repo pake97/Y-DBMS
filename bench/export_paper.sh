@@ -11,7 +11,7 @@ PAPER=${2:-$ROOT/../Causal4j-paper}
 OUT=$ROOT/bench/out/$RUN_ID
 [ -f "$OUT/numbers.tex" ] || { echo "$OUT/numbers.tex missing: run python -m causal4j_bench.results_to_tex $RUN_ID" >&2; exit 1; }
 [ -d "$PAPER/.git" ] || { echo "$PAPER is not a git checkout" >&2; exit 1; }
-git -C "$PAPER" pull --rebase
+git -C "$PAPER" pull --rebase --autostash  # keeps local edits (e.g. a new numbers-defaults line)
 mkdir -p "$PAPER/tables" "$PAPER/figures"
 cp "$OUT"/tables/*.tex "$PAPER/tables/"
 if compgen -G "$OUT/figures/*.pdf" > /dev/null; then cp "$OUT"/figures/*.pdf "$PAPER/figures/"; fi
