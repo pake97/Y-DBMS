@@ -3,6 +3,7 @@ package com.example.causal.procedures;
 import com.example.causal.api.*;
 import com.example.causal.dto.*;
 import com.example.causal.runtime.RuntimeRegistry;
+import com.example.causal.runtime.compile.CompiledCausalGraph;
 import org.neo4j.graphdb.Node;
 import org.neo4j.graphdb.Transaction;
 import org.neo4j.procedure.*;
@@ -329,9 +330,11 @@ public class CausalProcedures {
     }
 
     private Stream<VariableNodeRecord> toVariableNodes(Set<VariableRef> refs) {
+        GraphSnapshot snap = RuntimeRegistry.getInstance().currentSnapshot();
+        CompiledCausalGraph graph = snap instanceof CompiledCausalGraph g ? g : null;
         return refs.stream()
                 .sorted(Comparator.comparing(VariableRef::id))
-                .map(ref -> new VariableNodeRecord(ProcedureVariables.lookup(tx, ref.id())));
+                .map(ref -> new VariableNodeRecord(ProcedureVariables.lookup(tx, graph, ref.id())));
     }
 
     private static SnapshotRecord toSnapshotRecord(GraphSnapshot snap) {

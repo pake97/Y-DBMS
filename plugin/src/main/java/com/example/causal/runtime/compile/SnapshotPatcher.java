@@ -289,6 +289,7 @@ public final class SnapshotPatcher {
                 topoOrderIdx, topoPos, topoLayer,
                 longsPerNode,
                 ancestorBits, descendantBits,
+                Arrays.copyOf(old.elementIdArray(), newN),  // added variables: no element id yet
                 Instant.now(),
                 old.compiledAt());
     }

@@ -64,9 +64,11 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     private final int words;
     private final long[][] ancestorBits;
     private final long[][] descendantBits;
+    /** Neo4j element id of each variable's node by dense index (null if not loaded from Neo4j). */
+    private final String[] elementIds;
 
     /**
-     * Full constructor including linear-Gaussian SEM edge weights.
+     * Full constructor including linear-Gaussian SEM edge weights, without Neo4j element ids.
      */
     CompiledCausalGraph(
             Map<String, Variable> variableById,
@@ -74,6 +76,22 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             Map<String, Set<String>> reverseAdj,
             List<String> topoOrder,
             Map<String, Map<String, Double>> edgeWeights,
+            Instant compiledAt
+    ) {
+        this(variableById, forwardAdj, reverseAdj, topoOrder, edgeWeights, Map.of(), compiledAt);
+    }
+
+    /**
+     * Full constructor; {@code elementIdById} maps variable id to its node's Neo4j element id,
+     * so procedures can return nodes without searching for them (may be empty).
+     */
+    CompiledCausalGraph(
+            Map<String, Variable> variableById,
+            Map<String, Set<String>> forwardAdj,
+            Map<String, Set<String>> reverseAdj,
+            List<String> topoOrder,
+            Map<String, Map<String, Double>> edgeWeights,
+            Map<String, String> elementIdById,
             Instant compiledAt
     ) {
         this.variableById = Collections.unmodifiableMap(new LinkedHashMap<>(variableById));
@@ -93,6 +111,8 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             idx.put(v.id(), idx.size());
         }
         this.nameToIndex = Collections.unmodifiableMap(idx);
+        this.elementIds = new String[n];
+        for (int i = 0; i < n; i++) elementIds[i] = elementIdById.get(indexToVar[i].id());
 
         // 2. CSR adjacency
         this.fwdOffset = new int[n + 1];
@@ -169,6 +189,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             int[] topoOrderIdx, int[] topoPos, int[] topoLayer,
             int words,
             long[][] ancestorBits, long[][] descendantBits,
+            String[] elementIds,
             Instant compiledAt,
             Instant patchedFrom
     ) {
@@ -177,7 +198,8 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         check(fwdOffset.length == n + 1 && revOffset.length == n + 1, "CSR offsets");
         check(fwdOffset[n] == fwdTarget.length && revOffset[n] == revTarget.length
                 && fwdTarget.length == revTarget.length, "CSR targets");
-        check(topoOrderIdx.length == n && topoPos.length == n && topoLayer.length == n, "order arrays");
+        check(topoOrderIdx.length == n && topoPos.length == n && topoLayer.length == n
+                && elementIds.length == n, "order arrays");
         check(words == BitSet64.words(n) && ancestorBits.length == n && descendantBits.length == n, "closures");
         for (int i = 0; i < n; i++) {
             check(ancestorBits[i].length == words && descendantBits[i].length == words, "closure row " + i);
@@ -200,6 +222,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         this.words = words;
         this.ancestorBits = ancestorBits;
         this.descendantBits = descendantBits;
+        this.elementIds = elementIds;
         this.compiledAt = compiledAt;
         this.patchedFrom = patchedFrom;
         this.parameterized = computeParameterized();
@@ -239,6 +262,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     int[] layerArray()                                  { return topoLayer; }
     long[][] ancestorRows()                             { return ancestorBits; }
     long[][] descendantRows()                           { return descendantBits; }
+    String[] elementIdArray()                           { return elementIds; }
 
     /** Fill {@code offset} and return the target array for one adjacency direction. */
     private int[] csr(Map<String, Set<String>> adj, int[] offset) {
@@ -308,6 +332,16 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     // -------------------------------------------------------------------------
     // Index-level accessors (dense int ids)
     // -------------------------------------------------------------------------
+
+    /**
+     * Neo4j element id of the variable's node as of the compile, or null (unknown id, a
+     * variable added by a patch, or a snapshot not built from Neo4j). A stale element id
+     * cannot occur: deleting a :Variable invalidates the snapshot.
+     */
+    public String elementIdOf(String id) {
+        Integer i = nameToIndex.get(id);
+        return i == null ? null : elementIds[i];
+    }
 
     /** Dense index of {@code id}, or -1 if unknown. */
     public int indexOf(String id) {

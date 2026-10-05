@@ -35,8 +35,11 @@ jmh_each() {
   done
 }
 # have <relative-path>: true if this run or one of its base runs already has the output.
+# FORCE_STEPS=<dir>[,<dir>...] re-measures those steps even when a base run has them
+# (e.g. after a plugin change); results_to_tex then prefers this run's files.
 have() {
   if [ -s "$RUN/$1" ]; then return 0; fi
+  case ",${FORCE_STEPS:-}," in *",${1%%/*},"*) return 1 ;; esac
   if [ -f "$RUN/base_runs.txt" ]; then
     while read -r b; do [ -s "bench/results/$b/$1" ] && return 0; done < "$RUN/base_runs.txt"
   fi

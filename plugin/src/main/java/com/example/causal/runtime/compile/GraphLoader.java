@@ -41,6 +41,7 @@ public final class GraphLoader {
         Transaction tx = options.transaction();
 
         Map<String, Variable> variableById = new LinkedHashMap<>();
+        Map<String, String> elementIdById = new HashMap<>();
         List<String[]> edges = new ArrayList<>();
 
         // --- Pass 1: load all Variable nodes ---
@@ -57,6 +58,7 @@ public final class GraphLoader {
                         Variable.DEFAULT_NOISE_VARIANCE)).doubleValue();
 
                 variableById.put(id, Variable.from(id, name, observed, latent, intercept, noise));
+                elementIdById.put(id, node.getElementId());
             }
         }
 
@@ -90,6 +92,6 @@ public final class GraphLoader {
             }
         }
 
-        return GraphBuilder.build(variableById.values(), edges, edgeWeights);
+        return GraphBuilder.build(variableById.values(), edges, edgeWeights, elementIdById);
     }
 }

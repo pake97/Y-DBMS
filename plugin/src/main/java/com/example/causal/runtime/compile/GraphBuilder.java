@@ -25,6 +25,14 @@ public final class GraphBuilder {
     public static CompiledCausalGraph build(Collection<Variable> variables,
                                             Collection<String[]> edges,
                                             Map<String, Map<String, Double>> weightsByChild) {
+        return build(variables, edges, weightsByChild, Map.of());
+    }
+
+    /** As above, plus each variable's Neo4j element id (GraphLoader), so procedures can return nodes directly. */
+    public static CompiledCausalGraph build(Collection<Variable> variables,
+                                            Collection<String[]> edges,
+                                            Map<String, Map<String, Double>> weightsByChild,
+                                            Map<String, String> elementIdById) {
         Map<String, Variable> variableById = new LinkedHashMap<>();
         Map<String, Set<String>> forwardAdj = new LinkedHashMap<>();
         Map<String, Set<String>> reverseAdj = new LinkedHashMap<>();
@@ -42,6 +50,6 @@ public final class GraphBuilder {
         }
         List<String> topoOrder = TopologicalSorter.sort(variableById.keySet(), forwardAdj);
         return new CompiledCausalGraph(variableById, forwardAdj, reverseAdj, topoOrder,
-                weightsByChild, Instant.now());
+                weightsByChild, elementIdById, Instant.now());
     }
 }
