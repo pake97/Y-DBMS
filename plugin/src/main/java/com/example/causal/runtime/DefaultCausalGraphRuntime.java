@@ -8,6 +8,7 @@ import com.example.causal.api.GraphSnapshot;
 import com.example.causal.api.VariableRef;
 import com.example.causal.dto.CounterfactualRecord;
 import com.example.causal.dto.LinearGaussianRecord;
+import com.example.causal.runtime.algorithms.Adjustment;
 import com.example.causal.runtime.algorithms.CounterfactualInference;
 import com.example.causal.runtime.algorithms.DSeparation;
 import com.example.causal.runtime.algorithms.LinearGaussianInference;
@@ -18,7 +19,6 @@ import com.example.causal.runtime.compile.GraphLoader;
 import com.example.causal.runtime.index.BitSet64;
 import com.example.causal.runtime.compile.SnapshotPatcher;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -182,55 +182,36 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
         return b;
     }
 
+    /**
+     * The canonical-set decision of {@link Adjustment#decide} in the pre-WP2 result shape: the
+     * canonical set if the effect is identifiable by adjustment, no set otherwise. Kept as an
+     * alias for {@code causal.adjustmentCandidate} and the DSL until WP4 switches them.
+     */
     @Override
     public AdjustmentCandidateResult candidateAdjustmentSet(VariableRef treatment, VariableRef outcome) {
         CompiledCausalGraph g = requireSnapshot();
         if (treatment == null || outcome == null) {
             throw new IllegalArgumentException("`treatment` and `outcome` must be non-null");
         }
-
-        String treatmentId = treatment.id();
-        String outcomeId = outcome.id();
-
-        if (treatmentId.equals(outcomeId)) {
-            return new AdjustmentCandidateResult(
-                    true,
-                    List.of(Set.of()),
-                    "`treatment` equals `outcome`; empty adjustment set is sufficient"
-            );
+        int t = requireIndex(g, treatment), y = requireIndex(g, outcome);
+        if (t == y) {
+            return new AdjustmentCandidateResult(true, List.of(Set.of()),
+                    "`treatment` equals `outcome`; empty adjustment set is sufficient");
         }
-
-        if (isBackdoorBlocked(g, treatmentId, outcomeId, Set.of())) {
-            return new AdjustmentCandidateResult(
-                    true,
-                    List.of(Set.of()),
-                    "empty set blocks all backdoor paths"
-            );
+        Adjustment.Decision d = Adjustment.decide(g, t, y);
+        if (!d.identifiable()) {
+            return new AdjustmentCandidateResult(false, List.of(),
+                    "not identifiable by adjustment: the canonical set does not block all non-causal paths");
         }
+        Set<VariableRef> canonical = toRefs(g.toIds(d.canonical()));
+        return new AdjustmentCandidateResult(true, List.of(canonical),
+                "identifiable by adjustment; canonical set has " + canonical.size() + " variables");
+    }
 
-        List<String> eligibleIds = eligibleAdjustmentIds(g, treatmentId, outcomeId);
-        for (int size = 1; size <= eligibleIds.size(); size++) {
-            List<Set<VariableRef>> minimalCandidates = new ArrayList<>();
-            for (Set<String> candidateIds : combinationsOfSize(eligibleIds, size)) {
-                if (isBackdoorBlocked(g, treatmentId, outcomeId, candidateIds)) {
-                    minimalCandidates.add(toRefs(candidateIds));
-                }
-            }
-
-            if (!minimalCandidates.isEmpty()) {
-                return new AdjustmentCandidateResult(
-                        true,
-                        Collections.unmodifiableList(minimalCandidates),
-                        "found " + minimalCandidates.size() + " minimal backdoor adjustment set(s)"
-                );
-            }
-        }
-
-        return new AdjustmentCandidateResult(
-                false,
-                List.of(),
-                "no valid adjustment set satisfies the backdoor criterion"
-        );
+    private static int requireIndex(CompiledCausalGraph g, VariableRef v) {
+        int i = g.indexOf(v.id());
+        if (i < 0) throw new IllegalArgumentException("Unknown variable: " + v.id());
+        return i;
     }
 
     // -------------------------------------------------------------------------
@@ -249,66 +230,6 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
         Set<String> ids = new LinkedHashSet<>();
         for (VariableRef v : refs) ids.add(v.id());
         return ids;
-    }
-
-    private List<String> eligibleAdjustmentIds(
-            CompiledCausalGraph g,
-            String treatmentId,
-            String outcomeId
-    ) {
-        Set<String> descendantsOfTreatment = requireIndex().descendants(treatmentId);
-        List<String> eligibleIds = new ArrayList<>();
-        for (String id : g.topoOrder()) {
-            if (id.equals(treatmentId) || id.equals(outcomeId)) continue;
-            // If the node is a descendant of the treatment, it is not eligible for adjustment (since it would block active causal paths in case of chain and open collider paths)
-            if (descendantsOfTreatment.contains(id)) continue;
-            eligibleIds.add(id);
-        }
-        return eligibleIds;
-    }
-
-    private List<Set<String>> combinationsOfSize(List<String> values, int size) {
-        if (size <= 0 || size > values.size()) return List.of();
-        List<Set<String>> combinations = new ArrayList<>();
-        buildCombinations(values, size, 0, new ArrayList<>(), combinations);
-        return combinations;
-    }
-
-    private void buildCombinations(
-            List<String> values,
-            int targetSize,
-            int startIndex,
-            List<String> current,
-            List<Set<String>> sink
-    ) {
-        if (current.size() == targetSize) {
-            sink.add(new LinkedHashSet<>(current));
-            return;
-        }
-
-        int remainingNeeded = targetSize - current.size();
-        int maxStart = values.size() - remainingNeeded;
-        for (int i = startIndex; i <= maxStart; i++) {
-            current.add(values.get(i));
-            buildCombinations(values, targetSize, i + 1, current, sink);
-            current.remove(current.size() - 1);
-        }
-    }
-
-    /**
-     * Returns true if {@code conditionedOn} blocks all backdoor paths from
-     * {@code treatmentId} to {@code outcomeId}. Outgoing edges from
-     * {@code treatmentId} are cut so causal paths are not traversed.
-     */
-    private boolean isBackdoorBlocked(
-            CompiledCausalGraph g,
-            String treatmentId,
-            String outcomeId,
-            Set<String> conditionedOn
-    ) {
-        // cut every outgoing edge of the treatment so causal paths are not traversed
-        return DSeparation.separated(g, bits(g, Set.of(treatmentId)), bits(g, Set.of(outcomeId)),
-                bits(g, conditionedOn), bits(g, Set.of(treatmentId)), null);
     }
 
     // -------------------------------------------------------------------------

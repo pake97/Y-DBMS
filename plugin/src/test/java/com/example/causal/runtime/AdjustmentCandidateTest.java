@@ -40,29 +40,32 @@ class AdjustmentCandidateTest {
     }
 
     @Test
-    void returnsAllMinimalSetsWhenMultipleExist() throws Exception {
+    void returnsCanonicalSetWhenSeveralMinimalSetsExist() throws Exception {
         // both Z and W alone block the only backdoor path T <- Z -> W -> Y.
+        // candidateAdjustmentSet is now the canonical-set decision (WP2): the canonical set
+        // (an(T) ∪ an(Y)) \ forb = {Z, W} is valid; the minimal sets {Z}, {W} come from
+        // adjustmentSets(T, Y, "all-minimal", limit).
         CompiledCausalGraph g = Graphs.fromEdges(List.of("Z->T", "Z->W", "W->Y"));
         DefaultCausalGraphRuntime rt = runtimeWithSnapshot(g);
 
         AdjustmentCandidateResult result = rt.candidateAdjustmentSet(ref("T"), ref("Y"));
 
         assertTrue(result.adjustmentSetExists());
-        assertEquals(2, result.candidateSets().size());
-        assertTrue(result.candidateSets().contains(setOf("Z")));
-        assertTrue(result.candidateSets().contains(setOf("W")));
+        assertEquals(List.of(setOf("Z", "W")), result.candidateSets());
     }
 
     @Test
-    void returnsMinimalSetsInDeterministicTopoCombinationOrder() throws Exception {
-        // both Z and W are minimal size-1 blockers; order follows eligible topo-combination order.
+    void returnsExactlyOneSetInDenseIndexOrder() throws Exception {
+        // The canonical decision returns one set, its ids in dense-index order (Z before W);
+        // the old level-wise enumeration returned [{Z}, {W}] in topo-combination order.
         CompiledCausalGraph g = Graphs.fromEdges(List.of("Z->T", "Z->W", "W->Y"));
         DefaultCausalGraphRuntime rt = runtimeWithSnapshot(g);
 
         AdjustmentCandidateResult result = rt.candidateAdjustmentSet(ref("T"), ref("Y"));
 
         assertTrue(result.adjustmentSetExists());
-        assertEquals(List.of(setOf("Z"), setOf("W")), result.candidateSets());
+        assertEquals(1, result.candidateSets().size());
+        assertEquals(List.of(ref("Z"), ref("W")), List.copyOf(result.candidateSets().get(0)));
     }
 
     @Test
