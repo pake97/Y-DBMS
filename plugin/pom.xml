@@ -41,6 +41,10 @@
 
     <build>
         <testResources>
+            <!-- bnlearn edge lists for the WP2 reference tests (bnlearn/<name>/edges.csv) -->
+            <testResource>
+                <directory>${project.basedir}/src/test/resources</directory>
+            </testResource>
             <testResource>
                 <directory>${project.basedir}/../dev</directory>
                 <includes>
