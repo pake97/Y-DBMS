@@ -91,17 +91,28 @@ public interface CausalGraphRuntime {
     DSeparationResult isDSeparated(Set<VariableRef> x, Set<VariableRef> y, Set<VariableRef> z);
 
     /**
-     * Find valid adjustment sets for identifying the causal effect of
-     * {@code treatment} on {@code outcome} from observational data.
-     *
-     * <p>When multiple minimal candidate sets exist, implementations should
-     * return all of them in deterministic order based on graph traversal
-     * (for example, topological-combination order).
+     * Alias of {@link #adjustmentSets} in mode {@code canonical}, in the pre-WP2 result shape:
+     * the canonical set if the effect is identifiable by adjustment, no set otherwise. Kept for
+     * {@code causal.adjustmentCandidate} and the DSL until WP4 switches them.
      *
      * @param treatment the intervention variable
      * @param outcome   the response variable
      */
     AdjustmentCandidateResult candidateAdjustmentSet(VariableRef treatment, VariableRef outcome);
+
+    /**
+     * Adjustment sets for the total effect of {@code treatment} on {@code outcome} under the
+     * generalized adjustment criterion (Shpitser et al. 2010; Perković et al. 2018).
+     *
+     * @param mode  {@code canonical}, {@code minimal} (one inclusion-minimal set) or
+     *              {@code all-minimal} (inclusion-minimal sets with polynomial delay)
+     * @param limit maximum number of sets in mode {@code all-minimal} ({@code <= 0}: no limit)
+     * @throws IllegalArgumentException for an unknown mode or variable
+     */
+    AdjustmentSetsResult adjustmentSets(VariableRef treatment, VariableRef outcome, String mode, int limit);
+
+    /** Topological position of the variable in the current snapshot (0 = source), or -1 if unknown. */
+    int topoPosition(VariableRef v);
 
     /**
      * Return variables that lie on at least one directed path from {@code from}

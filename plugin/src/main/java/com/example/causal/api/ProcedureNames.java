@@ -31,6 +31,7 @@ public final class ProcedureNames {
 
     public static final String DSEP                 = "causal.dsep";
     public static final String ADJUSTMENT_CANDIDATE = "causal.adjustmentCandidate";
+    public static final String ADJUSTMENT_SETS      = "causal.adjustmentSets";
 
     public static final String MEDIATORS            = "causal.mediators";
     public static final String COLLIDERS            = "causal.colliders";

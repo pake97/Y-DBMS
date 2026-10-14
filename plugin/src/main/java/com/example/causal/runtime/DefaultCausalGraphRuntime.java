@@ -1,6 +1,7 @@
 package com.example.causal.runtime;
 
 import com.example.causal.api.AdjustmentCandidateResult;
+import com.example.causal.api.AdjustmentSetsResult;
 import com.example.causal.api.CausalGraphRuntime;
 import com.example.causal.api.DSeparationResult;
 import com.example.causal.api.GraphCompileOptions;
@@ -189,23 +190,46 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
      */
     @Override
     public AdjustmentCandidateResult candidateAdjustmentSet(VariableRef treatment, VariableRef outcome) {
+        AdjustmentSetsResult r = adjustmentSets(treatment, outcome, "canonical", 1);
+        return new AdjustmentCandidateResult(r.identifiable(), r.sets(), r.explanation());
+    }
+
+    @Override
+    public AdjustmentSetsResult adjustmentSets(VariableRef treatment, VariableRef outcome, String mode, int limit) {
         CompiledCausalGraph g = requireSnapshot();
         if (treatment == null || outcome == null) {
             throw new IllegalArgumentException("`treatment` and `outcome` must be non-null");
         }
+        if (!List.of("canonical", "minimal", "all-minimal").contains(mode)) {
+            throw new IllegalArgumentException("mode must be canonical, minimal or all-minimal, got: " + mode);
+        }
         int t = requireIndex(g, treatment), y = requireIndex(g, outcome);
+        Adjustment.Decision d = Adjustment.decide(g, t, y);
+        Set<VariableRef> canonical = toRefs(g.toIds(d.canonical()));
+        Set<VariableRef> forbidden = toRefs(g.toIds(d.forbidden()));
         if (t == y) {
-            return new AdjustmentCandidateResult(true, List.of(Set.of()),
+            return new AdjustmentSetsResult(true, canonical, forbidden, List.of(Set.of()), mode,
                     "`treatment` equals `outcome`; empty adjustment set is sufficient");
         }
-        Adjustment.Decision d = Adjustment.decide(g, t, y);
         if (!d.identifiable()) {
-            return new AdjustmentCandidateResult(false, List.of(),
+            return new AdjustmentSetsResult(false, canonical, forbidden, List.of(), mode,
                     "not identifiable by adjustment: the canonical set does not block all non-causal paths");
         }
-        Set<VariableRef> canonical = toRefs(g.toIds(d.canonical()));
-        return new AdjustmentCandidateResult(true, List.of(canonical),
-                "identifiable by adjustment; canonical set has " + canonical.size() + " variables");
+        List<Set<VariableRef>> sets = new java.util.ArrayList<>();
+        switch (mode) {
+            case "canonical" -> sets.add(canonical);
+            case "minimal" -> Adjustment.findMinimal(g, t, y).ifPresent(z -> sets.add(toRefs(g.toIds(z))));
+            default -> Adjustment.listMinimal(g, t, y, limit, z -> sets.add(toRefs(g.toIds(z))));
+        }
+        String explanation = mode.equals("all-minimal")
+                ? "found " + sets.size() + " minimal adjustment set(s)"
+                : "identifiable by adjustment; canonical set has " + canonical.size() + " variables";
+        return new AdjustmentSetsResult(true, canonical, forbidden, List.copyOf(sets), mode, explanation);
+    }
+
+    @Override
+    public int topoPosition(VariableRef v) {
+        return requireSnapshot().topoIndex(v.id());
     }
 
     private static int requireIndex(CompiledCausalGraph g, VariableRef v) {
