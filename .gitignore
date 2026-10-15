@@ -20,3 +20,6 @@ pipeline/*.egg-info/
 pipeline/out/
 # desktop app exports
 Claude outputs/
+
+# local drop folder for files coming from Cowork
+_incoming/

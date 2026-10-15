@@ -163,12 +163,16 @@ findMinSep(I, R):
     return Z                                         // inclusion-minimal, I ⊆ Z ⊆ R
 
 listMinSep(I, R, emit):
-    if findMinSep(I, R) is NONE: return
-    pick v in R \ I  such that v is not forced: v is "free" if findMinSep(I, R \ {v}) is not NONE or findMinSep(I | {v}, R) is not NONE
-       (simplest correct choice: any v in (findMinSep(I,R)) \ I; if none, that set is the unique answer in this branch)
-    if no free v: emit(findMinSep(I, R)); return
-    listMinSep(I | {v}, R, emit)        // branch: v forced in
-    listMinSep(I, R \ {v}, emit)        // branch: v excluded
+    // CORRECTED Oct 14 (A): the include/exclude branching that stood here emitted
+    // non-minimal sets (alarm 21, hepar2 64, covid 49 extra). Minimal separators are
+    // enumerated as in van der Zander, Liskiewicz and Textor, JAIR 2019, Algorithm
+    // ListMinSep, i.e. Takata's close-separator branching on the moral graph of
+    // G_pbd[An(t ∪ y ∪ I)] restricted to the eligible vertices, with findMinSep as the
+    // oracle that decides whether a branch still contains a separator. Every emitted
+    // set is inclusion-minimal by construction and the number of findMinSep calls
+    // between two emits is at most |R| + 1 (asserted in MinimalSeparatorTest).
+    // The implementation on feat/index-wp2-queries is the reference; this block is
+    // kept as the record of the correction.
 ```
 
 Where `separated_pbd(Z)` is `DSeparation.separated(g, {t}, {y}, Z, {t}, cn)`, and
@@ -178,7 +182,7 @@ proportional to the mask). Stop when `limit` sets have been emitted (`limit <= 0
 no limit). Every emitted set must pass `isValid`; assert it in a test, not in production
 code.
 
-Set `R = V & ~forb & ~{t,y}` and `I = ∅` for the public methods. `findMinimal` is
+Set `R = obs & ~forb & ~{t,y}` (addendum A: observed variables only) and `I = ∅` for the public methods. `findMinimal` is
 `findMinSep(∅, R)`.
 
 Complexity note for the Javadoc: each `findMinSep` is $O(|V|+|E|)$ plus closure unions;
