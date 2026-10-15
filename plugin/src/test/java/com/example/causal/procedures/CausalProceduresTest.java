@@ -238,6 +238,61 @@ class CausalProceduresTest {
     // Helpers
     // =========================================================================
 
+    // ── id-returning variants: same answer as the node variant, one `id` column ──
+
+    @Test
+    void parentIdsOfC() {
+        assertIdsMatchNodes("causal.parentIds([c])", "causal.parents([c])", "MATCH (c:Variable {id: 'C'})", List.of("A", "B"));
+    }
+
+    @Test
+    void childIdsOfA() {
+        assertIdsMatchNodes("causal.childIds([a])", "causal.children([a])", "MATCH (a:Variable {id: 'A'})", List.of("B", "C"));
+    }
+
+    @Test
+    void ancestorIdsOfC() {
+        assertIdsMatchNodes("causal.ancestorIds([c])", "causal.ancestors([c])", "MATCH (c:Variable {id: 'C'})", List.of("A", "B"));
+    }
+
+    @Test
+    void descendantIdsOfA() {
+        assertIdsMatchNodes("causal.descendantIds([a])", "causal.descendants([a])", "MATCH (a:Variable {id: 'A'})", List.of("B", "C"));
+    }
+
+    @Test
+    void mediatorIdsFromAToC() {
+        assertIdsMatchNodes("causal.mediatorIds(a, c)", "causal.mediators(a, c)",
+                "MATCH (a:Variable {id: 'A'}), (c:Variable {id: 'C'})", List.of("B"));
+    }
+
+    @Test
+    void colliderIdsMatchColliders() {
+        assertIdsMatchNodes("causal.colliderIds(a, b)", "causal.colliders(a, b)",
+                "MATCH (a:Variable {id: 'A'}), (b:Variable {id: 'B'})", null);
+    }
+
+    @Test
+    void confounderIdsOfBAndC() {
+        assertIdsMatchNodes("causal.confounderIds(b, c)", "causal.confounders(b, c)",
+                "MATCH (b:Variable {id: 'B'}), (c:Variable {id: 'C'})", List.of("A"));
+    }
+
+    @Test
+    void backdoorVariableIdsFromBToC() {
+        assertIdsMatchNodes("causal.backdoorVariableIds(b, c)", "causal.backdoorVariables(b, c)",
+                "MATCH (b:Variable {id: 'B'}), (c:Variable {id: 'C'})", List.of("A"));
+    }
+
+    /** The ids variant yields exactly the node variant's ids, in the same order (and {@code expected} if given). */
+    private void assertIdsMatchNodes(String idsCall, String nodesCall, String match, List<String> expected) {
+        compile();
+        List<String> ids = collectVariableIds(match + " CALL " + idsCall + " YIELD id RETURN id AS variableId");
+        List<String> viaNodes = collectVariableIds(match + " CALL " + nodesCall + " YIELD variable RETURN variable.id AS variableId");
+        assertEquals(viaNodes, ids, idsCall + " vs " + nodesCall);
+        if (expected != null) assertEquals(expected, ids, idsCall);
+    }
+
     // ── causal.adjustmentSets (WP2) and causal.topoOrder ──────────────────────
 
     @Test

@@ -3,6 +3,7 @@ package com.example.causal.procedures;
 import com.example.causal.api.*;
 import com.example.causal.dto.*;
 import com.example.causal.runtime.RuntimeRegistry;
+import com.example.causal.runtime.compile.CompiledCausalGraph;
 import org.neo4j.graphdb.Node;
 import org.neo4j.graphdb.Transaction;
 import org.neo4j.procedure.*;
@@ -168,7 +169,7 @@ public class CausalProcedures {
     private List<Node> toNodes(Set<VariableRef> refs) {
         return refs.stream()
                 .sorted(Comparator.comparing(VariableRef::id))
-                .map(ref -> ProcedureVariables.lookup(tx, ref.id()))
+                .map(ref -> ProcedureVariables.lookup(tx, snapshotGraph(), ref.id()))
                 .collect(Collectors.toList());
     }
 
@@ -191,7 +192,7 @@ public class CausalProcedures {
         List<List<Node>> sets = result.candidateSets().stream()
                 .map(s -> s.stream()
                         .sorted(Comparator.comparing(VariableRef::id))
-                        .map(ref -> ProcedureVariables.lookup(tx, ref.id()))
+                        .map(ref -> ProcedureVariables.lookup(tx, snapshotGraph(), ref.id()))
                         .collect(Collectors.toList()))
                 .collect(Collectors.toList());
 
@@ -344,6 +345,76 @@ public class CausalProcedures {
     // Helpers
     // =========================================================================
 
+    // =========================================================================
+    // Id-returning variants: same answers as above, one `id` column, no node lookup.
+    // For callers that only need ids (the DSL, RETURN variable.id), they skip binding
+    // each result to a Neo4j node.
+    // =========================================================================
+
+    @Procedure(name = ProcedureNames.PARENT_IDS, mode = Mode.READ)
+    @Description("Ids of the direct parents of each :Variable node (no node lookup).")
+    public Stream<IdRecord> parentIds(@Name("variables") List<Node> variables) {
+        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        return toIds(runtime.parents(ProcedureVariables.resolveAll(runtime, variables)));
+    }
+
+    @Procedure(name = ProcedureNames.CHILD_IDS, mode = Mode.READ)
+    @Description("Ids of the direct children of each :Variable node (no node lookup).")
+    public Stream<IdRecord> childIds(@Name("variables") List<Node> variables) {
+        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        return toIds(runtime.children(ProcedureVariables.resolveAll(runtime, variables)));
+    }
+
+    @Procedure(name = ProcedureNames.ANCESTOR_IDS, mode = Mode.READ)
+    @Description("Ids of all ancestors of each :Variable node (no node lookup).")
+    public Stream<IdRecord> ancestorIds(@Name("variables") List<Node> variables) {
+        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        return toIds(runtime.ancestors(ProcedureVariables.resolveAll(runtime, variables)));
+    }
+
+    @Procedure(name = ProcedureNames.DESCENDANT_IDS, mode = Mode.READ)
+    @Description("Ids of all descendants of each :Variable node (no node lookup).")
+    public Stream<IdRecord> descendantIds(@Name("variables") List<Node> variables) {
+        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        return toIds(runtime.descendants(ProcedureVariables.resolveAll(runtime, variables)));
+    }
+
+    @Procedure(name = ProcedureNames.MEDIATOR_IDS, mode = Mode.READ)
+    @Description("Ids of the mediators between from and to (no node lookup).")
+    public Stream<IdRecord> mediatorIds(@Name("from") Node from, @Name("to") Node to) {
+        return pathIds(from, to, CausalGraphRuntime::mediators);
+    }
+
+    @Procedure(name = ProcedureNames.COLLIDER_IDS, mode = Mode.READ)
+    @Description("Ids of the colliders between x and y (no node lookup).")
+    public Stream<IdRecord> colliderIds(@Name("x") Node x, @Name("y") Node y) {
+        return pathIds(x, y, CausalGraphRuntime::colliders);
+    }
+
+    @Procedure(name = ProcedureNames.CONFOUNDER_IDS, mode = Mode.READ)
+    @Description("Ids of the common ancestors of x and y (no node lookup).")
+    public Stream<IdRecord> confounderIds(@Name("x") Node x, @Name("y") Node y) {
+        return pathIds(x, y, CausalGraphRuntime::confounders);
+    }
+
+    @Procedure(name = ProcedureNames.BACKDOOR_VARIABLE_IDS, mode = Mode.READ)
+    @Description("Ids of the variables on backdoor paths from treatment to outcome (no node lookup).")
+    public Stream<IdRecord> backdoorVariableIds(@Name("treatment") Node treatment, @Name("outcome") Node outcome) {
+        return pathIds(treatment, outcome, CausalGraphRuntime::backdoorVariables);
+    }
+
+    private Stream<IdRecord> pathIds(Node from, Node to, PathFn fn) {
+        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        VariableRef a = ProcedureVariables.requireResolved(runtime, from, "from");
+        VariableRef b = ProcedureVariables.requireResolved(runtime, to, "to");
+        return toIds(fn.apply(runtime, a, b));
+    }
+
+    /** Same order as toVariableNodes (by id). */
+    private static Stream<IdRecord> toIds(Set<VariableRef> refs) {
+        return refs.stream().map(VariableRef::id).sorted().map(IdRecord::new);
+    }
+
     @FunctionalInterface
     private interface PathFn {
         Set<VariableRef> apply(CausalGraphRuntime rt, VariableRef a, VariableRef b);
@@ -356,10 +427,18 @@ public class CausalProcedures {
         return toVariableNodes(fn.apply(runtime, a, b));
     }
 
+    /** The compiled snapshot, for fetching result nodes by element id (null if none). */
+    private static CompiledCausalGraph snapshotGraph() {
+        GraphSnapshot snap = RuntimeRegistry.getInstance().currentSnapshot();
+        return snap instanceof CompiledCausalGraph g ? g : null;
+    }
+
     private Stream<VariableNodeRecord> toVariableNodes(Set<VariableRef> refs) {
+        GraphSnapshot snap = RuntimeRegistry.getInstance().currentSnapshot();
+        CompiledCausalGraph graph = snap instanceof CompiledCausalGraph g ? g : null;
         return refs.stream()
                 .sorted(Comparator.comparing(VariableRef::id))
-                .map(ref -> new VariableNodeRecord(ProcedureVariables.lookup(tx, ref.id())));
+                .map(ref -> new VariableNodeRecord(ProcedureVariables.lookup(tx, graph, ref.id())));
     }
 
     private static SnapshotRecord toSnapshotRecord(GraphSnapshot snap) {

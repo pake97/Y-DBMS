@@ -38,6 +38,16 @@ public final class ProcedureNames {
     public static final String CONFOUNDERS          = "causal.confounders";
     public static final String BACKDOOR_VARIABLES   = "causal.backdoorVariables";
 
+    // Id-returning variants: one `id` string column, no node lookup.
+    public static final String PARENT_IDS            = "causal.parentIds";
+    public static final String CHILD_IDS             = "causal.childIds";
+    public static final String ANCESTOR_IDS          = "causal.ancestorIds";
+    public static final String DESCENDANT_IDS        = "causal.descendantIds";
+    public static final String MEDIATOR_IDS          = "causal.mediatorIds";
+    public static final String COLLIDER_IDS          = "causal.colliderIds";
+    public static final String CONFOUNDER_IDS        = "causal.confounderIds";
+    public static final String BACKDOOR_VARIABLE_IDS = "causal.backdoorVariableIds";
+
     public static final String LINEAR_GAUSSIAN_INFERENCE = "causal.linearGaussianInference";
     public static final String COUNTERFACTUAL       = "causal.counterfactual";
 }

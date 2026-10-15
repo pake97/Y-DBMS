@@ -2,8 +2,10 @@ package com.example.causal.procedures;
 
 import com.example.causal.api.CausalGraphRuntime;
 import com.example.causal.api.VariableRef;
+import com.example.causal.runtime.compile.CompiledCausalGraph;
 import com.example.causal.runtime.compile.GraphLoader;
 import org.neo4j.graphdb.Node;
+import org.neo4j.graphdb.NotFoundException;
 import org.neo4j.graphdb.ResourceIterator;
 import org.neo4j.graphdb.Transaction;
 
@@ -57,7 +59,24 @@ public final class ProcedureVariables {
         return s;
     }
 
-    /** Re-bind a snapshot variable id to a {@code :Variable} node in the active transaction. */
+    /**
+     * Re-bind a snapshot variable id to its {@code :Variable} node: a direct fetch by the
+     * element id recorded at compile time (how Cypher reaches nodes it returns), falling back
+     * to the label/property index for variables the snapshot has no element id for.
+     */
+    public static Node lookup(Transaction tx, CompiledCausalGraph graph, String id) {
+        String elementId = graph == null ? null : graph.elementIdOf(id);
+        if (elementId != null) {
+            try {
+                return tx.getNodeByElementId(elementId);
+            } catch (NotFoundException e) {
+                // node gone since the compile: fall through to the index lookup
+            }
+        }
+        return lookup(tx, id);
+    }
+
+    /** Re-bind a snapshot variable id to a {@code :Variable} node through the label/property index. */
     public static Node lookup(Transaction tx, String id) {
         try (ResourceIterator<Node> it = tx.findNodes(GraphLoader.VARIABLE_LABEL, "id", id)) {
             if (it.hasNext()) return it.next();

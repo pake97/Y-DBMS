@@ -1,11 +1,9 @@
 package com.example.causal.runtime.compile;
 
 import com.example.causal.api.GraphCompileOptions;
-import com.example.causal.runtime.algorithms.TopologicalSorter;
 import com.example.causal.runtime.model.Variable;
 import org.neo4j.graphdb.*;
 
-import java.time.Instant;
 import java.util.*;
 
 /**
@@ -43,8 +41,8 @@ public final class GraphLoader {
         Transaction tx = options.transaction();
 
         Map<String, Variable> variableById = new LinkedHashMap<>();
-        Map<String, Set<String>> forwardAdj = new LinkedHashMap<>();
-        Map<String, Set<String>> reverseAdj = new LinkedHashMap<>();
+        Map<String, String> elementIdById = new HashMap<>();
+        List<String[]> edges = new ArrayList<>();
 
         // --- Pass 1: load all Variable nodes ---
         try (ResourceIterator<Node> nodes = tx.findNodes(VARIABLE_LABEL)) {
@@ -60,8 +58,7 @@ public final class GraphLoader {
                         Variable.DEFAULT_NOISE_VARIANCE)).doubleValue();
 
                 variableById.put(id, Variable.from(id, name, observed, latent, intercept, noise));
-                forwardAdj.putIfAbsent(id, new LinkedHashSet<>());
-                reverseAdj.putIfAbsent(id, new LinkedHashSet<>());
+                elementIdById.put(id, node.getElementId());
             }
         }
 
@@ -89,17 +86,12 @@ public final class GraphLoader {
                 boolean active = (boolean) row.get("active");
                 if (active) {
                     double weight = ((Number) row.get("weight")).doubleValue();
-                    forwardAdj.computeIfAbsent(fromId, k -> new LinkedHashSet<>()).add(toId);
-                    reverseAdj.computeIfAbsent(toId,   k -> new LinkedHashSet<>()).add(fromId);
+                    edges.add(new String[]{fromId, toId});
                     edgeWeights.computeIfAbsent(toId,  k -> new LinkedHashMap<>()).put(fromId, weight);
                 }
             }
         }
 
-        List<String> topoOrder = TopologicalSorter.sort(variableById.keySet(), forwardAdj);
-
-        return new CompiledCausalGraph(
-                variableById, forwardAdj, reverseAdj, topoOrder, edgeWeights, Instant.now()
-        );
+        return GraphBuilder.build(variableById.values(), edges, edgeWeights, elementIdById);
     }
 }

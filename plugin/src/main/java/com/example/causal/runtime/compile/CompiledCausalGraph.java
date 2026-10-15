@@ -64,9 +64,11 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     private final int words;
     private final long[][] ancestorBits;
     private final long[][] descendantBits;
+    /** Neo4j element id of each variable's node by dense index (null if not loaded from Neo4j). */
+    private final String[] elementIds;
 
     /**
-     * Full constructor including linear-Gaussian SEM edge weights.
+     * Full constructor including linear-Gaussian SEM edge weights, without Neo4j element ids.
      */
     CompiledCausalGraph(
             Map<String, Variable> variableById,
@@ -74,6 +76,22 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             Map<String, Set<String>> reverseAdj,
             List<String> topoOrder,
             Map<String, Map<String, Double>> edgeWeights,
+            Instant compiledAt
+    ) {
+        this(variableById, forwardAdj, reverseAdj, topoOrder, edgeWeights, Map.of(), compiledAt);
+    }
+
+    /**
+     * Full constructor; {@code elementIdById} maps variable id to its node's Neo4j element id,
+     * so procedures can return nodes without searching for them (may be empty).
+     */
+    CompiledCausalGraph(
+            Map<String, Variable> variableById,
+            Map<String, Set<String>> forwardAdj,
+            Map<String, Set<String>> reverseAdj,
+            List<String> topoOrder,
+            Map<String, Map<String, Double>> edgeWeights,
+            Map<String, String> elementIdById,
             Instant compiledAt
     ) {
         this.variableById = Collections.unmodifiableMap(new LinkedHashMap<>(variableById));
@@ -93,6 +111,8 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             idx.put(v.id(), idx.size());
         }
         this.nameToIndex = Collections.unmodifiableMap(idx);
+        this.elementIds = new String[n];
+        for (int i = 0; i < n; i++) elementIds[i] = elementIdById.get(indexToVar[i].id());
 
         // 2. CSR adjacency
         this.fwdOffset = new int[n + 1];
@@ -113,26 +133,30 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             topoPos[i] = k;
         }
 
-        // 4. layers, 5. ancestor closure: one forward-topological pass
+        // 4. layers, 5. ancestor closure: one forward-topological pass.
+        // Over the closure budget, only layers are computed (layer-pruned branch).
         this.words = BitSet64.words(n);
+        boolean closures = closureBytes(n) <= closureBudget();
         this.topoLayer = new int[n];
-        this.ancestorBits = new long[n][];
+        this.ancestorBits = closures ? new long[n][] : null;
         for (int i : topoOrderIdx) {
-            long[] anc = new long[words];
+            long[] anc = closures ? new long[words] : null;
             int layer = 0;
             for (int e = revOffset[i]; e < revOffset[i + 1]; e++) {
                 int p = revTarget[e];
-                BitSet64.or(anc, ancestorBits[p]);
-                BitSet64.set(anc, p);
+                if (closures) {
+                    BitSet64.or(anc, ancestorBits[p]);
+                    BitSet64.set(anc, p);
+                }
                 layer = Math.max(layer, topoLayer[p] + 1);
             }
             topoLayer[i] = layer;
-            ancestorBits[i] = anc;
+            if (closures) ancestorBits[i] = anc;
         }
 
         // 6. descendant closure: one reverse-topological pass
-        this.descendantBits = new long[n][];
-        for (int k = n - 1; k >= 0; k--) {
+        this.descendantBits = closures ? new long[n][] : null;
+        for (int k = n - 1; closures && k >= 0; k--) {
             int i = topoOrderIdx[k];
             long[] des = new long[words];
             for (int e = fwdOffset[i]; e < fwdOffset[i + 1]; e++) {
@@ -165,6 +189,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             int[] topoOrderIdx, int[] topoPos, int[] topoLayer,
             int words,
             long[][] ancestorBits, long[][] descendantBits,
+            String[] elementIds,
             Instant compiledAt,
             Instant patchedFrom
     ) {
@@ -173,7 +198,8 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         check(fwdOffset.length == n + 1 && revOffset.length == n + 1, "CSR offsets");
         check(fwdOffset[n] == fwdTarget.length && revOffset[n] == revTarget.length
                 && fwdTarget.length == revTarget.length, "CSR targets");
-        check(topoOrderIdx.length == n && topoPos.length == n && topoLayer.length == n, "order arrays");
+        check(topoOrderIdx.length == n && topoPos.length == n && topoLayer.length == n
+                && elementIds.length == n, "order arrays");
         check(words == BitSet64.words(n) && ancestorBits.length == n && descendantBits.length == n, "closures");
         for (int i = 0; i < n; i++) {
             check(ancestorBits[i].length == words && descendantBits[i].length == words, "closure row " + i);
@@ -196,9 +222,29 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         this.words = words;
         this.ancestorBits = ancestorBits;
         this.descendantBits = descendantBits;
+        this.elementIds = elementIds;
         this.compiledAt = compiledAt;
         this.patchedFrom = patchedFrom;
         this.parameterized = computeParameterized();
+    }
+
+    /** Bytes of the two closures for {@code n} nodes: {@code 2 * n * ceil(n/64) * 8}. */
+    public static long closureBytes(int n) {
+        return 2L * n * BitSet64.words(n) * Long.BYTES;
+    }
+
+    /** {@code -Dcausal.closures.budget=<bytes>}, read at every build; default unlimited. */
+    static long closureBudget() {
+        return Long.getLong("causal.closures.budget", Long.MAX_VALUE);
+    }
+
+    /**
+     * False when the closures exceeded {@code causal.closures.budget}: then
+     * {@link #ancestorBits}, {@link #descendantBits} and {@link #reaches} must not
+     * be called, and {@code ReachabilityIndex} answers with layer-pruned DFS.
+     */
+    public boolean hasClosures() {
+        return ancestorBits != null;
     }
 
     private static void check(boolean ok, String what) {
@@ -216,6 +262,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     int[] layerArray()                                  { return topoLayer; }
     long[][] ancestorRows()                             { return ancestorBits; }
     long[][] descendantRows()                           { return descendantBits; }
+    String[] elementIdArray()                           { return elementIds; }
 
     /** Fill {@code offset} and return the target array for one adjacency direction. */
     private int[] csr(Map<String, Set<String>> adj, int[] offset) {
@@ -285,6 +332,16 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     // -------------------------------------------------------------------------
     // Index-level accessors (dense int ids)
     // -------------------------------------------------------------------------
+
+    /**
+     * Neo4j element id of the variable's node as of the compile, or null (unknown id, a
+     * variable added by a patch, or a snapshot not built from Neo4j). A stale element id
+     * cannot occur: deleting a :Variable invalidates the snapshot.
+     */
+    public String elementIdOf(String id) {
+        Integer i = nameToIndex.get(id);
+        return i == null ? null : elementIds[i];
+    }
 
     /** Dense index of {@code id}, or -1 if unknown. */
     public int indexOf(String id) {
@@ -416,8 +473,13 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         for (int i = 0; i < n; i++) {
             sb.append(String.format("%n  [%2d]  %-30s  layer=%d", i, idOf(i), topoLayer[i]));
         }
-        appendClosure(sb, "Ancestor closure", ancestorBits);
-        appendClosure(sb, "Descendant closure", descendantBits);
+        if (hasClosures()) {
+            appendClosure(sb, "Ancestor closure", ancestorBits);
+            appendClosure(sb, "Descendant closure", descendantBits);
+        } else {
+            sb.append("\n\n── Closures skipped: ").append(closureBytes(n))
+              .append(" B exceed causal.closures.budget = ").append(closureBudget()).append(" B");
+        }
 
         // ── Linear-Gaussian SEM parameters (when present) ────────────
         if (parameterized) {
