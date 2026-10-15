@@ -13,6 +13,7 @@ public final class Graphs {
 
     private static final Pattern SEED_ID   = Pattern.compile("\\{id:\\s*'([^']+)'");
     private static final Pattern SEED_EDGE = Pattern.compile("\\{from:\\s*'([^']+)',\\s*to:\\s*'([^']+)'");
+    private static final Pattern SEED_LATENT = Pattern.compile("\\{id:\\s*'([^']+)'[^}]*?latent:\\s*true");
 
     private Graphs() {}
 
@@ -27,6 +28,19 @@ public final class Graphs {
             pairs.add(parts);
         }
         return build(nodes, pairs);
+    }
+
+    /** Graph from {@code "A->B"} strings with the given ids latent (not eligible for adjustment). */
+    public static CompiledCausalGraph fromEdgesWithLatent(List<String> edges, Set<String> latent) {
+        Set<String> nodes = new LinkedHashSet<>();
+        List<String[]> pairs = new ArrayList<>();
+        for (String edge : edges) {
+            String[] parts = edge.split("->");
+            nodes.add(parts[0]);
+            nodes.add(parts[1]);
+            pairs.add(parts);
+        }
+        return build(nodes, pairs, latent);
     }
 
     /** Graph over ids {@code v0 .. v{n-1}} (inserted in that order) with {@code {from, to}} index pairs. */
@@ -67,9 +81,53 @@ public final class Graphs {
         return build(nodes, pairs);
     }
 
+    /**
+     * The COVID-19 seed DAG with its latent flags (observed = !latent), as WP5a's covid
+     * dataset and the dagitty reference use it.
+     */
+    public static CompiledCausalGraph fromSeedDagWithLatents() {
+        String script = SeedDagSupport.readClasspathScript();
+        Set<String> nodes = new LinkedHashSet<>();
+        for (Matcher m = SEED_ID.matcher(script); m.find(); ) nodes.add(m.group(1));
+        Set<String> latent = new LinkedHashSet<>();
+        for (Matcher m = SEED_LATENT.matcher(script); m.find(); ) latent.add(m.group(1));
+        List<String[]> pairs = new ArrayList<>();
+        for (Matcher m = SEED_EDGE.matcher(script); m.find(); ) pairs.add(new String[]{m.group(1), m.group(2)});
+        return build(nodes, pairs, latent);
+    }
+
+    /**
+     * A bnlearn network from {@code src/test/resources/bnlearn/<name>/edges.csv} (header
+     * {@code from,to}; copied from WP5a's {@code bench/datasets/bnlearn/<name>/edges.csv}).
+     */
+    public static CompiledCausalGraph fromBnlearn(String name) {
+        try (var in = Graphs.class.getResourceAsStream("/bnlearn/" + name + "/edges.csv")) {
+            if (in == null) throw new IllegalStateException("no test resource bnlearn/" + name + "/edges.csv");
+            List<String> lines = new String(in.readAllBytes()).lines().toList();
+            Set<String> nodes = new LinkedHashSet<>();
+            List<String[]> pairs = new ArrayList<>();
+            for (String line : lines.subList(1, lines.size())) {
+                String[] e = line.split(",");
+                nodes.add(e[0]);
+                nodes.add(e[1]);
+                pairs.add(e);
+            }
+            return build(nodes, pairs, Set.of());
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
+
     private static CompiledCausalGraph build(Set<String> nodes, List<String[]> edges) {
+        return build(nodes, edges, Set.of());
+    }
+
+    private static CompiledCausalGraph build(Set<String> nodes, List<String[]> edges, Set<String> latent) {
         List<Variable> vars = new ArrayList<>();
-        for (String id : nodes) vars.add(Variable.from(id, id, true, false, 0.0, 1.0));
+        for (String id : nodes) {
+            boolean l = latent.contains(id);
+            vars.add(Variable.from(id, id, !l, l, 0.0, 1.0));
+        }
         return GraphBuilder.build(vars, edges, Map.of());
     }
 }

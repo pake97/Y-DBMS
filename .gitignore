@@ -30,3 +30,6 @@ bench/py/.pytest_cache/
 # bench harness outputs
 bench/results/
 bench/out/
+
+# local drop folder for files coming from Cowork
+_incoming/

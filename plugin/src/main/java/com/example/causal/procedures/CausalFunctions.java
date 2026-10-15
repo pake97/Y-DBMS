@@ -53,9 +53,6 @@ public class CausalFunctions {
     public long topoOrder(
             @Name("variableId") String variableId
     ) {
-        // TODO(student): expose topoIndex from CompiledCausalGraph via CausalGraphRuntime,
-        // or add a topoIndex(VariableRef) method to the CausalGraphRuntime interface.
-        // Interim: returns -1 until the interface method is added.
-        return -1L;
+        return RuntimeRegistry.getInstance().topoPosition(new VariableRef(variableId));
     }
 }

@@ -1,6 +1,7 @@
 package com.example.causal.procedures;
 
 import com.example.causal.runtime.RuntimeRegistry;
+import com.example.causal.testsupport.SeedDagSupport;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import org.neo4j.graphdb.*;
@@ -290,6 +291,58 @@ class CausalProceduresTest {
         List<String> viaNodes = collectVariableIds(match + " CALL " + nodesCall + " YIELD variable RETURN variable.id AS variableId");
         assertEquals(viaNodes, ids, idsCall + " vs " + nodesCall);
         if (expected != null) assertEquals(expected, ids, idsCall);
+    }
+
+    // ── causal.adjustmentSets (WP2) and causal.topoOrder ──────────────────────
+
+    @Test
+    void adjustmentSetsInAllThreeModes() {
+        // B -> C with the backdoor path B <- A -> C: {A} is canonical and the only minimal set.
+        compile();
+        for (String mode : List.of("canonical", "minimal", "all-minimal")) {
+            try (Transaction tx = db.beginTx()) {
+                Map<String, Object> row = tx.execute(
+                        "MATCH (b:Variable {id: 'B'}), (c:Variable {id: 'C'}) " +
+                        "CALL causal.adjustmentSets(b, c, $mode, 10) " +
+                        "YIELD identifiable, canonical, forbidden, sets, mode, explanation " +
+                        "RETURN identifiable, [n IN canonical | n.id] AS canonical, " +
+                        "       [n IN forbidden | n.id] AS forbidden, " +
+                        "       [s IN sets | [n IN s | n.id]] AS sets, mode, explanation",
+                        Map.of("mode", mode)).next();
+                assertEquals(true, row.get("identifiable"), mode);
+                assertEquals(List.of("A"), row.get("canonical"), mode);
+                assertEquals(List.of("B", "C"), row.get("forbidden"), mode);
+                assertEquals(List.of(List.of("A")), row.get("sets"), mode);
+                assertEquals(mode, row.get("mode"));
+            }
+        }
+    }
+
+    @Test
+    void adjustmentSetsDefaultsToAllMinimal() {
+        compile();
+        try (Transaction tx = db.beginTx()) {
+            Map<String, Object> row = tx.execute(
+                    "MATCH (b:Variable {id: 'B'}), (c:Variable {id: 'C'}) " +
+                    "CALL causal.adjustmentSets(b, c) YIELD mode, explanation RETURN mode, explanation").next();
+            assertEquals("all-minimal", row.get("mode"));
+            assertEquals("found 1 minimal adjustment set(s)", row.get("explanation"));
+        }
+    }
+
+    @Test
+    void topoOrderOnTheSeedDag() {
+        SeedDagSupport.load(db);
+        compile();
+        try (Transaction tx = db.beginTx()) {
+            Map<String, Object> row = tx.execute(
+                    "RETURN causal.topoOrder('covid19_burden') AS burden, causal.topoOrder('interventions') AS interventions, " +
+                    "       causal.topoOrder('no_such_variable') AS unknown").next();
+            long burden = (Long) row.get("burden"), interventions = (Long) row.get("interventions");
+            assertTrue(burden >= 0 && burden < interventions,
+                    "covid19_burden must precede interventions: " + burden + " vs " + interventions);
+            assertEquals(-1L, row.get("unknown"));
+        }
     }
 
     private void compile() {

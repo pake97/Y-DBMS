@@ -1,0 +1,9 @@
+from,to
+asia,tub
+tub,either
+smoke,lung
+smoke,bronc
+lung,either
+bronc,dysp
+either,xray
+either,dysp
