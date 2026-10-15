@@ -1,0 +1,18 @@
+{
+ "source": "bnlearn",
+ "name": "asia",
+ "url": "https://www.bnlearn.com/bnrepository/asia/asia.bif.gz",
+ "sha256": "7d5e7b8549834824c1b05f367eb7860fa3fca3adaf3649f0c7be6035af197197",
+ "n": 8,
+ "m": 8,
+ "nodes": [
+  "asia",
+  "tub",
+  "smoke",
+  "lung",
+  "bronc",
+  "either",
+  "xray",
+  "dysp"
+ ]
+}

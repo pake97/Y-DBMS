@@ -14,3 +14,22 @@ jobs:
           java-version: '21'
           cache: maven
       - run: mvn -B test -Dgroups='!synthetic,!slow'
+  bench-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # meta.json records the generator's last commit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: bench/py/pyproject.toml
+      - run: pip install -e 'bench/py[test]'
+      - run: causal4j-bench fetch --only asia     # downloads asia only and checks its SHA-256
+      - run: causal4j-bench covid
+      - run: causal4j-bench synth --only n=100
+      - run: causal4j-bench workloads --only asia,covid
+      - run: pytest -q bench/py
+      - name: Regenerated files match the committed ones
+        run: git diff --exit-code -- bench
