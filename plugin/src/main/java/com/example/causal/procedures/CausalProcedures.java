@@ -145,10 +145,38 @@ public class CausalProcedures {
     // causal.adjustmentCandidate(treatment, outcome)
     // =========================================================================
 
+    @Procedure(name = ProcedureNames.ADJUSTMENT_SETS, mode = Mode.READ)
+    @Description(
+        "Adjustment sets for the total effect of treatment on outcome under the generalized " +
+        "adjustment criterion. mode: 'canonical', 'minimal' or 'all-minimal' (default, up to limit)."
+    )
+    public Stream<AdjustmentSetsRecord> adjustmentSets(
+            @Name("treatment") Node treatment,
+            @Name("outcome")   Node outcome,
+            @Name(value = "mode",  defaultValue = "all-minimal") String mode,
+            @Name(value = "limit", defaultValue = "100") long limit
+    ) {
+        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        VariableRef t = ProcedureVariables.requireResolved(runtime, treatment, "treatment");
+        VariableRef o = ProcedureVariables.requireResolved(runtime, outcome, "outcome");
+        AdjustmentSetsResult r = runtime.adjustmentSets(t, o, mode, (int) Math.min(limit, Integer.MAX_VALUE));
+        List<List<Node>> sets = r.sets().stream().map(this::toNodes).collect(Collectors.toList());
+        return Stream.of(new AdjustmentSetsRecord(r.identifiable(), toNodes(r.canonical()), toNodes(r.forbidden()),
+                sets, r.mode(), r.explanation()));
+    }
+
+    private List<Node> toNodes(Set<VariableRef> refs) {
+        return refs.stream()
+                .sorted(Comparator.comparing(VariableRef::id))
+                .map(ref -> ProcedureVariables.lookup(tx, ref.id()))
+                .collect(Collectors.toList());
+    }
+
+    /** Alias of {@code causal.adjustmentSets(t, o, 'canonical')} in the pre-WP2 record shape. */
     @Procedure(name = ProcedureNames.ADJUSTMENT_CANDIDATE, mode = Mode.READ)
     @Description(
         "Find candidate adjustment sets for identifying the causal effect of " +
-        "treatment on outcome from observational data."
+        "treatment on outcome from observational data (alias of causal.adjustmentSets in mode canonical)."
     )
     public Stream<AdjustmentRecord> adjustmentCandidate(
             @Name("treatment") Node treatment,

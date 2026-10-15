@@ -309,6 +309,12 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         return BitSet64.get(descendantBits[from], to);
     }
 
+    // Copy-free CSR access for hot loops: the k-th child / parent of i.
+    public int childCount(int i)         { return fwdOffset[i + 1] - fwdOffset[i]; }
+    public int child(int i, int k)       { return fwdTarget[fwdOffset[i] + k]; }
+    public int parentCount(int i)        { return revOffset[i + 1] - revOffset[i]; }
+    public int parent(int i, int k)      { return revTarget[revOffset[i] + k]; }
+
     /** Children of {@code i} (a copy of the CSR slice, in loader order). */
     public int[] childrenOf(int i) { return Arrays.copyOfRange(fwdTarget, fwdOffset[i], fwdOffset[i + 1]); }
 
