@@ -1,0 +1,18 @@
+{
+ "dataset": "sachs",
+ "seed": 20261111,
+ "pairs": 22,
+ "triples_per_z_size": 50,
+ "z_sizes": [
+  0,
+  1,
+  3,
+  9
+ ],
+ "z_sizes_requested": [
+  0,
+  1,
+  3,
+  10
+ ]
+}

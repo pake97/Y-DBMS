@@ -1,0 +1,9 @@
+{
+ "source": "synthetic",
+ "model": "ba",
+ "n": 3162,
+ "avg_degree": 4,
+ "seed": 0,
+ "m": 6320,
+ "generator_commit": "488d5de2ae0ddc358040ec272d625de832fa556d"
+}

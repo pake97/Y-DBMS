@@ -1,0 +1,14 @@
+{
+ "dataset": "er-n1000-d4-s2",
+ "workload": "bench/workloads/er-n1000-d4-s2",
+ "workload_sha256": "853709c77b878548e6d3e3549bdf8bab680baed477ad4913fa744cfb6e3dced8",
+ "latent": [],
+ "pgmpy": "1.1.2",
+ "dagitty": "0.3.4",
+ "dsep": "pgmpy DAG.is_dconnected (negated), dagitty dseparated; verdicts agree",
+ "canonical": "definition (Perkovic et al. 2018), validated with pgmpy in the proper backdoor graph; equal to dagitty adjustmentSets(type='canonical')",
+ "minimal": null,
+ "minimal_skipped": "synthetic n > 316",
+ "minimal_timeouts": null,
+ "minimal_too_many": null
+}

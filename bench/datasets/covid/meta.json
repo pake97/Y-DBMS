@@ -1,0 +1,39 @@
+{
+ "source": "dev/seed-dag.cypher",
+ "sha256": "270466ecd542a2556011af72092487466c44be152872546d19356d3c09b15d09",
+ "n": 25,
+ "m": 78,
+ "nodes": [
+  "interventions",
+  "covid19_burden",
+  "healthcare_utilization",
+  "searches_corona",
+  "gender",
+  "age",
+  "foreign_citizens",
+  "socioeconomic_status",
+  "turnout",
+  "rightwing_votes",
+  "trust_society",
+  "population_density",
+  "nursing_homes",
+  "mobility",
+  "temperature",
+  "humidity",
+  "wind",
+  "rainfall",
+  "tracing_capacity",
+  "exposure_sarscov2",
+  "herd_immunity",
+  "access_tests",
+  "susceptibility",
+  "onset_covid19",
+  "reported_cases"
+ ],
+ "latent": [
+  "exposure_sarscov2",
+  "herd_immunity",
+  "susceptibility",
+  "onset_covid19"
+ ]
+}

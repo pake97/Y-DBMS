@@ -1,0 +1,14 @@
+{
+ "dataset": "munin",
+ "workload": "bench/workloads/munin",
+ "workload_sha256": "bbe3342cd2b880d86f883ef1eec1a854d365f2105144eb20adedeac8668bdaca",
+ "latent": [],
+ "pgmpy": "1.1.2",
+ "dagitty": "0.3.4",
+ "dsep": "pgmpy DAG.is_dconnected (negated), dagitty dseparated; verdicts agree",
+ "canonical": "definition (Perkovic et al. 2018), validated with pgmpy in the proper backdoor graph; equal to dagitty adjustmentSets(type='canonical')",
+ "minimal": "dagitty adjustmentSets(type='minimal', effect='total'); 30 s per pair (timeout: minimal = null, minimal_count = null); families over 1000 sets stored by size only (minimal = null, minimal_count = size)",
+ "minimal_skipped": null,
+ "minimal_timeouts": 0,
+ "minimal_too_many": 0
+}
