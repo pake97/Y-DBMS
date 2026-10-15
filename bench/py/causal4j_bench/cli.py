@@ -108,9 +108,6 @@ def cmd_workloads(only):
 def cmd_stats():
     rows = [stats.row(name, family, read_dataset(d)) for name, family, d in datasets()]
     write_csv(DATASETS / "datasets.csv", stats.HEADER, [[r[h] for h in stats.HEADER] for r in rows])
-    tex = REPO / "paper" / "tables" / "datasets.tex"
-    tex.parent.mkdir(parents=True, exist_ok=True)
-    tex.write_text(stats.latex(rows))
 
 
 def workload_hash(w: Path) -> str:
