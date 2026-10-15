@@ -25,10 +25,14 @@ class MinimalSeparatorTest {
     /** Longest single listMinimal call seen in this class (reported in the PR). */
     private static long longestNanos;
     private static String longestCall = "";
+    /** Most findMinSep calls seen between two emits, and |R| of that pair (reported in the PR). */
+    private static int maxDelayCalls;
+    private static String maxDelayCall = "";
 
     @AfterAll
     static void report() {
         System.out.printf("WP2REPORT longest listMinimal %.1f ms (%s)%n", longestNanos / 1e6, longestCall);
+        System.out.printf("WP2REPORT max findMinSep calls between two emits %d (%s)%n", maxDelayCalls, maxDelayCall);
     }
 
     // ── random fixtures ────────────────────────────────────────────────────
@@ -74,6 +78,10 @@ class MinimalSeparatorTest {
             if (elapsed > longestNanos) {
                 longestNanos = elapsed;
                 longestCall = label + ", " + family.size() + " sets";
+            }
+            if (maxCalls[0] > maxDelayCalls) {
+                maxDelayCalls = maxCalls[0];
+                maxDelayCall = label + ", |R| = " + r;
             }
         }
         assertTrue(maxCalls[0] <= r + 1, label + ": " + maxCalls[0] + " findMinSep calls between emits, |R| = " + r);
