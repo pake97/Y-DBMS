@@ -78,8 +78,9 @@ insertion patch of Step 1 and the existing propagation on top. A batch that both
 and inserts the same edge is a no-op for that edge.
 
 Threshold: a system property `causal.patch.threshold`, a fraction of `|V|`, default `0.5`.
-When `|coneDown(v) ∪ coneUp(u)|` summed over the batch's deletions exceeds
-`threshold * |V|`, return `null` (recompile) and increment the fallback counter. This is
+When the union of the batch's deletion cones, `|∪ coneDown(v)| + |∪ coneUp(u)|` (the rows
+the deletions recompute), exceeds `threshold * |V|`, return `null` (recompile) and
+increment the fallback counter. This is
 the only remaining legitimate fallback; every other `null` return is a bug.
 
 ## Step 3: variable removal and property flips

@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
  * {@code coneDown(v) = des[v] | {v}} and {@code des} over {@code coneUp(u) = anc[u] | {u}}
  * (the old closures, so the cones are a superset of the rows that can change);
  * all deletion and insertion cones of a batch are recomputed in one sweep. When the
- * deletion cones, summed, exceed {@code causal.patch.threshold * |V|} the patch
+ * union of the deletion cones (the rows they recompute) exceeds {@code causal.patch.threshold * |V|} the patch
  * declines ({@code null}): this is its only fallback besides a layer-pruned snapshot.
  * A removed variable loses its incident edges through the same deletion path; its
  * dense index is then freed (see {@link CompiledCausalGraph}: no compaction until the
@@ -57,7 +57,7 @@ public final class SnapshotPatcher {
                 FALLBACK_THRESHOLD.get(), FALLBACK_INVARIANT.get(), FALLBACK_NO_CLOSURES.get());
     }
 
-    /** {@code -Dcausal.patch.threshold}: fraction of |V| the summed deletion cones may reach; default 0.5. */
+    /** {@code -Dcausal.patch.threshold}: fraction of |V| the union of the deletion cones may reach; default 0.5. */
     static double threshold() {
         return Double.parseDouble(System.getProperty("causal.patch.threshold", "0.5"));
     }
@@ -140,15 +140,24 @@ public final class SnapshotPatcher {
             int u = old.indexOf(e.from()), v = old.indexOf(e.to());
             if (u >= 0 && v >= 0) addedPairs.add(pair(u, v));
         }
+        // The threshold is measured on the union of the deletion cones: the anc rows of
+        // ∪ coneDown(v) and the des rows of ∪ coneUp(u), i.e. the rows the deletions recompute.
         Set<Long> removed = new HashSet<>();
-        long deletionCones = 0;
+        long[] ancCone = null, desCone = null;
         for (ChangeBatch.Edge e : removedEdges) {
             int u = old.indexOf(e.from()), v = old.indexOf(e.to());
             if (u < 0 || v < 0 || !old.childrenOf(e.from()).contains(e.to())) continue; // inactive or never compiled
             if (addedPairs.contains(pair(u, v)) || !removed.add(pair(u, v))) continue;
-            deletionCones += BitSet64.cardinality(old.descendantBits(v)) + 1
-                    + BitSet64.cardinality(old.ancestorBits(u)) + 1;
+            if (ancCone == null) {
+                ancCone = new long[old.wordCount()];
+                desCone = new long[old.wordCount()];
+            }
+            BitSet64.or(ancCone, old.descendantBits(v));
+            BitSet64.set(ancCone, v);
+            BitSet64.or(desCone, old.ancestorBits(u));
+            BitSet64.set(desCone, u);
         }
+        long deletionCones = ancCone == null ? 0 : BitSet64.cardinality(ancCone) + BitSet64.cardinality(desCone);
         if (deletionCones > threshold() * old.liveCount()) {
             FALLBACK_THRESHOLD.incrementAndGet();
             long cones = deletionCones;
