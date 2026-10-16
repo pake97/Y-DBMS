@@ -147,6 +147,16 @@ public final class WorldRegistry {
         return cached(n, base).snapshot;
     }
 
+    /**
+     * The runtime that answers queries on {@code name} (blank: the active world): the base
+     * runtime itself for {@value #BASE}, else a read-only {@link DefaultCausalGraphRuntime#view}
+     * over the derived snapshot.
+     */
+    public CausalGraphRuntime runtime(String name) {
+        String n = resolveName(name);
+        return BASE.equals(n) ? baseRuntime.get() : DefaultCausalGraphRuntime.view(snapshot(n));
+    }
+
     /** How {@code name}'s current snapshot was derived (computing it if needed). */
     public Derivation derivation(String name) {
         String n = resolveName(name);
