@@ -27,7 +27,8 @@ TIMEOUT_US = 60e6
 SYSTEMS = {"TierABenchmarks": None, "CypherBenchmarks": "cypher", "GdsBenchmarks": "gds",
            "ProcedureBenchmarks": "procedure"}
 OPERATORS = ["ancestors", "descendants", "reaches", "confounders", "mediators"]
-SYSTEM_LABEL = {"causal4j": "Causal4j", "procedure": "Causal4j (procedure)",
+SYSTEM_LABEL = {"causal4j": "Causal4j", "masked": "Causal4j", "unmasked": "Causal4j, no mask",
+                "reference": "DFS", "procedure": "Causal4j (procedure)",
                 "procids": "Causal4j (procedure, ids)", "dfs": "DFS", "cypher": "Cypher", "gds": "GDS"}
 # Systems of the paper table, per operator, in order; "read" is the closure read alone
 # (TierABenchmarks.ancestorsCount). descendants mirrors ancestors and is kept in the CSV only.
@@ -64,6 +65,13 @@ def load_jmh(path: Path):
                 system = "pruned"
             if op in ("ancestorsBits", "ancestorsCount"):
                 system, op = ("read", "ancestors") if op == "ancestorsCount" else ("bits", "ancestors")
+        if cls == "TierBCBenchmarks":
+            # dsep -> masked/unmasked, dsepReference -> reference (July Bayes-Ball), both as
+            # dsep_sep / dsep_conn by verdict; decideReference -> legacy decide; the rest causal4j.
+            verdict = "dsep_" + ("sep" if params.get("verdict") == "separated" else "conn")
+            system, op = {"dsep": ("masked" if params.get("mask") == "true" else "unmasked", verdict),
+                          "dsepReference": ("reference", verdict),
+                          "decideReference": ("legacy", "decide")}.get(op, ("causal4j", op))
         if cls == "ProcedureBenchmarks" and op.endswith("Ids"):
             system, op = "procids", op[:-3]  # causal.*Ids: one id column, no node binding
         pm = b["primaryMetric"]
@@ -110,6 +118,37 @@ def load_censored(runs):
     return out
 
 
+def load_roundtrip(runs, step):
+    """roundtrip.py CSVs of one step as rows like load_jmh's (system = library); a (library,
+    operator) whose first query already hit the budget is infinite (t/o)."""
+    rows = []
+    for f in merged_files(runs, step):
+        with open(f, newline="") as fh:
+            for r in csv.DictReader(fh):
+                timed_out = r["censored"] == "True" and int(r["queries"]) <= 1
+                rows.append({"system": r["library"], "dataset": r["dataset"], "operator": r["operator"],
+                             "median_us": math.inf if timed_out else float(r["query_ms_median"]) * 1e3,
+                             "p99_us": math.inf if timed_out else float(r["query_ms_p99"]) * 1e3})
+    return rows
+
+
+def legacy_pairs(runs):
+    """legacy_pairs.csv rows, the newest run per dataset, one row per (dataset, t, y)."""
+    out, seen_ds = {}, set()
+    for run in runs:
+        p = run / "legacy_pairs.csv"
+        if not p.exists():
+            continue
+        with open(p, newline="") as f:
+            rows = list(csv.DictReader(f))
+        fresh = {r["dataset"] for r in rows} - seen_ds
+        for r in rows:
+            if r["dataset"] in fresh:
+                out.setdefault((r["dataset"], r["t"], r["y"]), r)
+        seen_ds |= fresh
+    return list(out.values())
+
+
 def meta(dataset):
     for d in (BENCH / "datasets" / "bnlearn" / dataset, BENCH / "datasets" / "synthetic" / dataset,
               BENCH / "datasets" / dataset):
@@ -128,6 +167,11 @@ def fmt_us(v):
     if v < 0.1:
         return f"{v:.3f}"  # closure reads take a few ns
     return f"{v:.2f}" if v < 10 else f"{v:.1f}" if v < 100 else f"{v:,.0f}".replace(",", "\\,")
+
+
+def fmt_pair(a, b):
+    """separated / connected medians in one cell."""
+    return "--" if a is None and b is None else f"{fmt_us(a)}\\,/\\,{fmt_us(b)}"
 
 
 def fmt_x(v):
@@ -183,6 +227,47 @@ def rq1_table(lat, datasets):
             continue
         cells = " & ".join(fmt_us(lat.get((s, ds, op))) for op, s in cols)
         lines.append(f"{label(ds)} & {cells} \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    return "\n".join(lines) + "\n"
+
+
+BC_DSEP = ["masked", "unmasked", "reference", "pgmpy", "dagitty"]
+BC_DECIDE = ["causal4j", "legacy", "pgmpy", "dagitty", "dowhy"]
+BC_LABEL = {"masked": "masked", "unmasked": "unmasked", "reference": "DFS", "pgmpy": "pgmpy",
+            "dagitty": "dagitty", "causal4j": "Causal4j", "legacy": "enum.", "dowhy": "DoWhy"}
+
+
+def rq1_bc_table(lat, datasets, legacy_censored):
+    """Tiers (b) and (c): d-separation cells are separated / connected medians (balanced
+    triples); identification over pairs.csv. enum. = the July level-wise enumeration over the
+    pairs that finished within 60 s, with the number of censored pairs in parentheses."""
+    def decide_cell(s, ds):
+        v = lat.get((s, ds, "adjustment" if s in ("pgmpy", "dagitty", "dowhy") else "decide"))
+        if s != "legacy":
+            return fmt_us(v)
+        k = legacy_censored.get(ds, 0)
+        if v is None and not k:
+            return "--"
+        return ("t/o" if v is None else fmt_us(v)) + (f" ({k})" if k else "")
+    lines = ["% Generated by causal4j-bench results_to_tex. Median latency in µs; t/o = 60 s timeout.",
+             "% d-separation: separated / connected triples of triples_balanced.csv (masked and unmasked",
+             "% ancestral masking; DFS = the July Bayes-Ball over id sets). identification: decide =",
+             "% Adjustment.decide; enum. = July level-wise enumeration, (k) = pairs censored at 60 s;",
+             "% pgmpy = get_minimal_adjustment_set, dagitty = canonical set, DoWhy = identify_effect.",
+             f"\\begin{{tabular}}{{@{{}}l{'r' * (len(BC_DSEP) + len(BC_DECIDE) + 2)}@{{}}}}", "\\toprule",
+             f"DAG & \\multicolumn{{{len(BC_DSEP)}}}{{c}}{{d-separation}} & "
+             f"\\multicolumn{{{len(BC_DECIDE)}}}{{c}}{{identification}} & \\multicolumn{{2}}{{c}}{{minimal sets}} \\\\",
+             f"\\cmidrule(lr){{2-{1 + len(BC_DSEP)}}} \\cmidrule(lr){{{2 + len(BC_DSEP)}-{1 + len(BC_DSEP) + len(BC_DECIDE)}}} "
+             f"\\cmidrule(lr){{{2 + len(BC_DSEP) + len(BC_DECIDE)}-{3 + len(BC_DSEP) + len(BC_DECIDE)}}}",
+             " & " + " & ".join(BC_LABEL[s] for s in BC_DSEP + BC_DECIDE) + " & list $\\le$100 & find \\\\",
+             "\\midrule"]
+    for ds in datasets:
+        if not any(k[1] == ds and (k[2].startswith("dsep_") or k[2] in ("decide", "adjustment")) for k in lat):
+            continue
+        cells = [fmt_pair(lat.get((s, ds, "dsep_sep")), lat.get((s, ds, "dsep_conn"))) for s in BC_DSEP]
+        cells += [decide_cell(s, ds) for s in BC_DECIDE]
+        cells += [fmt_us(lat.get(("causal4j", ds, "listMinimal100"))), fmt_us(lat.get(("causal4j", ds, "findMinimal")))]
+        lines.append(f"{label(ds)} & " + " & ".join(cells) + " \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"]
     return "\n".join(lines) + "\n"
 
@@ -277,7 +362,8 @@ def crossover(rq2, budget):
 # ── figures ─────────────────────────────────────────────────────────────────
 
 STYLE = {"causal4j": ("black", "-", "o"), "dfs": ("0.45", "--", "s"),
-         "cypher": ("0.25", ":", "^"), "gds": ("0.6", "-.", "D")}
+         "cypher": ("0.25", ":", "^"), "gds": ("0.6", "-.", "D"),
+         "masked": ("black", "-", "o"), "unmasked": ("0.6", "-.", "v"), "reference": ("0.45", "--", "s")}
 
 
 def _plt():
@@ -289,22 +375,32 @@ def _plt():
     return plt
 
 
+# RQ4 panels: (operator, title, systems). Systems in SEEDED come from the RQ4 runs (median over
+# seeds 0-4); the others are the seed-0 graphs of the RQ1 runs.
+RQ4_PANELS = [("ancestors", "ancestors", ["causal4j", "dfs", "cypher", "gds"]),
+              ("reaches", "reaches", ["causal4j", "dfs", "cypher", "gds"]),
+              ("dsep_conn", "d-separation (connected)", ["masked", "unmasked", "reference"]),
+              ("decide", "decide", ["causal4j"])]
+SEEDED = {"causal4j", "masked"}
+
+
 def rq4_figure(lat, rq4_rows, out: Path):
-    """Latency vs |V| on ER d=4: Causal4j (median over seeds 0-4) and the seed-0 baselines."""
+    """Latency vs |V| on ER d=4, 2x2 panels at \\linewidth: tier (a) ancestors and reaches, masked
+    d-separation on connected triples, and decide."""
     plt = _plt()
-    fig, axes = plt.subplots(1, 2, figsize=(3.4, 2.1), sharey=True)
+    fig, axes = plt.subplots(2, 2, figsize=(3.4, 3.3), sharex=True)
     seeds = defaultdict(list)
     for r in rq4_rows:
         m = meta(r["dataset"])
         if m["model"] == "er" and m["avg_degree"] == 4:
-            seeds[(r["operator"], m["n"])].append(r["median_us"])
-    for ax, op in zip(axes, ("ancestors", "reaches")):
-        for system in ("causal4j", "dfs", "cypher", "gds"):
-            if system == "causal4j" and seeds:
-                pts = sorted((n, statistics.median(v)) for (o, n), v in seeds.items() if o == op)
-                cens = []
-            else:
-                pts, cens = [], []
+            seeds[(r["system"], r["operator"], m["n"])].append(r["median_us"])
+    legend = {}
+    for ax, (op, title, systems) in zip(axes.flat, RQ4_PANELS):
+        for system in systems:
+            pts = sorted((n, statistics.median(v)) for (s, o, n), v in seeds.items() if s == system and o == op)
+            cens = []
+            if not (system in SEEDED and pts):
+                pts = []
                 for (s, ds, o), v in lat.items():
                     if s != system or o != op or ds in REAL:
                         continue
@@ -316,18 +412,20 @@ def rq4_figure(lat, rq4_rows, out: Path):
                 continue
             color, ls, mk = STYLE[system]
             if pts:
-                ax.plot(*zip(*pts), color=color, ls=ls, marker=mk, ms=3, lw=1, label=SYSTEM_LABEL[system])
+                line, = ax.plot(*zip(*pts), color=color, ls=ls, marker=mk, ms=3, lw=1)
+                legend.setdefault(SYSTEM_LABEL[system], line)
             if cens:
                 ax.plot(*zip(*sorted(cens)), ls="none", marker=mk, ms=4, mfc="none", color=color)
         ax.set_xscale("log")
         ax.set_yscale("log")
-        ax.set_title(op)
-        ax.set_xlabel("$|V|$")
+        ax.set_title(title)
         ax.grid(True, which="major", lw=0.3, color="0.85")
-    axes[0].set_ylabel("median latency (µs)")
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, frameon=False, loc="lower center", ncol=len(labels), fontsize=7)
-    fig.tight_layout(pad=0.3, rect=(0, 0.08, 1, 1))
+    for ax in axes[1]:
+        ax.set_xlabel("$|V|$")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("median latency (µs)")
+    fig.legend(list(legend.values()), list(legend), frameon=False, loc="lower center", ncol=3, fontsize=7)
+    fig.tight_layout(pad=0.3, rect=(0, 0.1, 1, 1))
     fig.savefig(out)
     plt.close(fig)
 
@@ -410,10 +508,22 @@ def main(argv=None):
     censored = load_censored(runs)
     tier_rows = (need("tier_a") + need("closure_read", optional=args.quick) + need("procedure", optional=args.quick)
                  + need("cypher") + (need("gds") if not args.quick else []))
-    rq4_rows = need("rq4") if not args.quick else []
+    rq4_rows = (need("rq4") + need("rq4_bc", optional=True)) if not args.quick else []
     pruned_rows = need("rq2_pruned") if not args.quick else []
+    # Phase 2 (tiers b/c) is optional until its run exists; RQ3 waits for WP3.
+    bc_rows = need("tier_bc", optional=True) + need("legacy", optional=True) + load_roundtrip(runs, "roundtrip_bc")
+    # The legacy enumeration's censored pairs are counted in its cell, not a censored point.
+    legacy_censored = defaultdict(set)
+    for run in runs:
+        if (run / "timeouts.csv").exists():
+            with open(run / "timeouts.csv", newline="") as f:
+                for r in csv.DictReader(f):
+                    if r["system"] == "legacy":
+                        legacy_censored[r["dataset"]].add(r["args"])
+    legacy_censored = {ds: len(a) for ds, a in legacy_censored.items()}
+    censored = {k for k in censored if k[0] != "legacy"}
     # tier (a) first, then RQ4 (Causal4j index=on for the remaining synthetic graphs), then pruned
-    lat = lookup(tier_rows + rq4_rows + pruned_rows, censored)
+    lat = lookup(tier_rows + rq4_rows + pruned_rows + bc_rows, censored)
     # reaches has no ids variant (causal.hasDirectedPath returns a boolean): its ids
     # procedure is the procedure itself, so the ids aggregates cover all 5 operators.
     for (s_, ds, op), v in list(lat.items()):
@@ -443,6 +553,9 @@ def main(argv=None):
         rq2_figure(rq2, out / "figures" / "rq2_crossover.pdf")
     if tier_rows or rq4_rows:
         rq4_figure(lat, rq4_rows, out / "figures" / "rq4_latency.pdf")
+    if bc_rows:
+        (out / "tables" / "rq1_tier_bc.tex").write_text(
+            rq1_bc_table(lat, list(dict.fromkeys(tier_datasets + [r["dataset"] for r in bc_rows])), legacy_censored))
 
     def speedup(baseline, system="causal4j"):
         """Geometric mean over bnlearn + covid x 5 operators of baseline / system median latency."""
@@ -483,6 +596,21 @@ def main(argv=None):
         values["crossoverLatencyRatio"] = fmt_x(lat[("pruned", big, "reaches")] / lat[("causal4j", big, "reaches")])
     else:
         values["crossoverLatencyRatio"] = "\\TODO{x}"
+
+    # Tiers (b)/(c), over bnlearn + covid: unmasked / masked d-separation, median over the
+    # (dataset, verdict) cells; legacy / decide, median over the pairs the legacy finished.
+    ratios = [lat[("unmasked", ds, v)] / lat[("masked", ds, v)] for ds in BNLEARN + ["covid"]
+              for v in ("dsep_sep", "dsep_conn") if ("unmasked", ds, v) in lat and ("masked", ds, v) in lat]
+    values["speedupDsepMasked"] = fmt_x(statistics.median(ratios)) if ratios else "\\TODO{x}"
+    lp = [r for r in legacy_pairs(runs) if r["dataset"] in BNLEARN + ["covid"]]
+    done = [float(r["legacy_us"]) / float(r["decide_us"]) for r in lp if r["censored"] == "false"]
+    values["speedupDecideVsEnumeration"] = fmt_x(statistics.median(done)) if done else "\\TODO{x}"
+    if lp:
+        cens = defaultdict(int)
+        for r in lp:
+            cens[r["dataset"]] += r["censored"] == "true"
+        print(f"legacy enumeration: {len(done)} pairs finished, {sum(cens.values())} censored ("
+              + ", ".join(f"{d} {c}" for d, c in cens.items() if c) + ")")
 
     # Every macro the paper defines a default for, in its order; measured value or its default.
     defaults = paper_defaults(Path(args.paper_dir), args.quick)

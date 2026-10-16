@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Every Section VIII measurement of phase 5b-1, then the LaTeX/figure export.
+# Every Section VIII measurement of phases 5b-1 and 5b-2 (RQ3 waits for WP3), then the LaTeX/figure export.
 # Resume an interrupted run with RUN_ID=<id> bench/run_all.sh.
 source "$(dirname "$0")/scripts/common.sh"
 start=$(date +%s)
 bench/scripts/rq1_tier_a.sh
+bench/scripts/rq1_tier_bc.sh
 bench/scripts/rq2.sh
 bench/scripts/rq4.sh
 bench/scripts/rq1_external.sh

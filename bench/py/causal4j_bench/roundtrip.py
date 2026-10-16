@@ -1,7 +1,9 @@
 """External round-trip baseline (paper baseline d): export the DAG from Neo4j over Bolt,
 build each library's graph object, run the workload, and time the three phases.
 
-usage: python -m causal4j_bench.roundtrip <dataset> <out.csv> [--libs pgmpy,dagitty,causallearn,dowhy]
+usage: python -m causal4j_bench.roundtrip <dataset> <out.csv> [--libs pgmpy,dagitty,causallearn,dowhy] [--balanced]
+With --balanced (tiers b/c, WP5b-2) only dsep and adjustment run, dsep over triples_balanced.csv
+as two operators, dsep_sep and dsep_conn, by the triple's verdict.
 Reads BOLT_URI (set by the Java ServeBolt driver). Appends one CSV row per
 (library, operator): export_ms, build_ms, queries, query_ms_median, query_ms_p99, censored.
 A (library, operator) stops after BUDGET_S seconds of queries, or as soon as one query
@@ -135,11 +137,16 @@ LIBS = {
 }
 
 
-def workload(dataset):
+def workload(dataset, balanced=False):
+    """pairs, and {dsep operator: triples}: triples.csv, or triples_balanced.csv split by verdict."""
     w = WORKLOADS / dataset
     pairs = [(r["t"], r["y"]) for r in read_csv(w / "pairs.csv")]
-    triples = [(r["x"], r["y"], [v for v in r["z"].split(";") if v]) for r in read_csv(w / "triples.csv")]
-    return pairs, triples
+    rows = read_csv(w / ("triples_balanced.csv" if balanced else "triples.csv"))
+    triple = lambda r: (r["x"], r["y"], [v for v in r["z"].split(";") if v])  # noqa: E731
+    if not balanced:
+        return pairs, {"dsep": [triple(r) for r in rows]}
+    return pairs, {f"dsep_{k}": [triple(r) for r in rows if (r["separated"] == "true") == (k == "sep")]
+                   for k in ("sep", "conn")}
 
 
 def main(argv=None):
@@ -147,9 +154,10 @@ def main(argv=None):
     a.add_argument("dataset")
     a.add_argument("out")
     a.add_argument("--libs", default=",".join(LIBS))
+    a.add_argument("--balanced", action="store_true", help="dsep (balanced, by verdict) and adjustment only")
     args = a.parse_args(argv)
     uri = os.environ["BOLT_URI"]
-    pairs, triples = workload(args.dataset)
+    pairs, triples = workload(args.dataset, args.balanced)
     out = Path(args.out)
     new = not out.exists()
     with open(out, "a", newline="") as f:
@@ -162,8 +170,13 @@ def main(argv=None):
             t0 = time.perf_counter()
             obj = build(nodes, edges, latent)
             build_ms = (time.perf_counter() - t0) * 1e3
+            runs = []
             for op, fn in ops().items():
-                items = triples if op == "dsep" else pairs
+                if op == "dsep":
+                    runs += [(name, fn, items) for name, items in triples.items()]
+                elif not args.balanced or op == "adjustment":
+                    runs.append((op, fn, pairs))
+            for op, fn, items in runs:
                 times, spent, censored = [], 0.0, False
                 for item in items:
                     s = time.perf_counter()
