@@ -5,6 +5,7 @@ import com.example.causal.runtime.algorithms.ReachabilityIndex;
 import com.example.causal.runtime.index.BitSet64;
 import com.example.causal.runtime.model.Variable;
 import com.example.causal.testsupport.Graphs;
+import com.example.causal.testsupport.SnapshotParity;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -17,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class IncrementalPatchTest {
 
@@ -63,25 +65,48 @@ class IncrementalPatchTest {
     }
     
     @Test
-    void testTopologicalViolationFallback() {
-        // Initial graph: A -> B -> C
+    void testTopologicalViolationRelabels() {
+        // A -> B, C -> D: D follows A in the order. D -> A is acyclic but backward:
+        // A and its descendant B move after D.
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B", "C->D"));
+        assertTrue(oldGraph.topoIndex("D") > oldGraph.topoIndex("A"));
+        long relabelled = SnapshotPatcher.RELABELLED.get(), moved = SnapshotPatcher.MOVED.get();
+
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
+                ChangeBatch.builder().addedEdge("D", "A").build());
+        assertNotNull(newGraph, "an acyclic backward edge is patched, not recompiled");
+        assertEquals(1, SnapshotPatcher.RELABELLED.get() - relabelled);
+        assertEquals(2, SnapshotPatcher.MOVED.get() - moved, "A and B move");
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(List.of("A->B", "C->D", "D->A")), "D->A");
+        assertParity(newGraph);
+    }
+
+    @Test
+    void testCycleThrowsInsteadOfRecompiling() {
+        // C -> A closes A -> B -> C: beforeCommit rejects it, so reaching the patch is a bug.
         CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B", "B->C"));
-        
-        // Try adding C -> A (creates a cycle / backward edge, violates topo sort)
-        ChangeBatch batch = ChangeBatch.builder()
-                .addedEdge("C", "A")
-                .build();
-                
-        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph, batch);
-        assertNull(newGraph, "Patch should return null and fallback for topological violations");
+        assertThrows(SnapshotPatcher.PatchNotApplicable.class,
+                () -> SnapshotPatcher.apply(oldGraph, ChangeBatch.builder().addedEdge("C", "A").build()));
+    }
+
+    @Test
+    void testEdgeOutOfANewVariableRelabels() {
+        // X is new; X -> A puts X before the old source A.
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B", "B->C"));
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph, ChangeBatch.builder()
+                .addedVariable(Variable.from("X", "X", true, false, 0, 1))
+                .addedEdge("X", "A")
+                .build());
+        assertNotNull(newGraph);
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(List.of("A->B", "B->C", "X->A")), "X->A");
     }
 
     @Test
     void testMultipleNodesChainedInBatch() {
         CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B"));
-        Variable nodeX = Variable.from("X", "X", false, false, 0, 1);
-        Variable nodeY = Variable.from("Y", "Y", false, false, 0, 1);
-        Variable nodeZ = Variable.from("Z", "Z", false, false, 0, 1);
+        Variable nodeX = Variable.from("X", "X", true, false, 0, 1);
+        Variable nodeY = Variable.from("Y", "Y", true, false, 0, 1);
+        Variable nodeZ = Variable.from("Z", "Z", true, false, 0, 1);
         
         ChangeBatch batch = ChangeBatch.builder()
                 .addedVariable(nodeZ)
@@ -92,12 +117,96 @@ class IncrementalPatchTest {
                 .addedEdge("B", "X")
                 .build();
         CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph, batch);
-        // We currently use the cheapest fix: return null and fallback if two new nodes connect
-        assertNull(newGraph, "Expected patch to fallback when multiple new nodes are chained");
-        /* TODO(future): Restore these when proper topological sort is implemented:
-        assertNotNull(newGraph);
+        assertNotNull(newGraph, "new variables are sorted against the batch's edges, no fallback");
         assertParity(newGraph);
-        */
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(List.of("A->B", "Y->Z", "X->Y", "B->X")), "chain");
+    }
+
+    private static final List<String> CHAIN_AND_NOISE = List.of(
+            "A->B", "B->C", "C->D", "P->Q", "R->S", "T->U", "V->W");
+
+    @Test
+    void testEdgeDeletionRecomputesTheConesOnly() {
+        // Remove B -> C: anc changes on {C, D}, des on {A, B}; every other row is shared.
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(CHAIN_AND_NOISE);
+        long deletions = SnapshotPatcher.DELETIONS.get();
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
+                ChangeBatch.builder().removedEdge("B", "C").build());
+        assertNotNull(newGraph, "cone 4 <= 0.5 * 12");
+        assertEquals(1, SnapshotPatcher.DELETIONS.get() - deletions);
+        List<String> rest = new java.util.ArrayList<>(CHAIN_AND_NOISE);
+        rest.remove("B->C");
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(rest), "-B->C");
+        Set<String> ancCone = Set.of("C", "D"), desCone = Set.of("A", "B");
+        for (int i = 0; i < oldGraph.size(); i++) {
+            String id = oldGraph.idOf(i);
+            if (ancCone.contains(id)) assertNotSame(oldGraph.ancestorBits(i), newGraph.ancestorBits(i), id);
+            else assertSame(oldGraph.ancestorBits(i), newGraph.ancestorBits(i), id);
+            if (desCone.contains(id)) assertNotSame(oldGraph.descendantBits(i), newGraph.descendantBits(i), id);
+            else assertSame(oldGraph.descendantBits(i), newGraph.descendantBits(i), id);
+        }
+        assertEquals(1, newGraph.layer(newGraph.indexOf("D")), "D's layer drops from 3 to 1");
+    }
+
+    @Test
+    void testDeletionAboveTheThresholdFallsBack() {
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B", "B->C"));
+        long fallbacks = SnapshotPatcher.FALLBACK_THRESHOLD.get();
+        assertNull(SnapshotPatcher.apply(oldGraph, ChangeBatch.builder().removedEdge("A", "B").build()),
+                "cone 3 > 0.5 * 3");
+        assertEquals(1, SnapshotPatcher.FALLBACK_THRESHOLD.get() - fallbacks);
+        System.setProperty("causal.patch.threshold", "1.0");
+        try {
+            CompiledCausalGraph g = SnapshotPatcher.apply(oldGraph, ChangeBatch.builder().removedEdge("A", "B").build());
+            assertNotNull(g, "cone 3 <= 1.0 * 3");
+            SnapshotParity.assertEquivalent(g, rebuilt(List.of("A", "B", "C"), List.of("B->C")), "-A->B");
+        } finally {
+            System.clearProperty("causal.patch.threshold");
+        }
+    }
+
+    @Test
+    void testRemoveAndReAddTheSameEdgeIsANoOp() {
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(CHAIN_AND_NOISE);
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
+                ChangeBatch.builder().removedEdge("B", "C").addedEdge("B", "C").build());
+        assertNotNull(newGraph);
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(CHAIN_AND_NOISE), "-B->C +B->C");
+    }
+
+    @Test
+    void testDeletionAndBackwardInsertionInOneBatch() {
+        // Reverse B -> C: remove it and add C -> B in one batch (relabel after the deletion).
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(CHAIN_AND_NOISE);
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
+                ChangeBatch.builder().removedEdge("B", "C").addedEdge("C", "B").build());
+        assertNotNull(newGraph);
+        List<String> edges = new java.util.ArrayList<>(CHAIN_AND_NOISE);
+        edges.set(edges.indexOf("B->C"), "C->B");
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(edges), "reverse B->C");
+    }
+
+    /** A full build over {@code nodes} (in that order) and {@code edges}, isolated nodes allowed. */
+    static CompiledCausalGraph rebuilt(List<String> nodes, List<String> edges) {
+        List<Variable> vars = new java.util.ArrayList<>();
+        for (String id : nodes) vars.add(Variable.from(id, id, true, false, 0.0, 1.0));
+        List<String[]> pairs = new java.util.ArrayList<>();
+        for (String e : edges) pairs.add(e.split("->"));
+        return GraphBuilder.build(vars, pairs, java.util.Map.of());
+    }
+
+    @Test
+    void testSnapshotCarriesThePatchCounters() {
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(CHAIN_AND_NOISE);
+        PatchStats before = SnapshotPatcher.stats();
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
+                ChangeBatch.builder().removedEdge("B", "C").addedEdge("D", "A").build());
+        assertNotNull(newGraph);
+        PatchStats after = newGraph.patchStats();
+        assertEquals(1, after.patchesApplied() - before.patchesApplied());
+        assertEquals(1, after.deletionsRecomputed() - before.deletionsRecomputed());
+        assertEquals(1, after.insertionsRelabelled() - before.insertionsRelabelled());
+        assertTrue(after.lastConeSize() >= 4, "at least the deletion cones {C, D} and {A, B}");
     }
 
     @Test
@@ -136,14 +245,66 @@ class IncrementalPatchTest {
     }
 
     @Test
-    void testDeactivationFallback() {
-        CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B"));
-        // Removing a node should trigger fallback
-        ChangeBatch batch = ChangeBatch.builder()
-                .removedVariable("A")
-                .build();
-        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph, batch);
-        assertNull(newGraph, "Removing a node should return null (fallback)");
+    void testVariableRemovalFreesItsIndex() {
+        // Remove D (edge C -> D goes with it; cone 1 + 3 <= 0.5 * 12). D's index becomes a hole.
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(CHAIN_AND_NOISE);
+        int d = oldGraph.indexOf("D");
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
+                ChangeBatch.builder().removedVariable("D").build());
+        assertNotNull(newGraph, "a variable removal is patched");
+        assertEquals(12, newGraph.size(), "size() keeps the array length");
+        assertEquals(11, newGraph.liveCount());
+        assertEquals(-1, newGraph.indexOf("D"));
+        assertNull(newGraph.variableAt(d));
+        assertEquals(-1, newGraph.topoPosition(d));
+        assertTrue(BitSet64.isEmpty(newGraph.ancestorBits(d)) && BitSet64.isEmpty(newGraph.descendantBits(d)));
+        assertFalse(newGraph.topoOrder().contains("D"));
+        List<String> nodes = new java.util.ArrayList<>(Graphs.fromEdges(CHAIN_AND_NOISE).topoOrder());
+        nodes.remove("D");
+        List<String> edges = new java.util.ArrayList<>(CHAIN_AND_NOISE);
+        edges.remove("C->D");
+        SnapshotParity.assertEquivalent(newGraph, rebuilt(nodes, edges), "-D");
+        // The path operators skip the hole.
+        com.example.causal.runtime.algorithms.PathAnalyzer pa = new com.example.causal.runtime.algorithms.PathAnalyzer(newGraph);
+        assertFalse(newGraph.toIds(pa.eligibleBits(newGraph.indexOf("A"), newGraph.indexOf("C"))).contains("D"));
+
+        // Re-adding D gives it a fresh index; the hole stays until the next full compile.
+        CompiledCausalGraph readded = SnapshotPatcher.apply(newGraph, ChangeBatch.builder()
+                .addedVariable(Variable.from("D", "D", true, false, 0, 1)).addedEdge("C", "D").build());
+        assertNotNull(readded);
+        assertEquals(13, readded.size());
+        assertEquals(12, readded.indexOf("D"));
+        SnapshotParity.assertEquivalent(readded, Graphs.fromEdges(CHAIN_AND_NOISE), "+D");
+    }
+
+    @Test
+    void testRemoveAndReAddAVariableInOneBatch() {
+        // One transaction deletes D and creates a new D with an edge from A: the new D is a new index.
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(CHAIN_AND_NOISE);
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph, ChangeBatch.builder()
+                .removedVariable("D").removedEdge("C", "D")
+                .addedVariable(Variable.from("D", "D", true, false, 0, 1)).addedEdge("A", "D").build());
+        assertNotNull(newGraph);
+        assertEquals(oldGraph.size(), newGraph.indexOf("D"));
+        List<String> edges = new java.util.ArrayList<>(CHAIN_AND_NOISE);
+        edges.set(edges.indexOf("C->D"), "A->D");
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(edges), "D replaced");
+    }
+
+    @Test
+    void testLatentFlipKeepsTheClosuresAndChangesEligibility() {
+        // U -> T, U -> Y, T -> Y: adjusting for U is possible until U turns latent.
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("U->T", "U->Y", "T->Y", "P->Q", "R->S"));
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph, ChangeBatch.builder()
+                .updatedVariable(Variable.from("U", "U", false, true, 0, 1)).build());
+        assertNotNull(newGraph);
+        for (int i = 0; i < oldGraph.size(); i++) {
+            assertSame(oldGraph.ancestorBits(i), newGraph.ancestorBits(i));
+            assertSame(oldGraph.descendantBits(i), newGraph.descendantBits(i));
+        }
+        int t = newGraph.indexOf("T"), y = newGraph.indexOf("Y");
+        assertTrue(com.example.causal.runtime.algorithms.Adjustment.decide(oldGraph, t, y).identifiable());
+        assertFalse(com.example.causal.runtime.algorithms.Adjustment.decide(newGraph, t, y).identifiable());
     }
 
     private void assertParity(CompiledCausalGraph graph) {

@@ -4,6 +4,7 @@ import com.example.causal.api.*;
 import com.example.causal.dto.*;
 import com.example.causal.runtime.RuntimeRegistry;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
+import com.example.causal.runtime.compile.SnapshotPatcher;
 import org.neo4j.graphdb.Node;
 import org.neo4j.graphdb.Transaction;
 import org.neo4j.procedure.*;
@@ -65,7 +66,7 @@ public class CausalProcedures {
     )
     public Stream<SnapshotRecord> invalidate() {
         RuntimeRegistry.getInstance().invalidate();
-        return Stream.of(new SnapshotRecord(0L, List.of(), "invalidated"));
+        return Stream.of(new SnapshotRecord(0L, List.of(), "invalidated", SnapshotPatcher.stats()));
     }
 
     // =========================================================================
@@ -336,7 +337,8 @@ public class CausalProcedures {
     public Stream<SnapshotRecord> inspectSnapshot() {
         GraphSnapshot snap = RuntimeRegistry.getInstance().currentSnapshot();
         if (snap == null) {
-            return Stream.of(new SnapshotRecord(0L, List.of(), "no snapshot — call causal.compile() first"));
+            return Stream.of(new SnapshotRecord(0L, List.of(), "no snapshot — call causal.compile() first",
+                    SnapshotPatcher.stats()));
         }
         return Stream.of(toSnapshotRecord(snap));
     }
@@ -446,6 +448,6 @@ public class CausalProcedures {
                 .map(VariableRef::id)
                 .sorted()
                 .collect(Collectors.toList());
-        return new SnapshotRecord(snap.size(), varIds, snap.compiledAt().toString());
+        return new SnapshotRecord(varIds.size(), varIds, snap.compiledAt().toString(), SnapshotPatcher.stats());
     }
 }

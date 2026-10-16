@@ -2,6 +2,7 @@ package com.example.causal.runtime.algorithms;
 
 import com.example.causal.runtime.compile.CompiledCausalGraph;
 import com.example.causal.runtime.index.BitSet64;
+import com.example.causal.runtime.model.Variable;
 
 import java.util.Set;
 
@@ -40,7 +41,8 @@ public final class PathAnalyzer {
         this.words = graph.wordCount();
         this.observed = new long[words];
         for (int i = 0; i < graph.size(); i++) {
-            if (!graph.variableAt(i).latent()) BitSet64.set(observed, i);
+            Variable v = graph.variableAt(i);
+            if (v != null && !v.latent()) BitSet64.set(observed, i);   // null: an index freed by a patch
         }
     }
 

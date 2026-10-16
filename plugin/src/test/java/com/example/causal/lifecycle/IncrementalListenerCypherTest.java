@@ -1,6 +1,10 @@
 package com.example.causal.lifecycle;
 
 import com.example.causal.api.GraphCompileOptions;
+import com.example.causal.procedures.CausalFunctions;
+import com.example.causal.procedures.CausalProcedures;
+import com.example.causal.runtime.compile.PatchStats;
+import com.example.causal.runtime.compile.SnapshotPatcher;
 import com.example.causal.runtime.DefaultCausalGraphRuntime;
 import com.example.causal.runtime.RuntimeRegistry;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
@@ -14,6 +18,8 @@ import org.neo4j.harness.Neo4j;
 import org.neo4j.harness.Neo4jBuilders;
 
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -29,7 +35,10 @@ public class IncrementalListenerCypherTest {
 
     @BeforeEach
     void setUp() {
-        neo4j = Neo4jBuilders.newInProcessBuilder(tempDir).build();
+        neo4j = Neo4jBuilders.newInProcessBuilder(tempDir)
+                .withProcedure(CausalProcedures.class)
+                .withFunction(CausalFunctions.class)
+                .build();
         db = neo4j.defaultDatabaseService();
         runtime = new DefaultCausalGraphRuntime();
         RuntimeRegistry.setInstance(runtime);
@@ -77,12 +86,9 @@ public class IncrementalListenerCypherTest {
             tx.commit();
         }
         CompiledCausalGraph snapshot = (CompiledCausalGraph) runtime.currentSnapshot();
-        // The cheapest fix returns null on patch, which invalidates the snapshot.
-        assertNull(snapshot, "Expected snapshot to be invalidated (fallback)");
-        /* TODO(future): Restore these when proper topological sort is implemented:
-        assertNotNull(snapshot);
+        assertNotNull(snapshot, "chained new variables are patched (WP3 step 1)");
         assertTrue(snapshot.variables().stream().anyMatch(v -> v.id().equals("X")));
-        */
+        assertEquals(Set.of("A", "B", "X", "Y"), snapshot.toIds(snapshot.ancestorBits(snapshot.indexOf("Z"))));
     }
     
     @Test
@@ -105,7 +111,7 @@ public class IncrementalListenerCypherTest {
             tx.commit();
         }
         CompiledCausalGraph snapshot = (CompiledCausalGraph) runtime.currentSnapshot();
-        assertNull(snapshot, "Snapshot should be invalidated after deactivation fallback");
+        assertNull(snapshot, "on two variables the deletion cone (2) exceeds 0.5 * |V|: threshold fallback");
     }
 
     @Test
@@ -157,7 +163,7 @@ public class IncrementalListenerCypherTest {
             tx.commit();
         }
         CompiledCausalGraph snapshot = (CompiledCausalGraph) runtime.currentSnapshot();
-        // Fallback is fine, we just care that the listener didn't abort the transaction.
+        // Threshold fallback on two variables; what matters is that the transaction commits.
         assertNull(snapshot);
     }
 
@@ -202,7 +208,7 @@ public class IncrementalListenerCypherTest {
         }, "Deleting a :Variable must not abort the transaction");
 
         assertNull(runtime.currentSnapshot(),
-                "Removing a variable is a non-local change, so the snapshot should be invalidated");
+                "on two variables the removal's deletion cone exceeds 0.5 * |V|: threshold fallback");
     }
 
     @Test
@@ -250,5 +256,91 @@ public class IncrementalListenerCypherTest {
         CompiledCausalGraph snapshot = (CompiledCausalGraph) runtime.currentSnapshot();
         assertEquals(Set.of("A", "B"), Set.copyOf(snapshot.topoOrder()),
                 "The transient variable should leave no trace in the snapshot");
+    }
+
+    // -------------------------------------------------------------------------
+    // WP3: patch instead of recompile
+    // -------------------------------------------------------------------------
+
+    private void run(String cypher) {
+        try (Transaction tx = db.beginTx()) {
+            tx.execute(cypher).accept(row -> true);
+            tx.commit();
+        }
+    }
+
+    private Set<String> ancestors(String id) {
+        try (Transaction tx = db.beginTx()) {
+            return Set.copyOf(tx.execute("MATCH (v:Variable {id: $id}) CALL causal.ancestors([v]) YIELD variable "
+                    + "RETURN variable.id AS id", Map.of("id", id)).<String>columnAs("id").stream().toList());
+        }
+    }
+
+    /** A -> B -> C plus four isolated variables, so a one-edge deletion cone stays below 0.5 * |V|. */
+    private void growToSeven() {
+        run("MATCH (b:Variable {id: 'B'}) CREATE (c:Variable {id: 'C', name: 'C'}), (b)-[:CAUSES {active: true}]->(c), "
+                + "(:Variable {id: 'X1'}), (:Variable {id: 'X2'}), (:Variable {id: 'X3'}), (:Variable {id: 'X4'})");
+        assertNotNull(runtime.currentSnapshot(), "insertions are patched");
+    }
+
+    @Test
+    void testActiveFlipChangesTheNextAnswerWithoutCompile() {
+        growToSeven();
+        assertEquals(Set.of("A", "B"), ancestors("C"));
+        PatchStats before = SnapshotPatcher.stats();
+
+        run("MATCH (:Variable {id: 'B'})-[r:CAUSES]->(:Variable {id: 'C'}) SET r.active = false");
+        CompiledCausalGraph off = (CompiledCausalGraph) runtime.currentSnapshot();
+        assertNotNull(off, "a deactivation is patched (cone 1 + 2 <= 0.5 * 7), no causal.compile");
+        assertEquals(1, SnapshotPatcher.stats().deletionsRecomputed() - before.deletionsRecomputed());
+        assertEquals(Set.of(), ancestors("C"));
+
+        run("MATCH (:Variable {id: 'B'})-[r:CAUSES]->(:Variable {id: 'C'}) SET r.active = true");
+        assertNotNull(runtime.currentSnapshot(), "a reactivation is an insertion");
+        assertEquals(Set.of("A", "B"), ancestors("C"));
+        assertEquals(before.fallbacksThreshold(), SnapshotPatcher.stats().fallbacksThreshold());
+    }
+
+    @Test
+    void testDeletionAboveTheThresholdFallsBackAndStaysCorrect() {
+        // A -> B on two variables: the cone {B} + {A} = 2 exceeds 0.5 * 2.
+        PatchStats before = SnapshotPatcher.stats();
+        run("MATCH ()-[r:CAUSES]->() DELETE r");
+        assertNull(runtime.currentSnapshot(), "the threshold fallback invalidates");
+        assertEquals(1, SnapshotPatcher.stats().fallbacksThreshold() - before.fallbacksThreshold());
+        run("CALL causal.compile()");
+        assertEquals(Set.of(), ancestors("B"));
+    }
+
+    @Test
+    void testInspectSnapshotShowsThePatchCounters() {
+        growToSeven();
+        PatchStats before = SnapshotPatcher.stats();
+        run("MATCH (:Variable {id: 'B'})-[r:CAUSES]->(:Variable {id: 'C'}) DELETE r");
+        run("MATCH (c:Variable {id: 'C'}), (a:Variable {id: 'A'}) CREATE (c)-[:CAUSES {active: true}]->(a)");
+        try (Transaction tx = db.beginTx()) {
+            Map<String, Object> row = tx.execute("CALL causal.inspectSnapshot()").next();
+            assertEquals(7L, row.get("variableCount"));
+            assertEquals(2L, (Long) row.get("patchesApplied") - before.patchesApplied());
+            assertEquals(1L, (Long) row.get("deletionsRecomputed") - before.deletionsRecomputed());
+            assertEquals(1L, (Long) row.get("insertionsRelabelled") - before.insertionsRelabelled(), "C -> A is backward");
+            for (String c : List.of("nodesMoved", "lastConeSize", "fallbacksThreshold", "fallbacksInvariant", "fallbacksNoClosures")) {
+                assertTrue(row.containsKey(c), c);
+            }
+        }
+        assertEquals(Set.of("C"), ancestors("A"));
+    }
+
+    @Test
+    void testPatchDisabledMakesEveryEditARecompile() {
+        System.setProperty("causal.patch.enabled", "false");
+        try {
+            run("MATCH (b:Variable {id: 'B'}) CREATE (c:Variable {id: 'C'}), (b)-[:CAUSES {active: true}]->(c)");
+            assertNull(runtime.currentSnapshot(), "with the patch disabled an insertion invalidates");
+            run("CALL causal.compile()");
+            assertEquals(Set.of("A", "B"), ancestors("C"));
+        } finally {
+            System.clearProperty("causal.patch.enabled");
+        }
     }
 }

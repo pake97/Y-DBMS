@@ -32,6 +32,12 @@ import java.util.logging.Logger;
  * <p>{@link SnapshotPatcher} derives a new snapshot from an old one plus a
  * {@code ChangeBatch}, sharing unchanged closure rows by reference.
  *
+ * <p><b>Freed indices.</b> A variable removed by a patch keeps its dense index as a
+ * hole: {@code variableAt(i)} is null, {@code idOf(i)} throws, its closure rows are
+ * empty, it has no edges and no position ({@code topoPosition(i) == -1}). Indices are
+ * not compacted until the next full compile. {@link #size()} is the array length
+ * (every loop over indices uses it); {@link #liveCount()} counts the variables.
+ *
  * <p>{@link #logStructure()} dumps all of this; it runs on every compile.
  */
 public final class CompiledCausalGraph implements GraphSnapshot {
@@ -66,6 +72,8 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     private final long[][] descendantBits;
     /** Neo4j element id of each variable's node by dense index (null if not loaded from Neo4j). */
     private final String[] elementIds;
+    /** {@link SnapshotPatcher} counters as of this snapshot's creation. */
+    private final PatchStats patchStats = SnapshotPatcher.stats();
 
     /**
      * Full constructor including linear-Gaussian SEM edge weights, without Neo4j element ids.
@@ -193,12 +201,13 @@ public final class CompiledCausalGraph implements GraphSnapshot {
             Instant compiledAt,
             Instant patchedFrom
     ) {
-        check(variableById.size() == n && nameToIndex.size() == n && indexToVar.length == n
-                && topoOrder.size() == n, "variable count");
+        int live = variableById.size();
+        check(live <= n && nameToIndex.size() == live && indexToVar.length == n
+                && topoOrder.size() == live, "variable count");
         check(fwdOffset.length == n + 1 && revOffset.length == n + 1, "CSR offsets");
         check(fwdOffset[n] == fwdTarget.length && revOffset[n] == revTarget.length
                 && fwdTarget.length == revTarget.length, "CSR targets");
-        check(topoOrderIdx.length == n && topoPos.length == n && topoLayer.length == n
+        check(topoOrderIdx.length == live && topoPos.length == n && topoLayer.length == n
                 && elementIds.length == n, "order arrays");
         check(words == BitSet64.words(n) && ancestorBits.length == n && descendantBits.length == n, "closures");
         for (int i = 0; i < n; i++) {
@@ -245,6 +254,11 @@ public final class CompiledCausalGraph implements GraphSnapshot {
      */
     public boolean hasClosures() {
         return ancestorBits != null;
+    }
+
+    /** The patcher's counters as of this snapshot's creation (process-wide; see {@link PatchStats}). */
+    public PatchStats patchStats() {
+        return patchStats;
     }
 
     private static void check(boolean ok, String what) {
@@ -295,7 +309,11 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         return Collections.unmodifiableSet(out);
     }
 
-    @Override public int size()                      { return variableById.size(); }
+    /** Length of the dense index range, holes included (see the class Javadoc). */
+    @Override public int size()                      { return n; }
+
+    /** Number of variables: {@link #size()} minus the indices freed by patches. */
+    public int liveCount()                           { return variableById.size(); }
     @Override public boolean contains(VariableRef r) { return variableById.containsKey(r.id()); }
     @Override public Instant compiledAt()            { return compiledAt; }
 
@@ -336,7 +354,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     /**
      * Neo4j element id of the variable's node as of the compile, or null (unknown id, a
      * variable added by a patch, or a snapshot not built from Neo4j). A stale element id
-     * cannot occur: deleting a :Variable invalidates the snapshot.
+     * cannot occur: a patch that removes a :Variable frees its index, and the id no longer resolves.
      */
     public String elementIdOf(String id) {
         Integer i = nameToIndex.get(id);
@@ -445,9 +463,11 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         sb.append("\n║           CompiledCausalGraph — structure dump           ║");
         sb.append("\n╚══════════════════════════════════════════════════════════╝");
         sb.append("\n  variables : ").append(variableById.size());
+        if (n != variableById.size()) sb.append(" (").append(n - variableById.size()).append(" freed indices)");
         sb.append("\n  edges     : ").append(forwardAdj.values().stream().mapToInt(Set::size).sum());
         sb.append("\n  compiled  : ").append(compiledAt);
         if (patchedFrom != null) sb.append("  (SnapshotPatcher: patched from ").append(patchedFrom).append(')');
+        sb.append("\n  patcher   : ").append(patchStats);
 
         sb.append("\n\n── Topological order (index : id) ──────────────────────────");
         for (int i = 0; i < topoOrder.size(); i++) {
@@ -471,7 +491,8 @@ public final class CompiledCausalGraph implements GraphSnapshot {
 
         sb.append("\n\n── Topo layer per node (index : id : layer) ────────────────");
         for (int i = 0; i < n; i++) {
-            sb.append(String.format("%n  [%2d]  %-30s  layer=%d", i, idOf(i), topoLayer[i]));
+            sb.append(String.format("%n  [%2d]  %-30s  layer=%d", i,
+                    indexToVar[i] == null ? "(freed)" : idOf(i), topoLayer[i]));
         }
         if (hasClosures()) {
             appendClosure(sb, "Ancestor closure", ancestorBits);

@@ -20,6 +20,14 @@ public final class ResultColumns {
     public static final String VARIABLE_COUNT        = "variableCount";
     public static final String VARIABLES             = "variables";
     public static final String COMPILED_AT           = "compiledAt";
+    public static final String PATCHES_APPLIED       = "patchesApplied";
+    public static final String INSERTIONS_RELABELLED = "insertionsRelabelled";
+    public static final String NODES_MOVED           = "nodesMoved";
+    public static final String DELETIONS_RECOMPUTED  = "deletionsRecomputed";
+    public static final String LAST_CONE_SIZE        = "lastConeSize";
+    public static final String FALLBACKS_THRESHOLD   = "fallbacksThreshold";
+    public static final String FALLBACKS_INVARIANT   = "fallbacksInvariant";
+    public static final String FALLBACKS_NO_CLOSURES = "fallbacksNoClosures";
 
     // VariableNodeRecord — parents / children / ancestors / descendants / path queries
     public static final String VARIABLE              = "variable";

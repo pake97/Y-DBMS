@@ -19,6 +19,8 @@ public final class BitSet64 {
 
     public static boolean get(long[] b, int i) { return (b[i >>> 6] & (1L << i)) != 0; }
 
+    public static void clear(long[] b, int i) { b[i >>> 6] &= ~(1L << i); }
+
     public static void or(long[] dst, long[] src) {
         for (int w = 0; w < dst.length; w++) dst[w] |= src[w];
     }
