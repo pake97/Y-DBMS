@@ -17,11 +17,13 @@ import com.example.causal.api.CausalGraphRuntime;
  * <h2>Single-Database Assumption</h2>
  * This registry is currently a process-wide singleton. On Enterprise or Aura setups with
  * multiple user databases, writes to different databases will incorrectly patch this single
- * shared snapshot. Future work should key this registry by database name.
+ * shared snapshot. Future work should key this registry by database name. The same holds
+ * for the {@link WorldRegistry} of named models and its active world.
  */
 public final class RuntimeRegistry {
 
     private static volatile CausalGraphRuntime instance;
+    private static volatile WorldRegistry worlds;
 
     private RuntimeRegistry() {}
 
@@ -47,6 +49,28 @@ public final class RuntimeRegistry {
     public static void setInstance(CausalGraphRuntime runtime) {
         synchronized (RuntimeRegistry.class) {
             instance = runtime;
+            worlds = null;
         }
+    }
+
+    /**
+     * The named models over the base runtime ({@link #getInstance()} is the world
+     * {@value WorldRegistry#BASE}), created lazily; {@link #setInstance} resets it.
+     */
+    public static WorldRegistry worlds() {
+        WorldRegistry w = worlds;
+        if (w == null) {
+            synchronized (RuntimeRegistry.class) {
+                if (worlds == null) worlds = new WorldRegistry(RuntimeRegistry::getInstance);
+                w = worlds;
+            }
+        }
+        return w;
+    }
+
+    /** Tell the world registry, if one exists, that the base snapshot changed. */
+    static void baseChanged() {
+        WorldRegistry w = worlds;
+        if (w != null) w.baseChanged();
     }
 }

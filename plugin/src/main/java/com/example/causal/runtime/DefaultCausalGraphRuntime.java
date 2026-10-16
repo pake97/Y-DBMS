@@ -66,12 +66,14 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
     synchronized void install(CompiledCausalGraph g) {
         snapshot = g;
         reachability = new ReachabilityIndex(g);
+        RuntimeRegistry.baseChanged();
     }
 
     @Override
     public synchronized void invalidate() {
         snapshot = null;
         reachability = null;
+        RuntimeRegistry.baseChanged();
     }
 
     /**
@@ -85,8 +87,7 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
         if (next == null) {
             return false;
         }
-        snapshot = next;
-        reachability = new ReachabilityIndex(next);
+        if (next != snapshot) install(next);   // an empty batch returns the same snapshot
         return true;
     }
 
