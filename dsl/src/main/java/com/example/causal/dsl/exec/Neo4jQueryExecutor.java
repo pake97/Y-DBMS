@@ -142,7 +142,7 @@ public class Neo4jQueryExecutor implements QueryExecutor {
                     (Set<String>) new LinkedHashSet<>(set.asList(org.neo4j.driver.Value::asString)));
             return new IdentificationResult(
                 s.treatment(), s.outcome(), identifiable,
-                identifiable ? "identifiable by adjustment (generalized criterion)" : "not identifiable by adjustment",
+                StructuralEvaluator.identifyMethod(identifiable),
                 sets, row.get("explanation").asString());
         }
     }

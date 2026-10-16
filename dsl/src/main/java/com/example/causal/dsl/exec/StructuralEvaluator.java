@@ -3,9 +3,16 @@ package com.example.causal.dsl.exec;
 import com.example.causal.dsl.ast.*;
 import com.example.causal.dsl.model.CausalModel;
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import com.example.causal.api.AdjustmentSetsResult;
+import com.example.causal.api.VariableRef;
+import com.example.causal.dsl.model.CausalVariable;
+import com.example.causal.dsl.model.VariableType;
+import com.example.causal.runtime.DefaultCausalGraphRuntime;
+import com.example.causal.runtime.compile.CompiledCausalGraph;
+import com.example.causal.runtime.compile.GraphBuilder;
+import com.example.causal.runtime.model.Variable;
+
+import java.util.*;
 
 /**
  * Pure, in-memory evaluation of the structural DSL queries against a single
@@ -53,47 +60,44 @@ final class StructuralEvaluator {
     }
 
     /**
-     * Backdoor-criterion identification. (Moved verbatim from the in-memory
-     * executor so both paths share one implementation.)
+     * IDENTIFY with the plugin's generalized adjustment criterion (all minimal sets, observed
+     * variables only), on a snapshot built from {@code model} with {@link GraphBuilder}, through
+     * the same {@code DefaultCausalGraphRuntime.adjustmentSets} the Neo4j backend's
+     * {@code causal.adjustmentSets} calls: both backends give the same sets, method text and
+     * explanation.
+     *
+     * <p>This reaches past {@code com.example.causal.api} into the plugin's runtime (CLAUDE.md
+     * keeps the DSL on the api); it is the in-memory backend only, and sharing the algorithm is
+     * what keeps the two backends from disagreeing.
+     *
+     * <p>Latent means {@code TYPE latent}, as {@link CypherTranslator} persists it for the Neo4j
+     * backend, not {@link com.example.causal.dsl.model.CausalVariable#isLatent()} (which also
+     * counts a variable without an {@code OBSERVED AS} binding).
      */
     private static IdentificationResult identify(CausalModel model, IdentifyStmt s) {
-        String t = s.treatment();
-        String o = s.outcome();
-
-        Set<String> descTreatment = model.descendants(t);
-        Set<String> backdoor = model.backdoorVars(t, o);
-        Set<String> confounders = model.confounders(t, o);
-        confounders.removeAll(descTreatment);
-
-        Set<String> directConfounders = new HashSet<>(model.parents(t));
-        directConfounders.retainAll(model.ancestors(o));
-        directConfounders.addAll(confounders);
-        directConfounders.removeAll(descTreatment);
-
-        boolean hasBackdoor = !backdoor.isEmpty();
-        boolean identifiable;
-        String method;
-        List<Set<String>> adjustmentSets;
-
-        if (!hasBackdoor) {
-            identifiable = true;
-            method = "no backdoor paths — no adjustment required";
-            adjustmentSets = List.of(Set.of());
-        } else if (!directConfounders.isEmpty()) {
-            identifiable = true;
-            method = "backdoor adjustment";
-            adjustmentSets = List.of(Set.copyOf(directConfounders));
-        } else {
-            identifiable = false;
-            method = "not identifiable via backdoor criterion with observed variables";
-            adjustmentSets = List.of();
+        List<Variable> vars = new ArrayList<>();
+        List<String[]> edges = new ArrayList<>();
+        for (CausalVariable v : model.variables().values()) {
+            boolean latent = v.type() == VariableType.LATENT;
+            vars.add(Variable.from(v.name(), v.name(), !latent, latent, 0.0, 1.0));
+            for (String c : model.children(v.name())) edges.add(new String[]{v.name(), c});
         }
+        CompiledCausalGraph g = GraphBuilder.build(vars, edges, Map.of());
+        AdjustmentSetsResult r = DefaultCausalGraphRuntime.view(g).adjustmentSets(
+            new VariableRef(s.treatment()), new VariableRef(s.outcome()), "all-minimal", CypherTranslator.IDENTIFY_LIMIT);
+        List<Set<String>> sets = new ArrayList<>();
+        for (Set<VariableRef> set : r.sets()) {
+            Set<String> ids = new TreeSet<>();
+            set.forEach(ref -> ids.add(ref.id()));
+            sets.add(new LinkedHashSet<>(ids));
+        }
+        return new IdentificationResult(s.treatment(), s.outcome(), r.identifiable(), identifyMethod(r.identifiable()),
+            sets, r.explanation());
+    }
 
-        String explanation = hasBackdoor
-            ? "Backdoor variables: " + backdoor
-            : "No backdoor paths from " + t + " to " + o;
-
-        return new IdentificationResult(t, o, identifiable, method, adjustmentSets, explanation);
+    /** IDENTIFY's method text, the same on both backends. */
+    static String identifyMethod(boolean identifiable) {
+        return identifiable ? "identifiable by adjustment (generalized criterion)" : "not identifiable by adjustment";
     }
 
     /**
