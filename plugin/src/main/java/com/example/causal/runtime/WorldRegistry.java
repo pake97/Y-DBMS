@@ -78,8 +78,9 @@ public final class WorldRegistry {
         }
         Set<String> ids = new TreeSet<>();
         variables.forEach(v -> ids.add(v.id()));
-        worlds.put(name, new World(name, source, Collections.unmodifiableSet(ids)));
-        worlds.values().forEach(w -> w.cached = null);   // dependents of a replaced world
+        if (worlds.put(name, new World(name, source, Collections.unmodifiableSet(ids))) != null) {
+            worlds.values().forEach(w -> w.cached = null);   // a replaced world: its dependents change too
+        }
         return resolved(name);
     }
 

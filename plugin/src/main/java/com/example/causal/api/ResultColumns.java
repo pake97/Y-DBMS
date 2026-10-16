@@ -29,6 +29,20 @@ public final class ResultColumns {
     public static final String FALLBACKS_INVARIANT   = "fallbacksInvariant";
     public static final String FALLBACKS_NO_CLOSURES = "fallbacksNoClosures";
 
+    // WorldRecord — causal.intervene; ModelRecord — causal.models / causal.use / causal.drop
+    public static final String NAME                  = "name";
+    public static final String BASE                  = "base";
+    public static final String INTERVENED            = "intervened";
+    public static final String REMOVED_EDGES         = "removedEdges";
+    public static final String CONE_SIZE             = "coneSize";
+    public static final String SHARED_ROWS           = "sharedRows";
+    public static final String TOTAL_ROWS            = "totalRows";
+    public static final String MILLIS                = "millis";
+    public static final String ACTIVE                = "active";
+    public static final String MATERIALIZED          = "materialized";
+    public static final String NODES                 = "nodes";
+    public static final String EDGES                 = "edges";
+
     // VariableNodeRecord — parents / children / ancestors / descendants / path queries
     public static final String VARIABLE              = "variable";
 

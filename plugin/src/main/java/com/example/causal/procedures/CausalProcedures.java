@@ -3,6 +3,7 @@ package com.example.causal.procedures;
 import com.example.causal.api.*;
 import com.example.causal.dto.*;
 import com.example.causal.runtime.RuntimeRegistry;
+import com.example.causal.runtime.WorldRegistry;
 import com.example.causal.runtime.compile.CompiledCausalGraph;
 import com.example.causal.runtime.compile.SnapshotPatcher;
 import org.neo4j.graphdb.Node;
@@ -76,10 +77,11 @@ public class CausalProcedures {
     @Procedure(name = ProcedureNames.PARENTS, mode = Mode.READ)
     @Description("Return the direct parents (immediate causes) of each :Variable node.")
     public Stream<VariableNodeRecord> parents(
-            @Name("variables") List<Node> variables
+            @Name("variables") List<Node> variables,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
-        return toVariableNodes(runtime.parents(ProcedureVariables.resolveAll(runtime, variables)));
+        CausalGraphRuntime runtime = runtime(model);
+        return toVariableNodes(runtime, runtime.parents(ProcedureVariables.resolveAll(runtime, variables)));
     }
 
     // =========================================================================
@@ -89,10 +91,11 @@ public class CausalProcedures {
     @Procedure(name = ProcedureNames.CHILDREN, mode = Mode.READ)
     @Description("Return the direct children (immediate effects) of each :Variable node.")
     public Stream<VariableNodeRecord> children(
-            @Name("variables") List<Node> variables
+            @Name("variables") List<Node> variables,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
-        return toVariableNodes(runtime.children(ProcedureVariables.resolveAll(runtime, variables)));
+        CausalGraphRuntime runtime = runtime(model);
+        return toVariableNodes(runtime, runtime.children(ProcedureVariables.resolveAll(runtime, variables)));
     }
 
     // =========================================================================
@@ -102,10 +105,11 @@ public class CausalProcedures {
     @Procedure(name = ProcedureNames.ANCESTORS, mode = Mode.READ)
     @Description("Return all ancestors (transitive causes) of each :Variable node.")
     public Stream<VariableNodeRecord> ancestors(
-            @Name("variables") List<Node> variables
+            @Name("variables") List<Node> variables,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
-        return toVariableNodes(runtime.ancestors(ProcedureVariables.resolveAll(runtime, variables)));
+        CausalGraphRuntime runtime = runtime(model);
+        return toVariableNodes(runtime, runtime.ancestors(ProcedureVariables.resolveAll(runtime, variables)));
     }
 
     // =========================================================================
@@ -115,10 +119,11 @@ public class CausalProcedures {
     @Procedure(name = ProcedureNames.DESCENDANTS, mode = Mode.READ)
     @Description("Return all descendants (transitive effects) of each :Variable node.")
     public Stream<VariableNodeRecord> descendants(
-            @Name("variables") List<Node> variables
+            @Name("variables") List<Node> variables,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
-        return toVariableNodes(runtime.descendants(ProcedureVariables.resolveAll(runtime, variables)));
+        CausalGraphRuntime runtime = runtime(model);
+        return toVariableNodes(runtime, runtime.descendants(ProcedureVariables.resolveAll(runtime, variables)));
     }
 
     // =========================================================================
@@ -133,9 +138,10 @@ public class CausalProcedures {
     public Stream<DSeparationRecord> dsep(
             @Name("x") List<Node> x,
             @Name("y") List<Node> y,
-            @Name("z") List<Node> z
+            @Name("z") List<Node> z,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        CausalGraphRuntime runtime = runtime(model);
         DSeparationResult result = runtime.isDSeparated(
                 ProcedureVariables.resolveAll(runtime, x),
                 ProcedureVariables.resolveAll(runtime, y),
@@ -156,21 +162,23 @@ public class CausalProcedures {
             @Name("treatment") Node treatment,
             @Name("outcome")   Node outcome,
             @Name(value = "mode",  defaultValue = "all-minimal") String mode,
-            @Name(value = "limit", defaultValue = "100") long limit
+            @Name(value = "limit", defaultValue = "100") long limit,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        CausalGraphRuntime runtime = runtime(model);
         VariableRef t = ProcedureVariables.requireResolved(runtime, treatment, "treatment");
         VariableRef o = ProcedureVariables.requireResolved(runtime, outcome, "outcome");
         AdjustmentSetsResult r = runtime.adjustmentSets(t, o, mode, (int) Math.min(limit, Integer.MAX_VALUE));
-        List<List<Node>> sets = r.sets().stream().map(this::toNodes).collect(Collectors.toList());
-        return Stream.of(new AdjustmentSetsRecord(r.identifiable(), toNodes(r.canonical()), toNodes(r.forbidden()),
+        CompiledCausalGraph g = graphOf(runtime);
+        List<List<Node>> sets = r.sets().stream().map(s -> toNodes(g, s)).collect(Collectors.toList());
+        return Stream.of(new AdjustmentSetsRecord(r.identifiable(), toNodes(g, r.canonical()), toNodes(g, r.forbidden()),
                 sets, r.mode(), r.explanation()));
     }
 
-    private List<Node> toNodes(Set<VariableRef> refs) {
+    private List<Node> toNodes(CompiledCausalGraph g, Set<VariableRef> refs) {
         return refs.stream()
                 .sorted(Comparator.comparing(VariableRef::id))
-                .map(ref -> ProcedureVariables.lookup(tx, snapshotGraph(), ref.id()))
+                .map(ref -> ProcedureVariables.lookup(tx, g, ref.id()))
                 .collect(Collectors.toList());
     }
 
@@ -182,19 +190,18 @@ public class CausalProcedures {
     )
     public Stream<AdjustmentRecord> adjustmentCandidate(
             @Name("treatment") Node treatment,
-            @Name("outcome")   Node outcome
+            @Name("outcome")   Node outcome,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        CausalGraphRuntime runtime = runtime(model);
         VariableRef t = ProcedureVariables.requireResolved(runtime, treatment, "treatment");
         VariableRef o = ProcedureVariables.requireResolved(runtime, outcome, "outcome");
 
         AdjustmentCandidateResult result = runtime.candidateAdjustmentSet(t, o);
 
+        CompiledCausalGraph g = graphOf(runtime);
         List<List<Node>> sets = result.candidateSets().stream()
-                .map(s -> s.stream()
-                        .sorted(Comparator.comparing(VariableRef::id))
-                        .map(ref -> ProcedureVariables.lookup(tx, snapshotGraph(), ref.id()))
-                        .collect(Collectors.toList()))
+                .map(s -> toNodes(g, s))
                 .collect(Collectors.toList());
 
         return Stream.of(new AdjustmentRecord(result.adjustmentSetExists(), sets, result.explanation()));
@@ -211,9 +218,10 @@ public class CausalProcedures {
     )
     public Stream<VariableNodeRecord> mediators(
             @Name("from") Node from,
-            @Name("to")   Node to
+            @Name("to")   Node to,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        return pathQuery(from, to, CausalGraphRuntime::mediators);
+        return pathQuery(from, to, model, CausalGraphRuntime::mediators);
     }
 
     // =========================================================================
@@ -227,9 +235,10 @@ public class CausalProcedures {
     )
     public Stream<VariableNodeRecord> colliders(
             @Name("x") Node x,
-            @Name("y") Node y
+            @Name("y") Node y,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        return pathQuery(x, y, CausalGraphRuntime::colliders);
+        return pathQuery(x, y, model, CausalGraphRuntime::colliders);
     }
 
     // =========================================================================
@@ -242,9 +251,10 @@ public class CausalProcedures {
     )
     public Stream<VariableNodeRecord> confounders(
             @Name("x") Node x,
-            @Name("y") Node y
+            @Name("y") Node y,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        return pathQuery(x, y, CausalGraphRuntime::confounders);
+        return pathQuery(x, y, model, CausalGraphRuntime::confounders);
     }
 
     // =========================================================================
@@ -258,9 +268,10 @@ public class CausalProcedures {
     )
     public Stream<VariableNodeRecord> backdoorVariables(
             @Name("treatment") Node treatment,
-            @Name("outcome")   Node outcome
+            @Name("outcome")   Node outcome,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        return pathQuery(treatment, outcome, CausalGraphRuntime::backdoorVariables);
+        return pathQuery(treatment, outcome, model, CausalGraphRuntime::backdoorVariables);
     }
 
     // =========================================================================
@@ -278,9 +289,10 @@ public class CausalProcedures {
     public Stream<LinearGaussianRecord> linearGaussianInference(
             @Name("treatment") Node treatment,
             @Name("outcome")   Node outcome,
-            @Name(value = "doValues", defaultValue = "{}") Map<String, Double> doValuesMap
+            @Name(value = "doValues", defaultValue = "{}") Map<String, Double> doValuesMap,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        CausalGraphRuntime runtime = runtime(model);
         VariableRef t = ProcedureVariables.requireResolved(runtime, treatment, "treatment");
         VariableRef o = ProcedureVariables.requireResolved(runtime, outcome, "outcome");
 
@@ -309,9 +321,10 @@ public class CausalProcedures {
             @Name("interventionVar") Node interventionVar,
             @Name("counterfactualValue") double counterfactualValue,
             @Name("outcome") Node outcome,
-            @Name(value = "factualValues", defaultValue = "{}") Map<String, Double> factualValues
+            @Name(value = "factualValues", defaultValue = "{}") Map<String, Double> factualValues,
+            @Name(value = "model", defaultValue = "") String model
     ) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+        CausalGraphRuntime runtime = runtime(model);
         VariableRef iVar = ProcedureVariables.requireResolved(runtime, interventionVar, "interventionVar");
         VariableRef oVar = ProcedureVariables.requireResolved(runtime, outcome, "outcome");
 
@@ -333,14 +346,66 @@ public class CausalProcedures {
     // =========================================================================
 
     @Procedure(name = ProcedureNames.INSPECT_SNAPSHOT, mode = Mode.READ)
-    @Description("Return metadata about the current compiled snapshot without recompiling.")
-    public Stream<SnapshotRecord> inspectSnapshot() {
-        GraphSnapshot snap = RuntimeRegistry.getInstance().currentSnapshot();
+    @Description("Return metadata about the compiled snapshot of a model (default: the active one) without recompiling.")
+    public Stream<SnapshotRecord> inspectSnapshot(@Name(value = "model", defaultValue = "") String model) {
+        GraphSnapshot snap = RuntimeRegistry.worlds().resolveName(model).equals(WorldRegistry.BASE)
+                ? RuntimeRegistry.getInstance().currentSnapshot()
+                : RuntimeRegistry.worlds().snapshot(model);
         if (snap == null) {
             return Stream.of(new SnapshotRecord(0L, List.of(), "no snapshot — call causal.compile() first",
                     SnapshotPatcher.stats()));
         }
         return Stream.of(toSnapshotRecord(snap));
+    }
+
+    // =========================================================================
+    // Named models: causal.intervene / use / models / drop
+    // =========================================================================
+
+    @Procedure(name = ProcedureNames.INTERVENE, mode = Mode.READ)
+    @Description(
+        "Define the world `name` as do(variables) on world `from` (default: the active world): the " +
+        "same DAG without the edges into the variables. Its snapshot is computed now from the base " +
+        "snapshot, sharing every untouched closure row; it follows later edits of the stored graph. " +
+        "Defining an existing name replaces it."
+    )
+    public Stream<WorldRecord> intervene(
+            @Name("name") String name,
+            @Name("variables") List<Node> variables,
+            @Name(value = "from", defaultValue = "") String from
+    ) {
+        WorldRegistry worlds = RuntimeRegistry.worlds();
+        CausalGraphRuntime source = worlds.runtime(from);
+        Set<VariableRef> vars = new LinkedHashSet<>();
+        for (Node v : variables == null ? List.<Node>of() : variables) {
+            vars.add(ProcedureVariables.requireResolved(source, v, "variable"));
+        }
+        List<String> intervened = worlds.define(name, from, vars);
+        WorldRegistry.Derivation d = worlds.derivation(name);
+        String base = worlds.list().stream().filter(i -> i.name().equals(name)).findFirst().orElseThrow().base();
+        return Stream.of(new WorldRecord(name, base, intervened, d.removedEdges(), d.coneSize(),
+                d.sharedRows(), d.totalRows(), d.millis()));
+    }
+
+    @Procedure(name = ProcedureNames.USE, mode = Mode.READ)
+    @Description("Make `name` the active world: procedures called without a model read it. Process-wide. Yields the models.")
+    public Stream<ModelRecord> use(@Name("name") String name) {
+        RuntimeRegistry.worlds().use(name);
+        return models();
+    }
+
+    @Procedure(name = ProcedureNames.MODELS, mode = Mode.READ)
+    @Description("List the worlds: base first, then the derived ones in definition order.")
+    public Stream<ModelRecord> models() {
+        return RuntimeRegistry.worlds().list().stream().map(i -> new ModelRecord(i.name(), i.base(),
+                i.intervened(), i.active(), i.materialized(), i.nodes(), i.edges()));
+    }
+
+    @Procedure(name = ProcedureNames.DROP, mode = Mode.READ)
+    @Description("Drop a derived world (not base, not one others are defined from). Yields the remaining models.")
+    public Stream<ModelRecord> drop(@Name("name") String name) {
+        RuntimeRegistry.worlds().drop(name);
+        return models();
     }
 
     // =========================================================================
@@ -355,58 +420,58 @@ public class CausalProcedures {
 
     @Procedure(name = ProcedureNames.PARENT_IDS, mode = Mode.READ)
     @Description("Ids of the direct parents of each :Variable node (no node lookup).")
-    public Stream<IdRecord> parentIds(@Name("variables") List<Node> variables) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+    public Stream<IdRecord> parentIds(@Name("variables") List<Node> variables, @Name(value = "model", defaultValue = "") String model) {
+        CausalGraphRuntime runtime = runtime(model);
         return toIds(runtime.parents(ProcedureVariables.resolveAll(runtime, variables)));
     }
 
     @Procedure(name = ProcedureNames.CHILD_IDS, mode = Mode.READ)
     @Description("Ids of the direct children of each :Variable node (no node lookup).")
-    public Stream<IdRecord> childIds(@Name("variables") List<Node> variables) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+    public Stream<IdRecord> childIds(@Name("variables") List<Node> variables, @Name(value = "model", defaultValue = "") String model) {
+        CausalGraphRuntime runtime = runtime(model);
         return toIds(runtime.children(ProcedureVariables.resolveAll(runtime, variables)));
     }
 
     @Procedure(name = ProcedureNames.ANCESTOR_IDS, mode = Mode.READ)
     @Description("Ids of all ancestors of each :Variable node (no node lookup).")
-    public Stream<IdRecord> ancestorIds(@Name("variables") List<Node> variables) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+    public Stream<IdRecord> ancestorIds(@Name("variables") List<Node> variables, @Name(value = "model", defaultValue = "") String model) {
+        CausalGraphRuntime runtime = runtime(model);
         return toIds(runtime.ancestors(ProcedureVariables.resolveAll(runtime, variables)));
     }
 
     @Procedure(name = ProcedureNames.DESCENDANT_IDS, mode = Mode.READ)
     @Description("Ids of all descendants of each :Variable node (no node lookup).")
-    public Stream<IdRecord> descendantIds(@Name("variables") List<Node> variables) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+    public Stream<IdRecord> descendantIds(@Name("variables") List<Node> variables, @Name(value = "model", defaultValue = "") String model) {
+        CausalGraphRuntime runtime = runtime(model);
         return toIds(runtime.descendants(ProcedureVariables.resolveAll(runtime, variables)));
     }
 
     @Procedure(name = ProcedureNames.MEDIATOR_IDS, mode = Mode.READ)
     @Description("Ids of the mediators between from and to (no node lookup).")
-    public Stream<IdRecord> mediatorIds(@Name("from") Node from, @Name("to") Node to) {
-        return pathIds(from, to, CausalGraphRuntime::mediators);
+    public Stream<IdRecord> mediatorIds(@Name("from") Node from, @Name("to") Node to, @Name(value = "model", defaultValue = "") String model) {
+        return pathIds(from, to, model, CausalGraphRuntime::mediators);
     }
 
     @Procedure(name = ProcedureNames.COLLIDER_IDS, mode = Mode.READ)
     @Description("Ids of the colliders between x and y (no node lookup).")
-    public Stream<IdRecord> colliderIds(@Name("x") Node x, @Name("y") Node y) {
-        return pathIds(x, y, CausalGraphRuntime::colliders);
+    public Stream<IdRecord> colliderIds(@Name("x") Node x, @Name("y") Node y, @Name(value = "model", defaultValue = "") String model) {
+        return pathIds(x, y, model, CausalGraphRuntime::colliders);
     }
 
     @Procedure(name = ProcedureNames.CONFOUNDER_IDS, mode = Mode.READ)
     @Description("Ids of the common ancestors of x and y (no node lookup).")
-    public Stream<IdRecord> confounderIds(@Name("x") Node x, @Name("y") Node y) {
-        return pathIds(x, y, CausalGraphRuntime::confounders);
+    public Stream<IdRecord> confounderIds(@Name("x") Node x, @Name("y") Node y, @Name(value = "model", defaultValue = "") String model) {
+        return pathIds(x, y, model, CausalGraphRuntime::confounders);
     }
 
     @Procedure(name = ProcedureNames.BACKDOOR_VARIABLE_IDS, mode = Mode.READ)
     @Description("Ids of the variables on backdoor paths from treatment to outcome (no node lookup).")
-    public Stream<IdRecord> backdoorVariableIds(@Name("treatment") Node treatment, @Name("outcome") Node outcome) {
-        return pathIds(treatment, outcome, CausalGraphRuntime::backdoorVariables);
+    public Stream<IdRecord> backdoorVariableIds(@Name("treatment") Node treatment, @Name("outcome") Node outcome, @Name(value = "model", defaultValue = "") String model) {
+        return pathIds(treatment, outcome, model, CausalGraphRuntime::backdoorVariables);
     }
 
-    private Stream<IdRecord> pathIds(Node from, Node to, PathFn fn) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+    private Stream<IdRecord> pathIds(Node from, Node to, String model, PathFn fn) {
+        CausalGraphRuntime runtime = runtime(model);
         VariableRef a = ProcedureVariables.requireResolved(runtime, from, "from");
         VariableRef b = ProcedureVariables.requireResolved(runtime, to, "to");
         return toIds(fn.apply(runtime, a, b));
@@ -422,22 +487,28 @@ public class CausalProcedures {
         Set<VariableRef> apply(CausalGraphRuntime rt, VariableRef a, VariableRef b);
     }
 
-    private Stream<VariableNodeRecord> pathQuery(Node from, Node to, PathFn fn) {
-        CausalGraphRuntime runtime = RuntimeRegistry.getInstance();
+    private Stream<VariableNodeRecord> pathQuery(Node from, Node to, String model, PathFn fn) {
+        CausalGraphRuntime runtime = runtime(model);
         VariableRef a = ProcedureVariables.requireResolved(runtime, from, "from");
         VariableRef b = ProcedureVariables.requireResolved(runtime, to, "to");
-        return toVariableNodes(fn.apply(runtime, a, b));
+        return toVariableNodes(runtime, fn.apply(runtime, a, b));
     }
 
-    /** The compiled snapshot, for fetching result nodes by element id (null if none). */
-    private static CompiledCausalGraph snapshotGraph() {
-        GraphSnapshot snap = RuntimeRegistry.getInstance().currentSnapshot();
-        return snap instanceof CompiledCausalGraph g ? g : null;
+    /**
+     * The runtime that answers on {@code model}: blank is the active world, {@code base} the
+     * stored graph's runtime, any other name a derived world (unknown names fail).
+     */
+    private static CausalGraphRuntime runtime(String model) {
+        return RuntimeRegistry.worlds().runtime(model);
     }
 
-    private Stream<VariableNodeRecord> toVariableNodes(Set<VariableRef> refs) {
-        GraphSnapshot snap = RuntimeRegistry.getInstance().currentSnapshot();
-        CompiledCausalGraph graph = snap instanceof CompiledCausalGraph g ? g : null;
+    /** The runtime's compiled snapshot, for fetching result nodes by element id (null if none). */
+    private static CompiledCausalGraph graphOf(CausalGraphRuntime runtime) {
+        return runtime.currentSnapshot() instanceof CompiledCausalGraph g ? g : null;
+    }
+
+    private Stream<VariableNodeRecord> toVariableNodes(CausalGraphRuntime runtime, Set<VariableRef> refs) {
+        CompiledCausalGraph graph = graphOf(runtime);
         return refs.stream()
                 .sorted(Comparator.comparing(VariableRef::id))
                 .map(ref -> new VariableNodeRecord(ProcedureVariables.lookup(tx, graph, ref.id())));
