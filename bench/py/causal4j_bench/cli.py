@@ -91,10 +91,15 @@ def cmd_synth(only_n):
             "m": g.number_of_edges(), "generator_commit": commit})
 
 
-def cmd_workloads(only):
+def cmd_workloads(only, balanced=False):
     for name, family, d in datasets(only):
         g = read_dataset(d)
         out = WORKLOADS / name
+        if balanced:  # tiers (b)/(c) and RQ5 (WP5b-2); leaves the other workload files alone
+            write_csv(out / "triples_balanced.csv", ["x", "y", "z", "separated"],
+                      [(x, y, ";".join(z), str(s).lower()) for x, y, z, s in workloads.balanced_triples(g)])
+            print(f"workloads {name}: triples_balanced.csv", flush=True)
+            continue
         ps = workloads.pairs(g)
         ts = workloads.triples(g)
         write_csv(out / "pairs.csv", ["t", "y"], ps)
@@ -177,6 +182,9 @@ def main(argv=None):
     for c in ("fetch", "workloads", "reference"):
         s = sub.add_parser(c)
         s.add_argument("--only", help="comma-separated dataset names")
+        if c == "workloads":
+            s.add_argument("--balanced", action="store_true",
+                           help="write only triples_balanced.csv (25 separated + 25 connected per |z|)")
         if c == "reference":
             s.add_argument("--no-dagitty", action="store_true")
             s.add_argument("--force", action="store_true", help="recompute even if the workload is unchanged")
@@ -195,7 +203,7 @@ def main(argv=None):
     elif a.cmd == "synth":
         cmd_synth(int(a.only.split("=")[1]) if a.only else None)
     elif a.cmd == "workloads":
-        cmd_workloads(only)
+        cmd_workloads(only, a.balanced)
     elif a.cmd == "stats":
         cmd_stats()
     elif a.cmd == "reference":

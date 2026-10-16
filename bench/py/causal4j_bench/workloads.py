@@ -1,4 +1,6 @@
 """Query workloads: (t, y) pairs with y ∈ de(t), and (x, y, z) d-separation triples."""
+import warnings
+
 import networkx as nx
 import numpy as np
 
@@ -52,4 +54,39 @@ def triples(g: nx.DiGraph, seed: int = SEED, k: int = N_TRIPLES):
             rest = [i for i in range(n) if i != x and i != y]
             z = sorted(rng.choice(rest, size=size, replace=False)) if size else []
             out.append((nodes[x], nodes[y], [nodes[i] for i in z]))
+    return out
+
+
+N_BALANCED = 25          # per verdict per |z|
+MAX_DRAWS = 200_000      # per |z|; a class still short after this many draws is kept short, with a warning
+
+
+def balanced_triples(g: nx.DiGraph, seed: int = SEED, k: int = N_BALANCED):
+    """k separated + k connected triples per |z| in z_sizes(n), drawn like `triples` and kept or
+    rejected on the pgmpy verdict (draws repeat, as in `triples`). Rows (x, y, z, separated).
+
+    A class can be empty: in child and pathfinder one root is an ancestor of every node, so no
+    pair is separated given the empty set. Such a class keeps what MAX_DRAWS found (a warning)."""
+    from .reference import _dag, separated
+    dag = _dag(g.edges())
+    dag.add_nodes_from(g.nodes)
+    nodes = list(g.nodes)
+    n = len(nodes)
+    rng = np.random.default_rng(seed)
+    out = []
+    for size in z_sizes(n):
+        need = {True: k, False: k}
+        for _ in range(MAX_DRAWS):
+            if not any(need.values()):
+                break
+            x, y = rng.choice(n, size=2, replace=False)
+            rest = [i for i in range(n) if i != x and i != y]
+            z = [nodes[i] for i in sorted(rng.choice(rest, size=size, replace=False))] if size else []
+            sep = separated(dag, nodes[x], nodes[y], z)
+            if need[sep]:
+                need[sep] -= 1
+                out.append((nodes[x], nodes[y], z, sep))
+        else:
+            short = {("separated" if v else "connected"): c for v, c in need.items() if c}
+            warnings.warn(f"|z|={size}: {short} missing after {MAX_DRAWS} draws; kept short")
     return out

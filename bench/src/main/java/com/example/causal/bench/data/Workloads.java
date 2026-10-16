@@ -17,6 +17,8 @@ public final class Workloads {
 
     public record Pair(String t, String y) {}
     public record Triple(String x, String y, List<String> z) {}
+    /** A balanced triple with the pgmpy verdict it was drawn for. */
+    public record Labeled(Triple triple, boolean separated) {}
 
     private Workloads() {}
 
@@ -30,9 +32,15 @@ public final class Workloads {
         return triples(file(dataset, "triples.csv"));
     }
 
-    /** triples_balanced.csv (50/50 separated/connected), added for tiers (b)/(c) in 5b-2. */
-    public static List<Triple> balancedTriples(String dataset) {
-        return triples(file(dataset, "triples_balanced.csv"));
+    /** triples_balanced.csv (x,y,z,separated: 25 separated + 25 connected per |z|), for tiers (b)/(c) and RQ5. */
+    public static List<Labeled> balancedTriples(String dataset) {
+        Path p = Datasets.workloadsDir().resolve(dataset).resolve("triples_balanced.csv");
+        if (!Files.exists(p)) {
+            throw new IllegalStateException(p + " is missing; regenerate it with: causal4j-bench workloads --balanced --only " + dataset);
+        }
+        List<Labeled> out = new ArrayList<>();
+        for (String[] r : csv(p, 4)) out.add(new Labeled(triple(r), Boolean.parseBoolean(r[3])));
+        return out;
     }
 
     /** dsep.json or dsep.json.gz. */
@@ -42,11 +50,12 @@ public final class Workloads {
 
     private static List<Triple> triples(Path p) {
         List<Triple> out = new ArrayList<>();
-        for (String[] r : csv(p, 3)) {
-            List<String> z = r[2].isEmpty() ? List.of() : Arrays.asList(r[2].split(";"));
-            out.add(new Triple(r[0], r[1], z));
-        }
+        for (String[] r : csv(p, 3)) out.add(triple(r));
         return out;
+    }
+
+    private static Triple triple(String[] r) {
+        return new Triple(r[0], r[1], r[2].isEmpty() ? List.of() : Arrays.asList(r[2].split(";")));
     }
 
     private static Path file(String dataset, String name) {
