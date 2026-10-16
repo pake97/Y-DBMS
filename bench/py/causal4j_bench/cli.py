@@ -1,6 +1,9 @@
 """causal4j-bench fetch|covid|policy|synth|workloads|stats|reference|all"""
 import argparse
+import csv
+import gzip
 import hashlib
+import json
 import re
 import subprocess
 import sys
@@ -142,6 +145,7 @@ def cmd_reference(only, use_dagitty, force=False):
         if family == "synthetic" and meta["n"] > REFERENCE_MAX_N:
             continue
         w = WORKLOADS / name
+        reference_balanced(name, family, d, w, meta, version is not None, force)
         wh = workload_hash(w)
         old = REFERENCE / name / "meta.json"
         if not force and old.exists() and read_json(old).get("workload_sha256") == wh:
@@ -183,6 +187,72 @@ def cmd_reference(only, use_dagitty, force=False):
               f"{reference.MAX_FAMILY}", flush=True)
 
 
+def reference_balanced(name, family, d, w, meta, use_dagitty, force):
+    """dsep_balanced.json(.gz): pgmpy and dagitty verdicts for triples_balanced.csv, kept while
+    that file's hash (stored in the output's head) is unchanged."""
+    bal = w / "triples_balanced.csv"
+    if not bal.exists():
+        return
+    bh = hashlib.sha256(bal.read_bytes()).hexdigest()
+    out = REFERENCE / name / ("dsep_balanced.json.gz" if family == "synthetic" else "dsep_balanced.json")
+    if not force and out.exists():
+        head = json.loads(gzip.decompress(out.read_bytes()) if out.suffix == ".gz" else out.read_text())
+        if head.get("workload_sha256") == bh:
+            return
+    triples = [(r["x"], r["y"], [v for v in r["z"].split(";") if v]) for r in read_csv(bal)]
+    rows = reference.balanced_dsep(read_dataset(d), triples, frozenset(meta.get("latent", [])), use_dagitty)
+    for r, c in zip(rows, read_csv(bal)):
+        assert r["pgmpy"] == (c["separated"] == "true"), (name, r)
+    write_rows_json(out, {"dataset": name, "dag": str((d / "edges.csv").relative_to(REPO)),
+                          "workload": str(bal.relative_to(REPO)), "workload_sha256": bh}, "triples", rows)
+    print(f"reference {name}: {len(rows)} balanced triples", flush=True)
+
+
+VALIDATE_COLUMNS = ["families_validated", "sets_validated", "sets_failing"]
+
+
+def cmd_validate(path, workers):
+    """RQ5: check every set in <path> (Rq5Runner's rq5_to_validate.json) with dagitty's
+    isAdjustmentSet and removal-minimality. Writes rq5_validated.json next to it, fills the
+    validation columns of rq5.csv there, and appends each failing set to rq5_disagreements.csv."""
+    path = Path(path)
+    todo = read_json(path)
+    dirs = {n: d for n, _, d in datasets(set(todo))}
+    codes = reference.validate(todo, dirs, workers)
+    write_json(path.parent / "rq5_validated.json",
+               {ds: [{"t": p["t"], "y": p["y"], "codes": c} for p, c in zip(todo[ds], codes[ds])] for ds in todo})
+    why = {reference.INVALID: "not an adjustment set", reference.VALID_NOT_MINIMAL: "not minimal"}
+    summary, failures = {}, []
+    for ds, ps in todo.items():
+        sets = failing = 0
+        for p, c in zip(ps, codes[ds]):
+            item = f"{p['t']} -> {p['y']}"
+            seen = set()
+            for s, code in zip(p["sets"], c):
+                sets += 1
+                problem = why.get(code) or ("duplicate" if frozenset(s) in seen else None)
+                seen.add(frozenset(s))
+                if problem:
+                    failing += 1
+                    failures.append([ds, "validate", item, "{" + " ".join(s) + "}", problem])
+            if p["identifiable"] and not p["sets"]:
+                failing += 1
+                failures.append([ds, "validate", item, "no set", "identifiable"])
+        summary[ds] = [len(ps), sets, failing]
+    csv_path = path.parent / "rq5.csv"
+    if csv_path.exists():
+        rows = read_csv(csv_path)
+        for r in rows:
+            r.update(zip(VALIDATE_COLUMNS, summary.get(r["dataset"], [0, 0, 0])))
+        write_csv(csv_path, list(rows[0]), [list(r.values()) for r in rows])
+    dis = path.parent / "rq5_disagreements.csv"
+    if dis.exists():
+        with open(dis, "a", newline="") as f:
+            csv.writer(f, lineterminator="\n").writerows(failures)
+    for ds, (pairs, sets, failing) in summary.items():
+        print(f"validate {ds}: {pairs} pairs, {sets} sets, {failing} failing")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="causal4j-bench", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -195,6 +265,9 @@ def main(argv=None):
         if c == "reference":
             s.add_argument("--no-dagitty", action="store_true")
             s.add_argument("--force", action="store_true", help="recompute even if the workload is unchanged")
+            s.add_argument("--validate", metavar="FILE",
+                           help="RQ5: validate the sets in Rq5Runner's rq5_to_validate.json with dagitty")
+            s.add_argument("--workers", type=int, default=12, help="processes for --validate")
     sub.add_parser("covid")
     sub.add_parser("policy")
     s = sub.add_parser("synth")
@@ -214,6 +287,8 @@ def main(argv=None):
         cmd_workloads(only, a.balanced)
     elif a.cmd == "stats":
         cmd_stats()
+    elif a.cmd == "reference" and a.validate:
+        cmd_validate(a.validate, a.workers)
     elif a.cmd == "reference":
         cmd_reference(only, not a.no_dagitty, a.force)
     elif a.cmd == "all":

@@ -45,6 +45,8 @@ public final class Workloads {
 
     /** dsep.json or dsep.json.gz. */
     public static JsonNode dsepReference(String dataset)       { return reference(dataset, "dsep"); }
+    /** dsep_balanced.json(.gz): verdicts for triples_balanced.csv (causal4j-bench reference). */
+    public static JsonNode dsepBalancedReference(String dataset) { return reference(dataset, "dsep_balanced"); }
     /** adjustment.json or adjustment.json.gz. */
     public static JsonNode adjustmentReference(String dataset) { return reference(dataset, "adjustment"); }
 

@@ -8,6 +8,7 @@ bench/scripts/rq1_tier_bc.sh
 bench/scripts/rq2.sh
 bench/scripts/rq4.sh
 bench/scripts/rq1_external.sh
+bench/scripts/rq5.sh
 "$PYTHON" -m causal4j_bench.results_to_tex "$RUN_ID"
 echo "$(( $(date +%s) - start )) s" > "$RUN/wall_time.txt"
 echo "run $RUN_ID done in $(cat "$RUN/wall_time.txt"); outputs in bench/out/$RUN_ID"

@@ -131,6 +131,18 @@ def test_dagitty_matches_on_toy_dags():
     assert adj[0]["identifiable"]
 
 
+def test_validate_codes_sets(tmp_path):
+    if reference.dagitty_version() is None:
+        pytest.skip("R + dagitty not available")
+    g = nx.DiGraph([("u", "t"), ("u", "y"), ("t", "y"), ("x", "u")])
+    write_edges(tmp_path / "edges.csv", g)
+    (tmp_path / "meta.json").write_text('{"n": 4, "m": 4, "nodes": ["u", "t", "y", "x"]}')
+    todo = {"toy": [{"t": "t", "y": "y", "identifiable": True, "sets": [["u"], [], ["u", "x"], ["x"]]}]}
+    codes = reference.validate(todo, {"toy": tmp_path}, workers=1)
+    assert codes == {"toy": [[reference.VALID_MINIMAL, reference.INVALID, reference.VALID_NOT_MINIMAL,
+                              reference.INVALID]]}
+
+
 def test_read_dataset_roundtrip(tmp_path):
     g = synthetic.generate(100, 2, "er", 0)
     write_edges(tmp_path / "edges.csv", g)
