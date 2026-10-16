@@ -1,4 +1,4 @@
-"""causal4j-bench fetch|covid|synth|workloads|stats|reference|all"""
+"""causal4j-bench fetch|covid|policy|synth|workloads|stats|reference|all"""
 import argparse
 import hashlib
 import re
@@ -26,8 +26,9 @@ def datasets(only=None):
     """(name, family, dir) for every generated dataset, bnlearn first, then covid, then synthetic."""
     found = [(d.name, "bnlearn", d) for d in (DATASETS / "bnlearn").glob("*") if (d / "edges.csv").exists()]
     found.sort(key=lambda t: BNLEARN.index(t[0]) if t[0] in BNLEARN else len(BNLEARN))
-    if (DATASETS / "covid" / "edges.csv").exists():
-        found.append(("covid", "covid", DATASETS / "covid"))
+    for name in SEEDS:
+        if (DATASETS / name / "edges.csv").exists():
+            found.append((name, name, DATASETS / name))
     syn = {synthetic.name(*p): p for p in synthetic.grid()}
     found += [(n, "synthetic", DATASETS / "synthetic" / n) for n in syn
               if (DATASETS / "synthetic" / n / "edges.csv").exists()]
@@ -60,8 +61,14 @@ SEED_ID = re.compile(r"\{id:\s*'([^']+)'[^}]*?latent:\s*(true|false)")
 SEED_EDGE = re.compile(r"\{from:\s*'([^']+)',\s*to:\s*'([^']+)'")
 
 
-def cmd_covid():
-    src = REPO / "dev" / "seed-dag.cypher"
+# Hand-authored DAGs with latent flags: dataset name -> (seed script, |V|, |E|).
+SEEDS = {"covid": ("seed-dag.cypher", 25, 78), "policy": ("seed-policy-dag.cypher", 22, 37)}
+
+
+def cmd_seed(name):
+    """datasets/<name>/{edges.csv, meta.json} from dev/<seed script>, latent ids in meta.json."""
+    script, n, m = SEEDS[name]
+    src = REPO / "dev" / script
     text = src.read_text()
     g = nx.DiGraph()
     latent = []
@@ -70,11 +77,11 @@ def cmd_covid():
         if lat == "true":
             latent.append(v)
     g.add_edges_from(SEED_EDGE.findall(text))
-    assert (g.number_of_nodes(), g.number_of_edges()) == (25, 78), (g.number_of_nodes(), g.number_of_edges())
-    d = DATASETS / "covid"
+    assert (g.number_of_nodes(), g.number_of_edges()) == (n, m), (g.number_of_nodes(), g.number_of_edges())
+    d = DATASETS / name
     write_edges(d / "edges.csv", g)
     write_json(d / "meta.json", {
-        "source": "dev/seed-dag.cypher", "sha256": hashlib.sha256(text.encode()).hexdigest(),
+        "source": f"dev/{script}", "sha256": hashlib.sha256(text.encode()).hexdigest(),
         "n": g.number_of_nodes(), "m": g.number_of_edges(), "nodes": list(g.nodes), "latent": latent})
 
 
@@ -189,6 +196,7 @@ def main(argv=None):
             s.add_argument("--no-dagitty", action="store_true")
             s.add_argument("--force", action="store_true", help="recompute even if the workload is unchanged")
     sub.add_parser("covid")
+    sub.add_parser("policy")
     s = sub.add_parser("synth")
     s.add_argument("--only", help="n=<N> to generate one size of the grid")
     sub.add_parser("stats")
@@ -198,8 +206,8 @@ def main(argv=None):
 
     if a.cmd == "fetch":
         cmd_fetch(only)
-    elif a.cmd == "covid":
-        cmd_covid()
+    elif a.cmd in SEEDS:
+        cmd_seed(a.cmd)
     elif a.cmd == "synth":
         cmd_synth(int(a.only.split("=")[1]) if a.only else None)
     elif a.cmd == "workloads":
@@ -210,7 +218,8 @@ def main(argv=None):
         cmd_reference(only, not a.no_dagitty, a.force)
     elif a.cmd == "all":
         cmd_fetch(None)
-        cmd_covid()
+        cmd_seed("covid")
+        cmd_seed("policy")
         cmd_synth(None)
         cmd_workloads(None)
         cmd_stats()

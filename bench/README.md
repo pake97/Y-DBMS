@@ -19,6 +19,7 @@ Every step is idempotent: a second `causal4j-bench all` leaves `git status` clea
 |---|---|---|
 | `fetch` (runs `datasets/fetch.sh`) | `datasets/bnlearn/<name>/{<name>.bif.gz, edges.csv, meta.json}` for the 11 bnlearn networks; `datasets/checksums.txt` (SHA-256, recorded on first download, verified after) | Table III, RQ1–RQ5 |
 | `covid` | `datasets/covid/{edges.csv, meta.json}` from `dev/seed-dag.cypher` (25 nodes, 78 edges, latent ids in `meta.json`) | Table III, running example, RQ5 |
+| `policy` | `datasets/policy/{edges.csv, meta.json}` from `dev/seed-policy-dag.cypher` (22 nodes, 37 edges, 3 latent ids in `meta.json`); every Phase 1 and 2 benchmark runs on it as on covid | Table III, landscape running example, RQ1–RQ5 |
 | `synth [--only n=N]` | `datasets/synthetic/<model>-n<N>-d<D>-s<S>/{edges.csv, meta.json}`: ER and BA, n ∈ {100, 316, 1000, 3162, 10000}, average degree ∈ {2, 4, 8}, seeds 0–4 (150 DAGs) | Table III summary row, RQ1/RQ4 scaling |
 | `workloads [--only a,b]` | `workloads/<dataset>/{pairs.csv, triples.csv, meta.json}`: 200 `(t, y)` pairs with `y ∈ de(t)`; 50 `(x, y, z)` triples per \|z\| ∈ {0, 1, 3, 10} (capped at n − 2); seed 20261111 | RQ1–RQ4 query workloads, RQ5 |
 | `workloads --balanced [--only a,b]` | `workloads/<dataset>/triples_balanced.csv` (`x,y,z,separated`): 25 separated + 25 connected triples per \|z\|, drawn as in `triples.csv` (seed 20261111) and kept or rejected on the pgmpy verdict. In child and pathfinder no pair is separated given ∅ (one root is an ancestor of every node), so their \|z\| = 0 block has 25 connected triples only (175 rows) | tiers (b)/(c), RQ5 |
@@ -48,7 +49,7 @@ exponential (one andes pair has 6404 sets) and R cannot interrupt dagitty's V8 e
 so dagitty runs in a worker process killed after 30 s per pair (`minimal` and
 `minimal_count` null); a family of more than 1000 sets is stored by size only
 (`minimal` null, `minimal_count` = size). Both cases are counted in `meta.json`.
-Latent nodes (covid only) are excluded from adjustment sets. Without R + dagitty,
+Latent nodes (covid and policy) are excluded from adjustment sets. Without R + dagitty,
 `dagitty`, `minimal` and `minimal_count` are null.
 
 **Caps.** Reference answers for synthetic graphs are computed only for n ≤ 1000

@@ -1,0 +1,35 @@
+{
+ "source": "dev/seed-policy-dag.cypher",
+ "sha256": "6cfea5c57a549c6cb83c402eb2d7dd3e84f2974d9d110c1ee30b2115d311101b",
+ "n": 22,
+ "m": 37,
+ "nodes": [
+  "energy_subsidy",
+  "eligibility_rule",
+  "household_size",
+  "urbanicity",
+  "regional_unemployment",
+  "household_income",
+  "energy_price",
+  "energy_consumption",
+  "energy_arrears",
+  "job_loss",
+  "employment_status",
+  "benefit_uptake",
+  "credit_access",
+  "consumer_credit",
+  "savings_buffer",
+  "loan_defaults",
+  "insurance_coverage",
+  "insurance_claims",
+  "health_shock",
+  "financial_literacy",
+  "informal_income",
+  "local_economic_shock"
+ ],
+ "latent": [
+  "financial_literacy",
+  "informal_income",
+  "local_economic_shock"
+ ]
+}

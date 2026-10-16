@@ -41,6 +41,8 @@ COLUMN_LABEL = {"read": "read", "causal4j": "in-proc.", "procedure": "proc.", "p
                 "dfs": "DFS", "cypher": "Cypher", "gds": "GDS"}
 BNLEARN = ["asia", "sachs", "child", "alarm", "hepar2", "win95pts", "pathfinder",
            "andes", "pigs", "link", "munin"]
+# Every non-synthetic dataset, in table order; covid and policy carry latent variables.
+REAL = BNLEARN + ["covid", "policy"]
 
 # \providecommand{\name}{default} lines of the paper's numbers-defaults.tex.
 PROVIDE = re.compile(r"^\\providecommand\{\\([A-Za-z]+)\}\{(.*)\}\s*$", re.M)
@@ -142,6 +144,8 @@ def label(dataset):
         return f"\\textsc{{{dataset}}}"
     if dataset == "covid":
         return "COVID-19"
+    if dataset == "policy":
+        return "Policy"
     m = meta(dataset)
     return f"{m['model'].upper()} $n{{=}}{m['n']}$, $\\bar d{{=}}{m['avg_degree']}$"
 
@@ -224,8 +228,8 @@ def rq2_table(rq2, compile_rows, lat):
              "DAG & \\multicolumn{2}{c}{build (ms)} & heap (KB) & closures (KB) & "
              "\\multicolumn{2}{c}{ancestors (µs)} & \\multicolumn{2}{c}{reaches (µs)} \\\\",
              " & c & p & c & & c & p & c & p \\\\", "\\midrule"]
-    order = [d for d in BNLEARN + ["covid"] if d in by] + sorted(
-        (d for d in by if d not in BNLEARN and d != "covid"
+    order = [d for d in REAL if d in by] + sorted(
+        (d for d in by if d not in REAL
          and meta(d)["avg_degree"] == 4 and meta(d)["model"] == "er"), key=lambda d: meta(d)["n"])
     for ds in order:
         c, p = by[ds].get("closures"), by[ds].get("pruned")
@@ -302,7 +306,7 @@ def rq4_figure(lat, rq4_rows, out: Path):
             else:
                 pts, cens = [], []
                 for (s, ds, o), v in lat.items():
-                    if s != system or o != op or ds in BNLEARN or ds == "covid":
+                    if s != system or o != op or ds in REAL:
                         continue
                     m = meta(ds)
                     if m["model"] == "er" and m["avg_degree"] == 4 and m["seed"] == 0:
@@ -425,8 +429,8 @@ def main(argv=None):
     with open(BENCH / "datasets" / "datasets.csv", newline="") as f:
         (out / "tables" / "datasets.tex").write_text(stats.latex(list(csv.DictReader(f))))
 
-    tier_datasets = [d for d in BNLEARN + ["covid"]] + sorted(
-        {r["dataset"] for r in tier_rows if r["dataset"] not in BNLEARN and r["dataset"] != "covid"
+    tier_datasets = list(REAL) + sorted(
+        {r["dataset"] for r in tier_rows if r["dataset"] not in REAL
          and meta(r["dataset"])["n"] == 1000 and meta(r["dataset"])["model"] == "er"},
         key=lambda d: meta(d)["avg_degree"])
     if not args.quick or tier_rows:
