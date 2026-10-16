@@ -109,8 +109,8 @@ class DslPluginE2ETest {
 
     @Test
     void intervene_derivedWorldEvaluatedInMemory() {
-        // Hydrates the live graph, applies do(Treatment), evaluates the RETURN
-        // structurally in-memory — no new plugin procedure involved.
+        // Defines do(Treatment) server-side (causal.intervene) and answers the RETURN
+        // part with procedures on that world.
         InterventionResult r = (InterventionResult)
                 dsl.execute("INTERVENE ON Treatment=1 RETURN EFFECT ON Retention30");
         assertTrue(r.affectsTarget());
@@ -138,14 +138,14 @@ class DslPluginE2ETest {
 
     @Test
     void intervene_thenIdentifyOnDerivedWorld() {
-        // IDENTIFY against the persisted graph is unimplemented plugin-side, but on
-        // the derived world it runs in-memory: do(Treatment) removed the confounding,
-        // so the effect is identifiable with no adjustment.
+        // IDENTIFY runs on the server-side derived world: do(Treatment) removed the
+        // confounding, so the effect is identifiable with the empty adjustment set.
         dsl.execute("INTERVENE ON Treatment=1 RETURN EFFECT ON Retention30");
         IdentificationResult r = (IdentificationResult)
                 dsl.execute("IDENTIFY EFFECT OF Treatment ON Retention30 RETURN ADJUSTMENT SETS");
         assertTrue(r.identifiable());
-        assertTrue(r.method().contains("no backdoor"), "do() removes backdoor paths; got: " + r.method());
+        assertEquals("identifiable by adjustment (generalized criterion)", r.method());
+        assertEquals(java.util.List.of(Set.of()), r.adjustmentSets(), "do() removes every backdoor path");
     }
 
     @Test

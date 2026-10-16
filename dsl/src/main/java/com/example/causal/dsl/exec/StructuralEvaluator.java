@@ -9,10 +9,9 @@ import java.util.Set;
 
 /**
  * Pure, in-memory evaluation of the structural DSL queries against a single
- * {@link CausalModel}. Shared by both executors: {@link InMemoryQueryExecutor}
- * always evaluates here, and {@link Neo4jQueryExecutor} routes queries here when
- * the active graph is a derived intervention world (the plugin only knows the
- * persisted base graph).
+ * {@link CausalModel}, for the in-memory backend ({@link InMemoryQueryExecutor}).
+ * The Neo4j backend answers on server-side worlds instead and shares only the
+ * INTERVENE result builders.
  *
  * <p>No I/O, no registry — given a graph and a statement, return the result.
  */
@@ -104,7 +103,6 @@ final class StructuralEvaluator {
      */
     private static InterventionResult render(CausalModel gPrime, InterveneStmt s) {
         String x = s.intervention().variable();
-        String v = s.intervention().value();
         String y = s.returnVar();
 
         boolean affects = gPrime.descendants(x).contains(y);
@@ -113,20 +111,32 @@ final class StructuralEvaluator {
         boolean numeric = gPrime.isParameterized() && LinearGaussianSEM.hasNumericInterventions(gPrime);
         if (numeric) {
             LinearGaussianSEM sem = new LinearGaussianSEM(gPrime);
-            double expectation = sem.means().get(y);
-            double totalEffect = sem.totalEffect(x, y);
             Double variance = s.returnType().equals("DISTRIBUTION") ? sem.variances().get(y) : null;
-            Double compareDelta = null;
-            String compareNote = null;
-            if (s.compareTo() != null) {
-                double v2 = Double.parseDouble(s.compareTo().value());
-                compareDelta = totalEffect * (Double.parseDouble(v) - v2);
-                compareNote = "linear-Gaussian: contrast = totalEffect·(v − v₂) = " + compareDelta;
-            }
-            return new InterventionResult(x, v, y, s.returnType(), affects, pathway, gPrime.name(),
-                null, compareNote, expectation, variance, totalEffect, compareDelta);
+            return numericResult(s, affects, pathway, gPrime.name(), sem.means().get(y), variance, sem.totalEffect(x, y));
         }
+        return structuralResult(s, affects, pathway, gPrime.name());
+    }
 
+    /** INTERVENE answer with linear-Gaussian numbers (shared with {@link Neo4jQueryExecutor}). */
+    static InterventionResult numericResult(InterveneStmt s, boolean affects, Set<String> pathway, String world,
+                                            double expectation, Double variance, double totalEffect) {
+        String x = s.intervention().variable();
+        Double compareDelta = null;
+        String compareNote = null;
+        if (s.compareTo() != null) {
+            double v2 = Double.parseDouble(s.compareTo().value());
+            compareDelta = totalEffect * (Double.parseDouble(s.intervention().value()) - v2);
+            compareNote = "linear-Gaussian: contrast = totalEffect·(v − v₂) = " + compareDelta;
+        }
+        return new InterventionResult(x, s.intervention().value(), s.returnVar(), s.returnType(), affects, pathway,
+            world, null, compareNote, expectation, variance, totalEffect, compareDelta);
+    }
+
+    /** INTERVENE answer without parameters (shared with {@link Neo4jQueryExecutor}). */
+    static InterventionResult structuralResult(InterveneStmt s, boolean affects, Set<String> pathway, String world) {
+        String x = s.intervention().variable();
+        String v = s.intervention().value();
+        String y = s.returnVar();
         // Structural-only fallback (no declared parameters, or non-numeric do-value).
         String note = switch (s.returnType()) {
             case "EFFECT" -> "Numeric magnitude of the effect requires the parameter layer (not implemented in v1).";
@@ -141,7 +151,7 @@ final class StructuralEvaluator {
                 + "numeric contrast E[" + y + "|do(" + x + "=" + v + ")] − E[" + y + "|do(" + x + "=" + v2 + ")] "
                 + "requires the parameter layer.";
         }
-        return new InterventionResult(x, v, y, s.returnType(), affects, pathway, gPrime.name(),
+        return new InterventionResult(x, v, y, s.returnType(), affects, pathway, world,
             note, compareNote, null, null, null, null);
     }
 }

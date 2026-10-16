@@ -62,17 +62,18 @@ public final class CypherTranslator {
             case ConfoundersOfStmt    s -> List.of(confounders(s.x(), s.y()));
             case BackdoorPathsStmt    s -> List.of(backdoorPaths(s.from(), s.to()));
 
-            case IdentifyStmt s -> List.of(adjustmentCandidate(s.treatment(), s.outcome()));
+            case IdentifyStmt s -> List.of(adjustmentSets(s.treatment(), s.outcome(), IDENTIFY_LIMIT, ""));
 
             case ShowDagStmt         s -> List.of(showDagVariables(), showDagEdges());
             case DescribeVariableStmt s -> List.of(describeVariable(s.name()));
 
             case EstimateStmt       s -> List.of();  // requires OBSERVED AS execution — not wired yet
-            case InterveneStmt      s -> List.of();  // do-operator handled DSL-side (derived world), no Cypher
+            case InterveneStmt      s -> List.of(intervene("<world>", s.intervention().variable(),
+                                                    s.modelRef() == null ? "" : s.modelRef()));
             case CounterfactualStmt s -> List.of();
-            case UseModelStmt       s -> List.of();  // context switch — no Cypher
-            case ResetStmt          s -> List.of();
-            case ShowModelsStmt     s -> List.of();  // registry-side listing — no Cypher
+            case UseModelStmt       s -> List.of(use(s.modelName()));
+            case ResetStmt          s -> List.of(use(BASE_WORLD));
+            case ShowModelsStmt     s -> List.of(models());
         };
     }
 
@@ -166,28 +167,72 @@ public final class CypherTranslator {
 
     // ─── Reads (structural + identification) ─────────────────────────────────
 
-    public CypherQuery causesOf(String var)      { return callList(ProcedureNames.PARENTS,     var); }
-    public CypherQuery effectsOf(String var)     { return callList(ProcedureNames.CHILDREN,    var); }
-    public CypherQuery ancestorsOf(String var)   { return callList(ProcedureNames.ANCESTORS,   var); }
-    public CypherQuery descendantsOf(String var) { return callList(ProcedureNames.DESCENDANTS, var); }
+    // Every read takes the model (world) to answer on; "" is the server's active world.
+    public CypherQuery causesOf(String var)      { return causesOf(var, ""); }
+    public CypherQuery effectsOf(String var)     { return effectsOf(var, ""); }
+    public CypherQuery ancestorsOf(String var)   { return ancestorsOf(var, ""); }
+    public CypherQuery descendantsOf(String var) { return descendantsOf(var, ""); }
+    public CypherQuery mediators(String from, String to)    { return mediators(from, to, ""); }
+    public CypherQuery colliders(String x, String y)        { return colliders(x, y, ""); }
+    public CypherQuery confounders(String x, String y)      { return confounders(x, y, ""); }
+    public CypherQuery backdoorPaths(String t, String y)    { return backdoorPaths(t, y, ""); }
 
-    public CypherQuery mediators(String from, String to)    { return callPair(ProcedureNames.MEDIATORS, from, to); }
-    public CypherQuery colliders(String x, String y)        { return callPair(ProcedureNames.COLLIDERS, x, y); }
-    public CypherQuery confounders(String x, String y)      { return callPair(ProcedureNames.CONFOUNDERS, x, y); }
-    public CypherQuery backdoorPaths(String t, String y)    { return callPair(ProcedureNames.BACKDOOR_VARIABLES, t, y); }
+    public CypherQuery causesOf(String var, String model)      { return callList(ProcedureNames.PARENTS,     var, model); }
+    public CypherQuery effectsOf(String var, String model)     { return callList(ProcedureNames.CHILDREN,    var, model); }
+    public CypherQuery ancestorsOf(String var, String model)   { return callList(ProcedureNames.ANCESTORS,   var, model); }
+    public CypherQuery descendantsOf(String var, String model) { return callList(ProcedureNames.DESCENDANTS, var, model); }
 
-    public CypherQuery adjustmentCandidate(String treatment, String outcome) {
-        String cols = ResultColumns.ADJUSTMENT_SET_EXISTS + ", " +
-                      ResultColumns.CANDIDATE_SETS + ", " +
-                      ResultColumns.EXPLANATION;
+    public CypherQuery mediators(String from, String to, String model) { return callPair(ProcedureNames.MEDIATORS, from, to, model); }
+    public CypherQuery colliders(String x, String y, String model)     { return callPair(ProcedureNames.COLLIDERS, x, y, model); }
+    public CypherQuery confounders(String x, String y, String model)   { return callPair(ProcedureNames.CONFOUNDERS, x, y, model); }
+    public CypherQuery backdoorPaths(String t, String y, String model) { return callPair(ProcedureNames.BACKDOOR_VARIABLES, t, y, model); }
+
+    /** Upper bound on the minimal adjustment sets IDENTIFY lists. */
+    public static final int IDENTIFY_LIMIT = 100;
+
+    /** The server's name for the stored graph's world. */
+    public static final String BASE_WORLD = "base";
+
+    /**
+     * IDENTIFY → {@code causal.adjustmentSets(t, o, 'all-minimal', limit, model)}: the generalized
+     * adjustment criterion. Yields {@code identifiable}, {@code sets} (as id lists) and
+     * {@code explanation}.
+     */
+    public CypherQuery adjustmentSets(String treatment, String outcome, int limit, String model) {
         return CypherQuery.read(
             "MATCH (t:Variable {id: $t}), (o:Variable {id: $o}) " +
-            "CALL " + ProcedureNames.ADJUSTMENT_CANDIDATE + "(t, o) " +
-            "YIELD " + cols + " " +
-            "RETURN " + cols,
-            Map.of("t", treatment, "o", outcome),
-            null // multi-column — handled specially
+            "CALL " + ProcedureNames.ADJUSTMENT_SETS + "(t, o, 'all-minimal', $limit, $model) " +
+            "YIELD identifiable, sets, explanation " +
+            "RETURN identifiable, [s IN sets | [v IN s | v.id]] AS sets, explanation",
+            Map.of("t", treatment, "o", outcome, "limit", limit, "model", model),
+            null // multi-column — read explicitly by the executor
         );
+    }
+
+    // ─── Worlds (server-side named models) ──────────────────────────────────
+
+    /** {@code causal.intervene(name, [var], from)}: define and materialize do(var) on {@code from}. */
+    public CypherQuery intervene(String name, String var, String from) {
+        return CypherQuery.read(
+            "MATCH (x:Variable {id: $var}) " +
+            "CALL " + ProcedureNames.INTERVENE + "($name, [x], $from) YIELD " + ResultColumns.NAME + " " +
+            "RETURN " + ResultColumns.NAME,
+            Map.of("name", name, "var", var, "from", from),
+            ResultColumns.NAME);
+    }
+
+    public CypherQuery use(String name) {
+        return CypherQuery.read(
+            "CALL " + ProcedureNames.USE + "($name) YIELD " + ResultColumns.NAME + " RETURN " + ResultColumns.NAME,
+            Map.of("name", name), ResultColumns.NAME);
+    }
+
+    /** {@code causal.models()}: name, base (null for the stored graph) and active, per world. */
+    public CypherQuery models() {
+        return CypherQuery.read(
+            "CALL " + ProcedureNames.MODELS + "() YIELD " + ResultColumns.NAME + ", " + ResultColumns.BASE + ", " +
+            ResultColumns.ACTIVE + " RETURN " + ResultColumns.NAME + ", " + ResultColumns.BASE + ", " + ResultColumns.ACTIVE,
+            Map.of(), null);
     }
 
     // ─── Quantitative layer (linear-Gaussian SEM) ───────────────────────────
@@ -201,13 +246,18 @@ public final class CypherTranslator {
      * parameters; callers must only invoke this against a parameterized graph.
      */
     public CypherQuery linearGaussianInference(String treatment, String outcome, Map<String, Double> doValues) {
+        return linearGaussianInference(treatment, outcome, doValues, "");
+    }
+
+    /** As above, on world {@code model} ("" = active). */
+    public CypherQuery linearGaussianInference(String treatment, String outcome, Map<String, Double> doValues, String model) {
         String cols = ResultColumns.MEANS + ", " + ResultColumns.VARIANCES + ", " + ResultColumns.TOTAL_EFFECT;
         return CypherQuery.read(
             "MATCH (t:Variable {id: $t}), (o:Variable {id: $o}) " +
-            "CALL " + ProcedureNames.LINEAR_GAUSSIAN_INFERENCE + "(t, o, $doValues) " +
+            "CALL " + ProcedureNames.LINEAR_GAUSSIAN_INFERENCE + "(t, o, $doValues, $model) " +
             "YIELD " + cols + " " +
             "RETURN " + cols,
-            Map.of("t", treatment, "o", outcome, "doValues", doValues),
+            Map.of("t", treatment, "o", outcome, "doValues", doValues, "model", model),
             null // multi-column — read explicitly by the executor
         );
     }
@@ -241,24 +291,24 @@ public final class CypherTranslator {
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private CypherQuery callList(String procedure, String var) {
+    private CypherQuery callList(String procedure, String var, String model) {
         String v = ResultColumns.VARIABLE;
         return CypherQuery.read(
             "MATCH (anchor:Variable {id: $var}) " +
-            "CALL " + procedure + "([anchor]) YIELD " + v + " " +
+            "CALL " + procedure + "([anchor], $model) YIELD " + v + " " +
             "RETURN " + v + ".id AS variableId ORDER BY variableId",
-            Map.of("var", var),
+            Map.of("var", var, "model", model),
             "variableId"
         );
     }
 
-    private CypherQuery callPair(String procedure, String a, String b) {
+    private CypherQuery callPair(String procedure, String a, String b, String model) {
         String v = ResultColumns.VARIABLE;
         return CypherQuery.read(
             "MATCH (a:Variable {id: $a}), (b:Variable {id: $b}) " +
-            "CALL " + procedure + "(a, b) YIELD " + v + " " +
+            "CALL " + procedure + "(a, b, $model) YIELD " + v + " " +
             "RETURN " + v + ".id AS variableId ORDER BY variableId",
-            Map.of("a", a, "b", b),
+            Map.of("a", a, "b", b, "model", model),
             "variableId"
         );
     }
