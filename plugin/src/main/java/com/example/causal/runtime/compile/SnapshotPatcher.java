@@ -79,6 +79,47 @@ public final class SnapshotPatcher {
         }
     }
 
+    /**
+     * The graph surgery of {@code do(intervened)}: {@code base} without the incoming edges of
+     * the intervened variables (unknown ids are ignored), as one deletion batch through
+     * {@link #apply}, so every untouched closure row is shared with {@code base}. When the
+     * patch declines (deletion cones over the threshold, or a layer-pruned base without
+     * closures) the world is built from scratch with {@link GraphBuilder#build} and
+     * {@code fallback} is true.
+     */
+    public static Surgery cutIncomingEdges(CompiledCausalGraph base, Set<String> intervened) {
+        ChangeBatch.Builder b = ChangeBatch.builder();
+        int removed = 0;
+        for (String x : intervened) {
+            for (String p : base.parentsOf(x)) {
+                b.removedEdge(p, x);
+                removed++;
+            }
+        }
+        ChangeBatch batch = b.build();
+        CompiledCausalGraph patched = apply(base, batch);
+        if (patched != null) return new Surgery(patched, removed, false);
+
+        List<Variable> vars = new ArrayList<>();
+        Map<String, String> elementIds = new HashMap<>();
+        List<String[]> edges = new ArrayList<>();
+        Map<String, Map<String, Double>> weights = new HashMap<>(base.edgeWeightMap());
+        intervened.forEach(weights::remove);
+        for (int i = 0; i < base.size(); i++) {
+            Variable v = base.variableAt(i);
+            if (v == null) continue;   // freed index
+            vars.add(v);
+            if (base.elementIdOf(v.id()) != null) elementIds.put(v.id(), base.elementIdOf(v.id()));
+            for (String c : base.childrenOf(v.id())) {
+                if (!intervened.contains(c)) edges.add(new String[]{v.id(), c});
+            }
+        }
+        return new Surgery(GraphBuilder.build(vars, edges, weights, elementIds), removed, true);
+    }
+
+    /** A derived world's snapshot, the number of edges cut, and whether it was built from scratch. */
+    public record Surgery(CompiledCausalGraph graph, int removedEdges, boolean fallback) {}
+
     private static CompiledCausalGraph patch(CompiledCausalGraph old, ChangeBatch batch) {
         // ── Removed variables the snapshot holds (a variable created and deleted in one
         // transaction never was); their incident edges are removed with them.

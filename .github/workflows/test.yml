@@ -1,8 +1,10 @@
 name: test
+# Manual only (Actions tab -> test -> Run workflow): the private repository is out of
+# Actions minutes. The push/pull_request triggers come back when the repository is
+# public for the artifact. Until then every merge into feat/index is gated on
+# `mvn test` from the repo root, run locally, with the test count in the PR description.
 on:
-  push:
-    branches: [master, feat/**]
-  pull_request:
+  workflow_dispatch:
 jobs:
   maven:
     runs-on: ubuntu-latest

@@ -11,7 +11,6 @@ import org.neo4j.driver.Record;
 import org.neo4j.driver.Session;
 
 import java.util.*;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -20,10 +19,17 @@ import java.util.stream.Collectors;
  * queries delegate to the {@code causal.*} procedures provided by
  * {@code causal4j-plugin}, so the Neo4j graph is the single source of truth.
  *
+ * <p>Worlds live on the server ({@code causal.intervene}, {@code causal.use},
+ * {@code causal.models}): {@code INTERVENE} defines a derived world there, and every
+ * structural statement and {@code IDENTIFY} is answered by the procedures on the
+ * active world, with no client-side graph. The executor remembers only the do-values
+ * of the worlds it defined, for the numeric answers ({@code INTERVENE} on a
+ * parameterized graph) and for {@code ESTIMATE}/{@code COUNTERFACTUAL}, which still
+ * evaluate DSL-side on the stored graph with those interventions replayed.
+ *
  * <p>DSL-side metadata that the plugin's schema does not carry (unit, role,
  * binding) is also written to a local {@link ModelRegistry} so the DSL can
- * answer {@code DESCRIBE VARIABLE} and validate adjustment sets without a
- * round-trip.
+ * answer {@code DESCRIBE VARIABLE} without a round-trip.
  *
  * <p>Lifecycle: caller owns the {@link Driver}. This executor does not open
  * or close it.
@@ -34,6 +40,10 @@ public class Neo4jQueryExecutor implements QueryExecutor {
     private final String database;
     private final CypherTranslator translator = new CypherTranslator();
     private final ModelRegistry registry;
+    /** The world this executor reads ({@link CypherTranslator#BASE_WORLD} until INTERVENE or USE MODEL). */
+    private String active = CypherTranslator.BASE_WORLD;
+    /** do-values (variable -> value, in order) of each world this executor defined; base has none. */
+    private final Map<String, LinkedHashMap<String, String>> doValues = new HashMap<>();
 
     public Neo4jQueryExecutor(Driver driver, String database, ModelRegistry registry) {
         this.driver   = driver;
@@ -53,29 +63,27 @@ public class Neo4jQueryExecutor implements QueryExecutor {
             case DefineModelStmt     s -> defineModel(s);
             case DefineDagStmt       s -> defineDag(s);
 
-            case CausesOfStmt        s -> structural(s, () -> readVars("CAUSES OF " + s.var(),      translator.causesOf(s.var())));
-            case EffectsOfStmt       s -> structural(s, () -> readVars("EFFECTS OF " + s.var(),     translator.effectsOf(s.var())));
-            case AncestorsOfStmt     s -> structural(s, () -> readVars("ANCESTORS OF " + s.var(),   translator.ancestorsOf(s.var())));
-            case DescendantsOfStmt   s -> structural(s, () -> readVars("DESCENDANTS OF " + s.var(), translator.descendantsOf(s.var())));
-            case MediatorsBetweenStmt s -> structural(s, () -> readVars(
-                "MEDIATORS BETWEEN " + s.from() + " AND " + s.to(), translator.mediators(s.from(), s.to())));
-            case CollidersBetweenStmt s -> structural(s, () -> readVars(
-                "COLLIDERS BETWEEN " + s.from() + " AND " + s.to(), translator.colliders(s.from(), s.to())));
-            case ConfoundersOfStmt    s -> structural(s, () -> readVars(
-                "CONFOUNDERS OF " + s.x() + " AND " + s.y(), translator.confounders(s.x(), s.y())));
-            case BackdoorPathsStmt    s -> structural(s, () -> readVars(
-                "BACKDOOR PATHS BETWEEN " + s.from() + " AND " + s.to(), translator.backdoorPaths(s.from(), s.to())));
+            case CausesOfStmt        s -> readVars("CAUSES OF " + s.var(),      translator.causesOf(s.var(), active));
+            case EffectsOfStmt       s -> readVars("EFFECTS OF " + s.var(),     translator.effectsOf(s.var(), active));
+            case AncestorsOfStmt     s -> readVars("ANCESTORS OF " + s.var(),   translator.ancestorsOf(s.var(), active));
+            case DescendantsOfStmt   s -> readVars("DESCENDANTS OF " + s.var(), translator.descendantsOf(s.var(), active));
+            case MediatorsBetweenStmt s -> readVars(
+                "MEDIATORS BETWEEN " + s.from() + " AND " + s.to(), translator.mediators(s.from(), s.to(), active));
+            case CollidersBetweenStmt s -> readVars(
+                "COLLIDERS BETWEEN " + s.from() + " AND " + s.to(), translator.colliders(s.from(), s.to(), active));
+            case ConfoundersOfStmt    s -> readVars(
+                "CONFOUNDERS OF " + s.x() + " AND " + s.y(), translator.confounders(s.x(), s.y(), active));
+            case BackdoorPathsStmt    s -> readVars(
+                "BACKDOOR PATHS BETWEEN " + s.from() + " AND " + s.to(), translator.backdoorPaths(s.from(), s.to(), active));
 
-            case IdentifyStmt        s -> structural(s, () -> identify(s));
-            case EstimateStmt        s -> EstimateEvaluator.evaluate(
-                registry.isCurrentDerived() ? registry.currentModel().orElseThrow() : hydrateCurrentGraph(), s);
+            case IdentifyStmt        s -> identify(s);
+            case EstimateStmt        s -> EstimateEvaluator.evaluate(activeModelDslSide(), s);
             case InterveneStmt       s -> executeIntervene(s);
-            case CounterfactualStmt  s -> CounterfactualEvaluator.evaluate(
-                registry.isCurrentDerived() ? registry.currentModel().orElseThrow() : hydrateCurrentGraph(), s);
+            case CounterfactualStmt  s -> CounterfactualEvaluator.evaluate(activeModelDslSide(), s);
 
             case UseModelStmt        s -> executeUseModel(s);
             case ResetStmt           s -> executeReset(s);
-            case ShowModelsStmt      s -> ModelListResult.from(registry);
+            case ShowModelsStmt      s -> showModels();
 
             case ShowDagStmt         s -> showDag(s);
             case DescribeVariableStmt s -> describeVariable(s);
@@ -112,117 +120,105 @@ public class Neo4jQueryExecutor implements QueryExecutor {
     // ─── Reads ───────────────────────────────────────────────────────────────
 
     private QueryResult readVars(String label, CypherQuery q) {
+        return new VariableSetResult(label, readIds(q));
+    }
+
+    private Set<String> readIds(CypherQuery q) {
         Set<String> result = new LinkedHashSet<>();
         try (Session session = openSession()) {
             session.run(q.cypher(), q.params()).stream()
                 .map(r -> r.get(q.yieldColumn()).asString())
                 .forEach(result::add);
         }
-        return new VariableSetResult(label, result);
+        return result;
     }
 
     private QueryResult identify(IdentifyStmt s) {
-        CypherQuery q = translator.adjustmentCandidate(s.treatment(), s.outcome());
+        CypherQuery q = translator.adjustmentSets(s.treatment(), s.outcome(), CypherTranslator.IDENTIFY_LIMIT, active);
         try (Session session = openSession()) {
             Record row = session.run(q.cypher(), q.params()).single();
-            boolean exists = row.get("adjustmentSetExists").asBoolean();
-            String explanation = row.get("explanation").asString();
-            List<Set<String>> sets = row.get("candidateSets").asList(outer ->
-                    new LinkedHashSet<>(outer.asList(inner ->
-                            inner.asNode().get("id").asString())))
-                .stream().collect(Collectors.toList());
+            boolean identifiable = row.get("identifiable").asBoolean();
+            List<Set<String>> sets = row.get("sets").asList(set ->
+                    (Set<String>) new LinkedHashSet<>(set.asList(org.neo4j.driver.Value::asString)));
             return new IdentificationResult(
-                s.treatment(), s.outcome(), exists,
-                exists ? "backdoor adjustment" : "not identifiable via backdoor",
-                sets, explanation);
+                s.treatment(), s.outcome(), identifiable,
+                identifiable ? "identifiable by adjustment (generalized criterion)" : "not identifiable by adjustment",
+                sets, row.get("explanation").asString());
         }
     }
 
-    // ─── Intervention & context switching ───────────────────────────────────
+    // ─── Intervention & context switching (server-side worlds) ──────────────
 
     /**
-     * Dispatch a structural query. While the active graph is a derived
-     * intervention world it lives only DSL-side, so evaluate it in-memory; while
-     * it is the base graph, delegate to the plugin against live Neo4j ({@code liveBranch}).
+     * {@code INTERVENE ON x = v [FROM MODEL m]}: define {@code do(x)} on the source world
+     * (m, else the active one) as a server-side world named like the in-memory backend's
+     * ({@code <source>_do_<x>_<v>}, with {@code neo4j} for the stored graph), make it active,
+     * and answer the RETURN part with procedures on it.
      */
-    private QueryResult structural(Statement s, Supplier<QueryResult> liveBranch) {
-        if (registry.isCurrentDerived()) {
-            return StructuralEvaluator.evaluate(registry.currentModel().orElseThrow(), s);
-        }
-        return liveBranch.get();
-    }
-
     private QueryResult executeIntervene(InterveneStmt s) {
-        // Source world: an explicit FROM MODEL, the active derived world, or a
-        // fresh hydration of the persisted base graph.
-        CausalModel source;
-        boolean fromBaseGraph = false;
-        if (s.modelRef() != null) {
-            source = registry.model(s.modelRef())
-                .orElseThrow(() -> new IllegalArgumentException("Unknown model: " + s.modelRef()));
-        } else if (registry.isCurrentDerived()) {
-            source = registry.currentModel().orElseThrow();
-        } else {
-            source = hydrateCurrentGraph();
-            fromBaseGraph = true;
-        }
-        String derivedName = CausalModel.derivedName(
-            source.name(), s.intervention().variable(), s.intervention().value());
-        CausalModel gPrime = source.intervene(
-            s.intervention().variable(), s.intervention().value(), derivedName);
-        registry.registerDerived(gPrime);   // G′ becomes the active graph
-
-        // When intervening on the persisted, parameterized base graph, get the
-        // numeric answer from the plugin's linear-Gaussian engine (the production
-        // path, and the single source of truth). The derived world G′ above still
-        // drives the structural fields and any later query in the derived context.
-        // Derived/FROM-MODEL sources and unparameterized graphs fall back to the
-        // shared in-memory evaluator below.
-        if (fromBaseGraph && source.isParameterized()) {
-            InterventionResult numeric = pluginIntervene(s, gPrime);
-            if (numeric != null) return numeric;
-        }
-        return StructuralEvaluator.evaluate(gPrime, s);
-    }
-
-    /**
-     * Numeric INTERVENE answer via {@code causal.linearGaussianInference}. The
-     * structural fields (affects/pathway) come from the derived world {@code gPrime};
-     * the means/variance/total-effect come from the plugin over the base graph
-     * (do(X=x) is applied plugin-side). Returns null when the do-value is not
-     * numeric, so the caller falls back to the structural evaluator.
-     */
-    private InterventionResult pluginIntervene(InterveneStmt s, CausalModel gPrime) {
         String x = s.intervention().variable();
+        String value = s.intervention().value();
         String y = s.returnVar();
-        Double xVal = tryParseDouble(s.intervention().value());
-        if (xVal == null) return null;
+        String source = s.modelRef() != null ? s.modelRef() : active;
+        String sourceLabel = CypherTranslator.BASE_WORLD.equals(source) ? "neo4j" : source;
+        String world = CausalModel.derivedName(sourceLabel, x, value);
 
-        CypherTranslator.CypherQuery q = translator.linearGaussianInference(x, y, Map.of(x, xVal));
-        double expectation;
-        double totalEffect;
-        Double variance = null;
         try (Session session = openSession()) {
-            Record row = session.run(q.cypher(), q.params()).single();
-            expectation = row.get(ResultColumns.MEANS).get(y).asDouble();
-            totalEffect = row.get(ResultColumns.TOTAL_EFFECT).asDouble();
-            if ("DISTRIBUTION".equals(s.returnType())) {
-                variance = row.get(ResultColumns.VARIANCES).get(y).asDouble();
+            CypherQuery def = translator.intervene(world, x, source);
+            session.run(def.cypher(), def.params()).consume();
+            CypherQuery use = translator.use(world);
+            session.run(use.cypher(), use.params()).consume();
+        }
+        LinkedHashMap<String, String> values = new LinkedHashMap<>(doValues.getOrDefault(source, new LinkedHashMap<>()));
+        values.put(x, value);
+        doValues.put(world, values);
+        active = world;
+
+        boolean affects = readIds(translator.descendantsOf(x, world)).contains(y);
+        Set<String> pathway = affects ? readIds(translator.mediators(x, y, world)) : Set.of();
+
+        Map<String, Double> numericValues = new LinkedHashMap<>();
+        values.forEach((var, v) -> { Double d = tryParseDouble(v); if (d != null) numericValues.put(var, d); });
+        if (numericValues.size() == values.size() && storedGraphIsParameterized()) {
+            try {
+                return numericIntervene(s, affects, pathway, world, numericValues, world);
+            } catch (org.neo4j.driver.exceptions.ClientException e) {
+                if (!String.valueOf(e.getMessage()).contains("not parameterized")) throw e;
+                // Every parameter sat on a cut edge, so the derived world has none: do() on the
+                // stored graph with all the do-values gives the same means.
+                return numericIntervene(s, affects, pathway, world, numericValues, CypherTranslator.BASE_WORLD);
             }
         }
+        return StructuralEvaluator.structuralResult(s, affects, pathway, world);
+    }
 
-        boolean affects = gPrime.descendants(x).contains(y);
-        Set<String> pathway = affects ? gPrime.mediators(x, y) : Set.of();
-        Double compareDelta = null;
-        String compareNote = null;
-        if (s.compareTo() != null) {
-            double v2 = Double.parseDouble(s.compareTo().value());
-            compareDelta = totalEffect * (xVal - v2);
-            compareNote = "linear-Gaussian: contrast = totalEffect·(v − v₂) = " + compareDelta;
+    private InterventionResult numericIntervene(InterveneStmt s, boolean affects, Set<String> pathway, String world,
+                                                Map<String, Double> doValues, String onModel) {
+        String x = s.intervention().variable(), y = s.returnVar();
+        CypherQuery q = translator.linearGaussianInference(x, y, doValues, onModel);
+        try (Session session = openSession()) {
+            Record row = session.run(q.cypher(), q.params()).single();
+            Double variance = "DISTRIBUTION".equals(s.returnType())
+                ? row.get(ResultColumns.VARIANCES).get(y).asDouble() : null;
+            return StructuralEvaluator.numericResult(s, affects, pathway, world,
+                row.get(ResultColumns.MEANS).get(y).asDouble(), variance,
+                row.get(ResultColumns.TOTAL_EFFECT).asDouble());
         }
-        return new InterventionResult(x, s.intervention().value(), y, s.returnType(),
-            affects, pathway, gPrime.name(), null, compareNote,
-            expectation, variance, totalEffect, compareDelta);
+    }
+
+    /**
+     * The stored graph carries linear-Gaussian parameters: an intercept other than 0, a noise
+     * other than 1, or an active edge weight other than 1 (the plugin's and
+     * {@link CausalModel#isParameterized()}'s definition).
+     */
+    private boolean storedGraphIsParameterized() {
+        try (Session session = openSession()) {
+            return session.run(
+                "RETURN EXISTS { MATCH (v:Variable) WHERE coalesce(v.intercept, 0.0) <> 0.0 OR coalesce(v.noise, 1.0) <> 1.0 } " +
+                "    OR EXISTS { MATCH (:Variable)-[r:CAUSES]->(:Variable) " +
+                "                WHERE coalesce(r.active, true) AND coalesce(r.weight, 1.0) <> 1.0 } AS p")
+                .single().get("p").asBoolean();
+        }
     }
 
     private static Double tryParseDouble(String text) {
@@ -234,17 +230,60 @@ public class Neo4jQueryExecutor implements QueryExecutor {
     }
 
     private QueryResult executeUseModel(UseModelStmt s) {
-        registry.useModel(s.modelName());
+        useWorld(s.modelName());
         return new TextResult("active model: " + s.modelName());
     }
 
     private QueryResult executeReset(ResetStmt s) {
-        registry.reset();
+        useWorld(CypherTranslator.BASE_WORLD);
         return new TextResult("active model: live Neo4j graph");
     }
 
+    private void useWorld(String name) {
+        CypherQuery q = translator.use(name);
+        try (Session session = openSession()) {
+            session.run(q.cypher(), q.params()).consume();
+        }
+        active = name;
+    }
+
+    private QueryResult showModels() {
+        CypherQuery q = translator.models();
+        List<ModelListResult.Entry> entries = new ArrayList<>();
+        String activeName = null;
+        try (Session session = openSession()) {
+            for (Record r : session.run(q.cypher(), q.params()).list()) {
+                String name = r.get(ResultColumns.NAME).asString();
+                boolean isActive = r.get(ResultColumns.ACTIVE).asBoolean();
+                if (isActive) activeName = name;
+                entries.add(new ModelListResult.Entry(name, isActive, !r.get(ResultColumns.BASE).isNull()));
+            }
+        }
+        return new ModelListResult(entries, activeName);
+    }
+
     /**
-     * Load the persisted graph from Neo4j into a {@link CausalModel} — the same
+     * The active world as a DSL-side {@link CausalModel}, for ESTIMATE and COUNTERFACTUAL
+     * (still evaluated DSL-side): the stored graph, with the active world's do-values
+     * replayed when it is a derived world this executor defined.
+     */
+    private CausalModel activeModelDslSide() {
+        CausalModel m = hydrateCurrentGraph();
+        if (CypherTranslator.BASE_WORLD.equals(active)) return m;
+        Map<String, String> values = doValues.get(active);
+        if (values == null) {
+            throw new IllegalStateException("world `" + active + "` was not defined by this session's INTERVENE, "
+                + "so its do-values are unknown; ESTIMATE and COUNTERFACTUAL need them");
+        }
+        for (Map.Entry<String, String> e : values.entrySet()) {
+            m = m.intervene(e.getKey(), e.getValue(), CausalModel.derivedName(m.name(), e.getKey(), e.getValue()));
+        }
+        return m;
+    }
+
+    /**
+     * Load the persisted graph from Neo4j into a {@link CausalModel} (for ESTIMATE and
+     * COUNTERFACTUAL only) — the same
      * two queries {@link #showDag} uses (all {@code :Variable} nodes + active
      * {@code :CAUSES} edges). DSL-side metadata (unit/role/type) is recovered
      * from the registry when present.

@@ -48,7 +48,32 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
 
     private volatile ReachabilityIndex reachability;
 
-    public DefaultCausalGraphRuntime() {}
+    /** True for a {@link #view}: bound to one snapshot, no compile, invalidate or patch. */
+    private final boolean view;
+
+    public DefaultCausalGraphRuntime() {
+        this.view = false;
+    }
+
+    private DefaultCausalGraphRuntime(CompiledCausalGraph g) {
+        this.view = true;
+        this.snapshot = g;
+        this.reachability = new ReachabilityIndex(g);
+    }
+
+    /**
+     * A read-only runtime over {@code g} (a world's snapshot, see {@link WorldRegistry}):
+     * every query method of this class, run against {@code g} instead of the base snapshot.
+     * Cheap: the {@link ReachabilityIndex} reads the snapshot's closures.
+     */
+    public static DefaultCausalGraphRuntime view(CompiledCausalGraph g) {
+        return new DefaultCausalGraphRuntime(g);
+    }
+
+    private void requireWritable() {
+        if (view) throw new UnsupportedOperationException(
+                "a world is read-only: writes go to the stored graph, which is the base");
+    }
 
     // -------------------------------------------------------------------------
     // Lifecycle
@@ -56,6 +81,7 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
 
     @Override
     public synchronized GraphSnapshot compile(GraphCompileOptions options) {
+        requireWritable();
         CompiledCausalGraph g = GraphLoader.load(options);
         install(g);
         g.logStructure();  // adjacency, topo order, layers, closures
@@ -64,14 +90,18 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
 
     /** Publish {@code g} and its index. Package-private so unit tests can skip Neo4j. */
     synchronized void install(CompiledCausalGraph g) {
+        requireWritable();
         snapshot = g;
         reachability = new ReachabilityIndex(g);
+        RuntimeRegistry.baseChanged();
     }
 
     @Override
     public synchronized void invalidate() {
+        requireWritable();
         snapshot = null;
         reachability = null;
+        RuntimeRegistry.baseChanged();
     }
 
     /**
@@ -80,13 +110,13 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
      * {@code -Dcausal.patch.enabled=false} (read per call): then the listener invalidates.
      */
     public synchronized boolean applyChange(ChangeBatch batch) {
+        requireWritable();
         if (snapshot == null || !Boolean.parseBoolean(System.getProperty("causal.patch.enabled", "true"))) return false;
         CompiledCausalGraph next = SnapshotPatcher.apply(snapshot, batch);
         if (next == null) {
             return false;
         }
-        snapshot = next;
-        reachability = new ReachabilityIndex(next);
+        if (next != snapshot) install(next);   // an empty batch returns the same snapshot
         return true;
     }
 

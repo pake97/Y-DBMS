@@ -24,6 +24,12 @@ public final class ProcedureNames {
     public static final String INVALIDATE           = "causal.invalidate";
     public static final String INSPECT_SNAPSHOT     = "causal.inspectSnapshot";
 
+    // Named models (WP4): derived worlds do(X) over the stored graph
+    public static final String INTERVENE            = "causal.intervene";
+    public static final String USE                  = "causal.use";
+    public static final String MODELS               = "causal.models";
+    public static final String DROP                 = "causal.drop";
+
     public static final String PARENTS              = "causal.parents";
     public static final String CHILDREN             = "causal.children";
     public static final String ANCESTORS            = "causal.ancestors";
