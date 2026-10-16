@@ -6,6 +6,7 @@ import com.example.causal.runtime.model.Variable;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
@@ -40,12 +41,21 @@ public final class SnapshotPatcher {
 
     private SnapshotPatcher() {}
 
-    /** Insertions that needed a topological relabel, and nodes moved by them (process-wide, monotone). */
-    static final java.util.concurrent.atomic.AtomicLong RELABELLED = new java.util.concurrent.atomic.AtomicLong();
-    static final java.util.concurrent.atomic.AtomicLong MOVED = new java.util.concurrent.atomic.AtomicLong();
-    /** Removed edges whose cones were recomputed, and batches declined by the threshold. */
-    static final java.util.concurrent.atomic.AtomicLong DELETIONS = new java.util.concurrent.atomic.AtomicLong();
-    static final java.util.concurrent.atomic.AtomicLong FALLBACK_THRESHOLD = new java.util.concurrent.atomic.AtomicLong();
+    // Counters behind PatchStats (process-wide, monotone).
+    static final AtomicLong PATCHES = new AtomicLong();
+    static final AtomicLong RELABELLED = new AtomicLong();
+    static final AtomicLong MOVED = new AtomicLong();
+    static final AtomicLong DELETIONS = new AtomicLong();
+    static final AtomicLong LAST_CONE = new AtomicLong();
+    static final AtomicLong FALLBACK_THRESHOLD = new AtomicLong();
+    static final AtomicLong FALLBACK_INVARIANT = new AtomicLong();
+    static final AtomicLong FALLBACK_NO_CLOSURES = new AtomicLong();
+
+    /** The counters now. */
+    public static PatchStats stats() {
+        return new PatchStats(PATCHES.get(), RELABELLED.get(), MOVED.get(), DELETIONS.get(), LAST_CONE.get(),
+                FALLBACK_THRESHOLD.get(), FALLBACK_INVARIANT.get(), FALLBACK_NO_CLOSURES.get());
+    }
 
     /** {@code -Dcausal.patch.threshold}: fraction of |V| the summed deletion cones may reach; default 0.5. */
     static double threshold() {
@@ -54,13 +64,19 @@ public final class SnapshotPatcher {
 
     /** Returns the patched snapshot, or null when the batch must be applied by a full recompile. */
     public static CompiledCausalGraph apply(CompiledCausalGraph old, ChangeBatch batch) {
-        if (!old.hasClosures()) {
-            return null; // layer-pruned snapshot: nothing to patch incrementally, recompile
-        }
         if (batch.isEmpty()) {
             return old;
         }
-        return patch(old, batch);  // PatchNotApplicable propagates: a broken invariant, not a fallback
+        if (!old.hasClosures()) {
+            FALLBACK_NO_CLOSURES.incrementAndGet();
+            return null; // layer-pruned snapshot (causal.closures.budget): no closures to patch
+        }
+        try {
+            return patch(old, batch);
+        } catch (PatchNotApplicable e) {
+            FALLBACK_INVARIANT.incrementAndGet();
+            throw e;  // a broken beforeCommit invariant, not a fallback: the listener logs it and invalidates
+        }
     }
 
     private static CompiledCausalGraph patch(CompiledCausalGraph old, ChangeBatch batch) {
@@ -356,6 +372,8 @@ public final class SnapshotPatcher {
             for (int w = 0; w < oldLongsPerNode; w++) needsDescendantUpdate[w] |= oldAnc[u][w];
         }
         DELETIONS.addAndGet(removed.size());
+        LAST_CONE.set(BitSet64.cardinality(needsAncestorUpdate) + BitSet64.cardinality(needsDescendantUpdate));
+        PATCHES.incrementAndGet();
 
         // Ancestors (and layers) of flagged rows, in topological order, from parents.
         for (int k = 0; k < live; k++) {

@@ -196,6 +196,20 @@ class IncrementalPatchTest {
     }
 
     @Test
+    void testSnapshotCarriesThePatchCounters() {
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(CHAIN_AND_NOISE);
+        PatchStats before = SnapshotPatcher.stats();
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
+                ChangeBatch.builder().removedEdge("B", "C").addedEdge("D", "A").build());
+        assertNotNull(newGraph);
+        PatchStats after = newGraph.patchStats();
+        assertEquals(1, after.patchesApplied() - before.patchesApplied());
+        assertEquals(1, after.deletionsRecomputed() - before.deletionsRecomputed());
+        assertEquals(1, after.insertionsRelabelled() - before.insertionsRelabelled());
+        assertTrue(after.lastConeSize() >= 4, "at least the deletion cones {C, D} and {A, B}");
+    }
+
+    @Test
     void testBatchAppliedTwice() {
         CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B"));
         ChangeBatch batch = ChangeBatch.builder()

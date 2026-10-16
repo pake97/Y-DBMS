@@ -72,6 +72,8 @@ public final class CompiledCausalGraph implements GraphSnapshot {
     private final long[][] descendantBits;
     /** Neo4j element id of each variable's node by dense index (null if not loaded from Neo4j). */
     private final String[] elementIds;
+    /** {@link SnapshotPatcher} counters as of this snapshot's creation. */
+    private final PatchStats patchStats = SnapshotPatcher.stats();
 
     /**
      * Full constructor including linear-Gaussian SEM edge weights, without Neo4j element ids.
@@ -252,6 +254,11 @@ public final class CompiledCausalGraph implements GraphSnapshot {
      */
     public boolean hasClosures() {
         return ancestorBits != null;
+    }
+
+    /** The patcher's counters as of this snapshot's creation (process-wide; see {@link PatchStats}). */
+    public PatchStats patchStats() {
+        return patchStats;
     }
 
     private static void check(boolean ok, String what) {
@@ -460,6 +467,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         sb.append("\n  edges     : ").append(forwardAdj.values().stream().mapToInt(Set::size).sum());
         sb.append("\n  compiled  : ").append(compiledAt);
         if (patchedFrom != null) sb.append("  (SnapshotPatcher: patched from ").append(patchedFrom).append(')');
+        sb.append("\n  patcher   : ").append(patchStats);
 
         sb.append("\n\n── Topological order (index : id) ──────────────────────────");
         for (int i = 0; i < topoOrder.size(); i++) {

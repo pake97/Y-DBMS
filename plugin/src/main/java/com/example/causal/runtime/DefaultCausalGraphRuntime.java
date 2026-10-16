@@ -76,10 +76,11 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
 
     /**
      * Patch the current snapshot with {@code batch} via {@link SnapshotPatcher}.
-     * Returns false when there is no snapshot or the batch needs a full recompile.
+     * Returns false when there is no snapshot, the batch needs a full recompile, or
+     * {@code -Dcausal.patch.enabled=false} (read per call): then the listener invalidates.
      */
     public synchronized boolean applyChange(ChangeBatch batch) {
-        if (snapshot == null) return false;
+        if (snapshot == null || !Boolean.parseBoolean(System.getProperty("causal.patch.enabled", "true"))) return false;
         CompiledCausalGraph next = SnapshotPatcher.apply(snapshot, batch);
         if (next == null) {
             return false;
