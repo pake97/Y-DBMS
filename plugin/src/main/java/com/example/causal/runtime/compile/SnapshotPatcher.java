@@ -19,7 +19,13 @@ import java.util.stream.Collectors;
  * by a topological relabel: the descendants of {@code v} (and {@code v}) that
  * precede {@code u} move, in their relative order, to just after {@code u}.
  * New variables are first sorted against the batch's own edges (Kahn).
- * Removals still fall back to a full recompile ({@code null} result).
+ * A removed (or deactivated) edge {@code u -> v} recomputes {@code anc} over
+ * {@code coneDown(v) = des[v] | {v}} and {@code des} over {@code coneUp(u) = anc[u] | {u}}
+ * (the old closures, so the cones are a superset of the rows that can change);
+ * all deletion and insertion cones of a batch are recomputed in one sweep. When the
+ * deletion cones, summed, exceed {@code causal.patch.threshold * |V|} the patch
+ * declines ({@code null}): this is its only fallback besides a layer-pruned snapshot.
+ * Variable removals still fall back.
  *
  * <p>A batch that would close a cycle, or names an unknown endpoint, breaks an
  * invariant {@code CausalGraphChangeListener.beforeCommit} guarantees: the patch
@@ -34,14 +40,22 @@ public final class SnapshotPatcher {
     /** Insertions that needed a topological relabel, and nodes moved by them (process-wide, monotone). */
     static final java.util.concurrent.atomic.AtomicLong RELABELLED = new java.util.concurrent.atomic.AtomicLong();
     static final java.util.concurrent.atomic.AtomicLong MOVED = new java.util.concurrent.atomic.AtomicLong();
+    /** Removed edges whose cones were recomputed, and batches declined by the threshold. */
+    static final java.util.concurrent.atomic.AtomicLong DELETIONS = new java.util.concurrent.atomic.AtomicLong();
+    static final java.util.concurrent.atomic.AtomicLong FALLBACK_THRESHOLD = new java.util.concurrent.atomic.AtomicLong();
+
+    /** {@code -Dcausal.patch.threshold}: fraction of |V| the summed deletion cones may reach; default 0.5. */
+    static double threshold() {
+        return Double.parseDouble(System.getProperty("causal.patch.threshold", "0.5"));
+    }
 
     /** Returns the patched snapshot, or null when the batch must be applied by a full recompile. */
     public static CompiledCausalGraph apply(CompiledCausalGraph old, ChangeBatch batch) {
         if (!old.hasClosures()) {
             return null; // layer-pruned snapshot: nothing to patch incrementally, recompile
         }
-        if (!batch.removedVariables().isEmpty() || !batch.removedEdges().isEmpty()) {
-            return null; // non-local changes, fallback to recompile
+        if (!batch.removedVariables().isEmpty()) {
+            return null; // variable removal: WP3 step 3
         }
         if (batch.isEmpty()) {
             return old;
@@ -50,6 +64,29 @@ public final class SnapshotPatcher {
     }
 
     private static CompiledCausalGraph patch(CompiledCausalGraph old, ChangeBatch batch) {
+        // ── Removed edges present in the old snapshot; one removed and re-added in the same
+        // batch is a no-op for the structure. Cones are measured on the old closures.
+        Set<Long> addedPairs = new HashSet<>();
+        for (ChangeBatch.Edge e : batch.addedEdges()) {
+            int u = old.indexOf(e.from()), v = old.indexOf(e.to());
+            if (u >= 0 && v >= 0) addedPairs.add(pair(u, v));
+        }
+        Set<Long> removed = new HashSet<>();
+        long deletionCones = 0;
+        for (ChangeBatch.Edge e : batch.removedEdges()) {
+            int u = old.indexOf(e.from()), v = old.indexOf(e.to());
+            if (u < 0 || v < 0 || !old.childrenOf(e.from()).contains(e.to())) continue; // inactive or never compiled
+            if (addedPairs.contains(pair(u, v)) || !removed.add(pair(u, v))) continue;
+            deletionCones += BitSet64.cardinality(old.descendantBits(v)) + 1
+                    + BitSet64.cardinality(old.ancestorBits(u)) + 1;
+        }
+        if (deletionCones > threshold() * old.size()) {
+            FALLBACK_THRESHOLD.incrementAndGet();
+            long cones = deletionCones;
+            LOG.fine(() -> "patch declined: deletion cones " + cones + " > " + threshold() + " * |V| = " + old.size());
+            return null;
+        }
+
         List<Variable> actualAddedVariables = batch.addedVariables().stream()
                 .filter(v -> old.indexOf(v.id()) < 0)
                 // Note: (a, b) -> b means last-wins. This is arbitrary (createdNodes order isn't specified),
@@ -78,7 +115,7 @@ public final class SnapshotPatcher {
             }
             int u = uBoxed, v = vBoxed;
             if (old.forwardMap().getOrDefault(e.from(), Set.of()).contains(e.to())) continue; // already present
-            if (seen.add(((long) u << 32) | v)) newEdges.add(new int[]{u, v});
+            if (seen.add(pair(u, v))) newEdges.add(new int[]{u, v});
         }
 
         // ── Variables
@@ -135,6 +172,15 @@ public final class SnapshotPatcher {
                 }
             }
         }
+        for (long r : removed) {
+            String from = old.idOf((int) (r >>> 32)), to = old.idOf((int) r);
+            Map<String, Double> inner = newWeights.get(to);
+            if (inner == null || !inner.containsKey(from)) continue;
+            inner = new HashMap<>(inner);
+            inner.remove(from);
+            if (inner.isEmpty()) newWeights.remove(to); else newWeights.put(to, Collections.unmodifiableMap(inner));
+            weightsChanged = true;
+        }
         Map<String, Map<String, Double>> edgeWeights =
                 weightsChanged ? Collections.unmodifiableMap(newWeights) : oldWeights;
 
@@ -170,13 +216,18 @@ public final class SnapshotPatcher {
             addedChildren.get(u).add(v);
             addedParents.get(v).add(u);
         }
+        for (long r : removed) {
+            String from = old.idOf((int) (r >>> 32)), to = old.idOf((int) r);
+            touchedFwd.computeIfAbsent(from, k -> new LinkedHashSet<>(forward.getOrDefault(k, Set.of()))).remove(to);
+            touchedRev.computeIfAbsent(to, k -> new LinkedHashSet<>(reverse.getOrDefault(k, Set.of()))).remove(from);
+        }
         touchedFwd.forEach((k, set) -> forward.put(k, Collections.unmodifiableSet(set)));
         touchedRev.forEach((k, set) -> reverse.put(k, Collections.unmodifiableSet(set)));
 
         int[] fwdOffset = new int[newN + 1];
-        int[] fwdTarget = csr(old, newN, addedChildren, fwdOffset, true);
+        int[] fwdTarget = csr(old, newN, addedChildren, removed, fwdOffset, true);
         int[] revOffset = new int[newN + 1];
-        int[] revTarget = csr(old, newN, addedParents, revOffset, false);
+        int[] revTarget = csr(old, newN, addedParents, removed, revOffset, false);
 
         // ── Order arrays: old topological order, then new nodes in their sorted order; then
         // every added edge against that order is repaired by a relabel.
@@ -252,6 +303,18 @@ public final class SnapshotPatcher {
                 for (int w = 0; w < oldLongsPerNode; w++) needsDescendantUpdate[w] |= oldAnc[u][w];
             }
         }
+
+        // Removed u -> v: anc can shrink on coneDown(v), des on coneUp(u) (old closures, a
+        // superset of the rows that change). The sweeps below recompute deletion and
+        // insertion cones together, from the final parents and children.
+        for (long r : removed) {
+            int u = (int) (r >>> 32), v = (int) r;
+            BitSet64.set(needsAncestorUpdate, v);
+            for (int w = 0; w < oldLongsPerNode; w++) needsAncestorUpdate[w] |= oldDesc[v][w];
+            BitSet64.set(needsDescendantUpdate, u);
+            for (int w = 0; w < oldLongsPerNode; w++) needsDescendantUpdate[w] |= oldAnc[u][w];
+        }
+        DELETIONS.addAndGet(removed.size());
 
         // Ancestors (and layers) of flagged rows, in topological order, from parents.
         for (int k = 0; k < newN; k++) {
@@ -387,14 +450,26 @@ public final class SnapshotPatcher {
         return sorted;
     }
 
-    /** CSR for one direction: each node's old neighbours (old order), then its added ones. */
-    private static int[] csr(CompiledCausalGraph old, int newN, List<List<Integer>> added,
+    private static long pair(int u, int v) {
+        return ((long) u << 32) | (v & 0xffffffffL);
+    }
+
+    /**
+     * CSR for one direction: each node's old neighbours (old order) minus the removed
+     * edges, then its added ones. Rebuilt once per batch.
+     */
+    private static int[] csr(CompiledCausalGraph old, int newN, List<List<Integer>> added, Set<Long> removed,
                              int[] offset, boolean forward) {
         int oldN = old.size();
         int[][] oldRows = new int[newN][];
         int m = 0;
         for (int i = 0; i < newN; i++) {
             oldRows[i] = i < oldN ? (forward ? old.childrenOf(i) : old.parentsOf(i)) : new int[0];
+            if (!removed.isEmpty() && i < oldN) {
+                final int x = i;
+                oldRows[i] = Arrays.stream(oldRows[i])
+                        .filter(j -> !removed.contains(forward ? pair(x, j) : pair(j, x))).toArray();
+            }
             offset[i] = m;
             m += oldRows[i].length + (added.get(i) == null ? 0 : added.get(i).size());
         }

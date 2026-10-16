@@ -122,6 +122,79 @@ class IncrementalPatchTest {
         SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(List.of("A->B", "Y->Z", "X->Y", "B->X")), "chain");
     }
 
+    private static final List<String> CHAIN_AND_NOISE = List.of(
+            "A->B", "B->C", "C->D", "P->Q", "R->S", "T->U", "V->W");
+
+    @Test
+    void testEdgeDeletionRecomputesTheConesOnly() {
+        // Remove B -> C: anc changes on {C, D}, des on {A, B}; every other row is shared.
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(CHAIN_AND_NOISE);
+        long deletions = SnapshotPatcher.DELETIONS.get();
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
+                ChangeBatch.builder().removedEdge("B", "C").build());
+        assertNotNull(newGraph, "cone 4 <= 0.5 * 14");
+        assertEquals(1, SnapshotPatcher.DELETIONS.get() - deletions);
+        List<String> rest = new java.util.ArrayList<>(CHAIN_AND_NOISE);
+        rest.remove("B->C");
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(rest), "-B->C");
+        Set<String> ancCone = Set.of("C", "D"), desCone = Set.of("A", "B");
+        for (int i = 0; i < oldGraph.size(); i++) {
+            String id = oldGraph.idOf(i);
+            if (ancCone.contains(id)) assertNotSame(oldGraph.ancestorBits(i), newGraph.ancestorBits(i), id);
+            else assertSame(oldGraph.ancestorBits(i), newGraph.ancestorBits(i), id);
+            if (desCone.contains(id)) assertNotSame(oldGraph.descendantBits(i), newGraph.descendantBits(i), id);
+            else assertSame(oldGraph.descendantBits(i), newGraph.descendantBits(i), id);
+        }
+        assertEquals(1, newGraph.layer(newGraph.indexOf("D")), "D's layer drops from 3 to 1");
+    }
+
+    @Test
+    void testDeletionAboveTheThresholdFallsBack() {
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B", "B->C"));
+        long fallbacks = SnapshotPatcher.FALLBACK_THRESHOLD.get();
+        assertNull(SnapshotPatcher.apply(oldGraph, ChangeBatch.builder().removedEdge("A", "B").build()),
+                "cone 3 > 0.5 * 3");
+        assertEquals(1, SnapshotPatcher.FALLBACK_THRESHOLD.get() - fallbacks);
+        System.setProperty("causal.patch.threshold", "1.0");
+        try {
+            CompiledCausalGraph g = SnapshotPatcher.apply(oldGraph, ChangeBatch.builder().removedEdge("A", "B").build());
+            assertNotNull(g, "cone 3 <= 1.0 * 3");
+            SnapshotParity.assertEquivalent(g, rebuilt(List.of("A", "B", "C"), List.of("B->C")), "-A->B");
+        } finally {
+            System.clearProperty("causal.patch.threshold");
+        }
+    }
+
+    @Test
+    void testRemoveAndReAddTheSameEdgeIsANoOp() {
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(CHAIN_AND_NOISE);
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
+                ChangeBatch.builder().removedEdge("B", "C").addedEdge("B", "C").build());
+        assertNotNull(newGraph);
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(CHAIN_AND_NOISE), "-B->C +B->C");
+    }
+
+    @Test
+    void testDeletionAndBackwardInsertionInOneBatch() {
+        // Reverse B -> C: remove it and add C -> B in one batch (relabel after the deletion).
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(CHAIN_AND_NOISE);
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
+                ChangeBatch.builder().removedEdge("B", "C").addedEdge("C", "B").build());
+        assertNotNull(newGraph);
+        List<String> edges = new java.util.ArrayList<>(CHAIN_AND_NOISE);
+        edges.set(edges.indexOf("B->C"), "C->B");
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(edges), "reverse B->C");
+    }
+
+    /** A full build over {@code nodes} (in that order) and {@code edges}, isolated nodes allowed. */
+    static CompiledCausalGraph rebuilt(List<String> nodes, List<String> edges) {
+        List<Variable> vars = new java.util.ArrayList<>();
+        for (String id : nodes) vars.add(Variable.from(id, id, true, false, 0.0, 1.0));
+        List<String[]> pairs = new java.util.ArrayList<>();
+        for (String e : edges) pairs.add(e.split("->"));
+        return GraphBuilder.build(vars, pairs, java.util.Map.of());
+    }
+
     @Test
     void testBatchAppliedTwice() {
         CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B"));
