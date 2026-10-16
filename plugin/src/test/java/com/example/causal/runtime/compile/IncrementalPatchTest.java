@@ -132,7 +132,7 @@ class IncrementalPatchTest {
         long deletions = SnapshotPatcher.DELETIONS.get();
         CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
                 ChangeBatch.builder().removedEdge("B", "C").build());
-        assertNotNull(newGraph, "cone 4 <= 0.5 * 14");
+        assertNotNull(newGraph, "cone 4 <= 0.5 * 12");
         assertEquals(1, SnapshotPatcher.DELETIONS.get() - deletions);
         List<String> rest = new java.util.ArrayList<>(CHAIN_AND_NOISE);
         rest.remove("B->C");
@@ -231,14 +231,66 @@ class IncrementalPatchTest {
     }
 
     @Test
-    void testDeactivationFallback() {
-        CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B"));
-        // Removing a node should trigger fallback
-        ChangeBatch batch = ChangeBatch.builder()
-                .removedVariable("A")
-                .build();
-        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph, batch);
-        assertNull(newGraph, "Removing a node should return null (fallback)");
+    void testVariableRemovalFreesItsIndex() {
+        // Remove D (edge C -> D goes with it; cone 1 + 3 <= 0.5 * 12). D's index becomes a hole.
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(CHAIN_AND_NOISE);
+        int d = oldGraph.indexOf("D");
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
+                ChangeBatch.builder().removedVariable("D").build());
+        assertNotNull(newGraph, "a variable removal is patched");
+        assertEquals(12, newGraph.size(), "size() keeps the array length");
+        assertEquals(11, newGraph.liveCount());
+        assertEquals(-1, newGraph.indexOf("D"));
+        assertNull(newGraph.variableAt(d));
+        assertEquals(-1, newGraph.topoPosition(d));
+        assertTrue(BitSet64.isEmpty(newGraph.ancestorBits(d)) && BitSet64.isEmpty(newGraph.descendantBits(d)));
+        assertFalse(newGraph.topoOrder().contains("D"));
+        List<String> nodes = new java.util.ArrayList<>(Graphs.fromEdges(CHAIN_AND_NOISE).topoOrder());
+        nodes.remove("D");
+        List<String> edges = new java.util.ArrayList<>(CHAIN_AND_NOISE);
+        edges.remove("C->D");
+        SnapshotParity.assertEquivalent(newGraph, rebuilt(nodes, edges), "-D");
+        // The path operators skip the hole.
+        com.example.causal.runtime.algorithms.PathAnalyzer pa = new com.example.causal.runtime.algorithms.PathAnalyzer(newGraph);
+        assertFalse(newGraph.toIds(pa.eligibleBits(newGraph.indexOf("A"), newGraph.indexOf("C"))).contains("D"));
+
+        // Re-adding D gives it a fresh index; the hole stays until the next full compile.
+        CompiledCausalGraph readded = SnapshotPatcher.apply(newGraph, ChangeBatch.builder()
+                .addedVariable(Variable.from("D", "D", true, false, 0, 1)).addedEdge("C", "D").build());
+        assertNotNull(readded);
+        assertEquals(13, readded.size());
+        assertEquals(12, readded.indexOf("D"));
+        SnapshotParity.assertEquivalent(readded, Graphs.fromEdges(CHAIN_AND_NOISE), "+D");
+    }
+
+    @Test
+    void testRemoveAndReAddAVariableInOneBatch() {
+        // One transaction deletes D and creates a new D with an edge from A: the new D is a new index.
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(CHAIN_AND_NOISE);
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph, ChangeBatch.builder()
+                .removedVariable("D").removedEdge("C", "D")
+                .addedVariable(Variable.from("D", "D", true, false, 0, 1)).addedEdge("A", "D").build());
+        assertNotNull(newGraph);
+        assertEquals(oldGraph.size(), newGraph.indexOf("D"));
+        List<String> edges = new java.util.ArrayList<>(CHAIN_AND_NOISE);
+        edges.set(edges.indexOf("C->D"), "A->D");
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(edges), "D replaced");
+    }
+
+    @Test
+    void testLatentFlipKeepsTheClosuresAndChangesEligibility() {
+        // U -> T, U -> Y, T -> Y: adjusting for U is possible until U turns latent.
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("U->T", "U->Y", "T->Y", "P->Q", "R->S"));
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph, ChangeBatch.builder()
+                .updatedVariable(Variable.from("U", "U", false, true, 0, 1)).build());
+        assertNotNull(newGraph);
+        for (int i = 0; i < oldGraph.size(); i++) {
+            assertSame(oldGraph.ancestorBits(i), newGraph.ancestorBits(i));
+            assertSame(oldGraph.descendantBits(i), newGraph.descendantBits(i));
+        }
+        int t = newGraph.indexOf("T"), y = newGraph.indexOf("Y");
+        assertTrue(com.example.causal.runtime.algorithms.Adjustment.decide(oldGraph, t, y).identifiable());
+        assertFalse(com.example.causal.runtime.algorithms.Adjustment.decide(newGraph, t, y).identifiable());
     }
 
     private void assertParity(CompiledCausalGraph graph) {

@@ -446,6 +446,6 @@ public class CausalProcedures {
                 .map(VariableRef::id)
                 .sorted()
                 .collect(Collectors.toList());
-        return new SnapshotRecord(snap.size(), varIds, snap.compiledAt().toString());
+        return new SnapshotRecord(varIds.size(), varIds, snap.compiledAt().toString());
     }
 }
