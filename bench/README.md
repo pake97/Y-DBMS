@@ -1,6 +1,6 @@
 # bench: evaluation inputs
 
-Everything the evaluation in `paper/sections/08_evaluation.tex` reads, regenerated
+Everything the evaluation section of the paper (janez87/Causal4j, `sections/08_evaluation.tex`) reads, regenerated
 from fixed seeds. Python only; the Java harness (JMH, baselines) is WP5b.
 
 ```bash
@@ -21,7 +21,7 @@ Every step is idempotent: a second `causal4j-bench all` leaves `git status` clea
 | `covid` | `datasets/covid/{edges.csv, meta.json}` from `dev/seed-dag.cypher` (25 nodes, 78 edges, latent ids in `meta.json`) | Table III, running example, RQ5 |
 | `synth [--only n=N]` | `datasets/synthetic/<model>-n<N>-d<D>-s<S>/{edges.csv, meta.json}`: ER and BA, n ∈ {100, 316, 1000, 3162, 10000}, average degree ∈ {2, 4, 8}, seeds 0–4 (150 DAGs) | Table III summary row, RQ1/RQ4 scaling |
 | `workloads [--only a,b]` | `workloads/<dataset>/{pairs.csv, triples.csv, meta.json}`: 200 `(t, y)` pairs with `y ∈ de(t)`; 50 `(x, y, z)` triples per \|z\| ∈ {0, 1, 3, 10} (capped at n − 2); seed 20261111 | RQ1–RQ4 query workloads, RQ5 |
-| `stats` | `datasets/datasets.csv` and `paper/tables/datasets.tex` (Table III body) | Table III |
+| `stats` | `datasets/datasets.csv` (Table III; `results_to_tex` renders it as `out/<run>/tables/datasets.tex`) | Table III |
 | `reference [--only a,b] [--no-dagitty] [--force]` | `reference/<dataset>/{dsep.json, adjustment.json, meta.json}` (synthetic: `dsep.json.gz`, `adjustment.json.gz`); an existing result is kept while its workload is unchanged (`workload_sha256` in `meta.json`), because timeouts make a recompute machine-dependent | RQ5 oracle; WP2 fixture (`reference/alarm/adjustment.json`, `reference/sachs/adjustment.json`) |
 
 **Committed vs regenerated.** `edges.csv` and `.bif.gz` of bnlearn and synthetic
@@ -78,7 +78,7 @@ Results are never overwritten; both directories are gitignored.
 
 | Paper element | Produced by | Input in the run directory |
 |---|---|---|
-| Table III (datasets) | WP5a `causal4j-bench stats`, copied to `out/<run>/tables/datasets.tex` | – |
+| Table III (datasets) | `results_to_tex` from `datasets/datasets.csv` (WP5a `causal4j-bench stats`) | – |
 | RQ1 tier (a) table `tables/rq1_tier_a.tex` (Table V; descendants only in `rq1_tier_a.csv`) | `scripts/rq1_tier_a.sh`: TierABenchmarks index on/off (in-process, DFS), `ancestorsBits/Count` (closure read, AverageTime ns), ProcedureBenchmarks (CALL causal.* in embedded Neo4j), CypherBenchmarks, GdsBenchmarks | `tier_a/`, `closure_read/`, `procedure/`, `cypher/`, `gds/` (one JSON per dataset), `timeouts.csv` |
 | RQ1 external round-trip | `scripts/rq1_external.sh` (ServeBolt + `causal4j_bench.roundtrip`: pgmpy, dagitty, causal-learn, DoWhy) | `roundtrip.csv` |
 | RQ2 table `tables/rq2.tex`, Fig. `figures/rq2_crossover.pdf` | `scripts/rq2.sh`: CompileBenchmarks both branches; `run.Rq2` heap; latency from TierABenchmarks (closures: the RQ1/RQ4 runs; pruned: `budget=0`) | `compile/`, `rq2.csv`, `rq2_pruned/`, `tier_a/`, `rq4/` |
@@ -93,7 +93,9 @@ Results are never overwritten; both directories are gitignored.
 
 `numbers.tex` defines every macro listed in the paper's `numbers-defaults.tex` (read from
 `--paper-dir`, default `../Causal4j-paper`): the measured value, or that file's `\TODO`
-default. `export_paper.sh` ends with `latexmk` in the paper directory and prints the page count.
+default. Nothing under `bench/` writes outside `bench/out/<run-id>/` (and `bench/results/`);
+`export_paper.sh` copies that directory into the paper checkout, then runs `latexmk` on
+`main.tex` (landscape version), `full_version.tex` and `technical.tex` and prints the three page counts.
 
 **Protocol.** Pure-Java benchmarks: `SampleTime`, 3 forks, 5 × 1 s warm-up, 10 × 1 s
 measurement. Embedded-DBMS baselines: 1 fork, 3 + 5 iterations. Forks get `-Xmx4g`.

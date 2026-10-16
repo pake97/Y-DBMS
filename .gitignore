@@ -4,15 +4,6 @@ target/
 .idea/
 .DS_Store
 mise.local.toml
-# paper build
-paper/*.aux
-paper/*.bbl
-paper/*.blg
-paper/*.log
-paper/*.fls
-paper/*.fdb_latexmk
-paper/*.synctex.gz
-paper/*.out
 # pipeline
 pipeline/.pytest_cache/
 pipeline/**/__pycache__/
@@ -33,3 +24,6 @@ bench/out/
 
 # local drop folder for files coming from Cowork
 _incoming/
+_to_delete/
+# the paper lives in its own repository (janez87/Causal4j)
+paper/

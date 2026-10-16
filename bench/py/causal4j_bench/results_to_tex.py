@@ -21,7 +21,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from . import BENCH, REPO
+from . import BENCH, REPO, stats
 
 TIMEOUT_US = 60e6
 SYSTEMS = {"TierABenchmarks": None, "CypherBenchmarks": "cypher", "GdsBenchmarks": "gds",
@@ -422,7 +422,8 @@ def main(argv=None):
 
     (out / "tables").mkdir(parents=True, exist_ok=True)
     (out / "figures").mkdir(parents=True, exist_ok=True)
-    shutil.copy(REPO / "paper" / "tables" / "datasets.tex", out / "tables" / "datasets.tex")
+    with open(BENCH / "datasets" / "datasets.csv", newline="") as f:
+        (out / "tables" / "datasets.tex").write_text(stats.latex(list(csv.DictReader(f))))
 
     tier_datasets = [d for d in BNLEARN + ["covid"]] + sorted(
         {r["dataset"] for r in tier_rows if r["dataset"] not in BNLEARN and r["dataset"] != "covid"
