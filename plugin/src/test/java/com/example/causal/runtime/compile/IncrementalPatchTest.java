@@ -5,6 +5,7 @@ import com.example.causal.runtime.algorithms.ReachabilityIndex;
 import com.example.causal.runtime.index.BitSet64;
 import com.example.causal.runtime.model.Variable;
 import com.example.causal.testsupport.Graphs;
+import com.example.causal.testsupport.SnapshotParity;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -17,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class IncrementalPatchTest {
 
@@ -63,25 +65,48 @@ class IncrementalPatchTest {
     }
     
     @Test
-    void testTopologicalViolationFallback() {
-        // Initial graph: A -> B -> C
+    void testTopologicalViolationRelabels() {
+        // A -> B, C -> D: D follows A in the order. D -> A is acyclic but backward:
+        // A and its descendant B move after D.
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B", "C->D"));
+        assertTrue(oldGraph.topoIndex("D") > oldGraph.topoIndex("A"));
+        long relabelled = SnapshotPatcher.RELABELLED.get(), moved = SnapshotPatcher.MOVED.get();
+
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph,
+                ChangeBatch.builder().addedEdge("D", "A").build());
+        assertNotNull(newGraph, "an acyclic backward edge is patched, not recompiled");
+        assertEquals(1, SnapshotPatcher.RELABELLED.get() - relabelled);
+        assertEquals(2, SnapshotPatcher.MOVED.get() - moved, "A and B move");
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(List.of("A->B", "C->D", "D->A")), "D->A");
+        assertParity(newGraph);
+    }
+
+    @Test
+    void testCycleThrowsInsteadOfRecompiling() {
+        // C -> A closes A -> B -> C: beforeCommit rejects it, so reaching the patch is a bug.
         CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B", "B->C"));
-        
-        // Try adding C -> A (creates a cycle / backward edge, violates topo sort)
-        ChangeBatch batch = ChangeBatch.builder()
-                .addedEdge("C", "A")
-                .build();
-                
-        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph, batch);
-        assertNull(newGraph, "Patch should return null and fallback for topological violations");
+        assertThrows(SnapshotPatcher.PatchNotApplicable.class,
+                () -> SnapshotPatcher.apply(oldGraph, ChangeBatch.builder().addedEdge("C", "A").build()));
+    }
+
+    @Test
+    void testEdgeOutOfANewVariableRelabels() {
+        // X is new; X -> A puts X before the old source A.
+        CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B", "B->C"));
+        CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph, ChangeBatch.builder()
+                .addedVariable(Variable.from("X", "X", true, false, 0, 1))
+                .addedEdge("X", "A")
+                .build());
+        assertNotNull(newGraph);
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(List.of("A->B", "B->C", "X->A")), "X->A");
     }
 
     @Test
     void testMultipleNodesChainedInBatch() {
         CompiledCausalGraph oldGraph = Graphs.fromEdges(List.of("A->B"));
-        Variable nodeX = Variable.from("X", "X", false, false, 0, 1);
-        Variable nodeY = Variable.from("Y", "Y", false, false, 0, 1);
-        Variable nodeZ = Variable.from("Z", "Z", false, false, 0, 1);
+        Variable nodeX = Variable.from("X", "X", true, false, 0, 1);
+        Variable nodeY = Variable.from("Y", "Y", true, false, 0, 1);
+        Variable nodeZ = Variable.from("Z", "Z", true, false, 0, 1);
         
         ChangeBatch batch = ChangeBatch.builder()
                 .addedVariable(nodeZ)
@@ -92,12 +117,9 @@ class IncrementalPatchTest {
                 .addedEdge("B", "X")
                 .build();
         CompiledCausalGraph newGraph = SnapshotPatcher.apply(oldGraph, batch);
-        // We currently use the cheapest fix: return null and fallback if two new nodes connect
-        assertNull(newGraph, "Expected patch to fallback when multiple new nodes are chained");
-        /* TODO(future): Restore these when proper topological sort is implemented:
-        assertNotNull(newGraph);
+        assertNotNull(newGraph, "new variables are sorted against the batch's edges, no fallback");
         assertParity(newGraph);
-        */
+        SnapshotParity.assertEquivalent(newGraph, Graphs.fromEdges(List.of("A->B", "Y->Z", "X->Y", "B->X")), "chain");
     }
 
     @Test
