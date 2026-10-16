@@ -86,7 +86,21 @@ public final class Graphs {
      * dataset and the dagitty reference use it.
      */
     public static CompiledCausalGraph fromSeedDagWithLatents() {
-        String script = SeedDagSupport.readClasspathScript();
+        return fromSeedScript(SeedDagSupport.readClasspathScript());
+    }
+
+    /** The household-finance policy DAG of {@code dev/seed-policy-dag.cypher} (22 variables, 3 latent). */
+    public static CompiledCausalGraph fromPolicyDag() {
+        try (var in = Graphs.class.getResourceAsStream("/seed-policy-dag.cypher")) {
+            if (in == null) throw new IllegalStateException("seed-policy-dag.cypher not on the test classpath");
+            return fromSeedScript(new String(in.readAllBytes()));
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
+
+    /** A seed script's UNWIND lists: ids, latent flags, edges. */
+    private static CompiledCausalGraph fromSeedScript(String script) {
         Set<String> nodes = new LinkedHashSet<>();
         for (Matcher m = SEED_ID.matcher(script); m.find(); ) nodes.add(m.group(1));
         Set<String> latent = new LinkedHashSet<>();

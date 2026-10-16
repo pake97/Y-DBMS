@@ -2,6 +2,7 @@ package com.example.causal.dsl;
 
 import com.example.causal.dsl.exec.IdentificationResult;
 import com.example.causal.dsl.exec.InterventionResult;
+import com.example.causal.dsl.exec.ModelListResult;
 import com.example.causal.dsl.exec.Neo4jQueryExecutor;
 import com.example.causal.dsl.exec.VariableSetResult;
 import com.example.causal.dsl.model.ModelRegistry;
@@ -55,6 +56,7 @@ class DslPluginE2ETest {
     private Neo4j neo4j;
     private Driver driver;
     private CausalDSL dsl;
+    private ModelRegistry registry;
 
     @BeforeEach
     void setUp() {
@@ -64,7 +66,7 @@ class DslPluginE2ETest {
                 .build();
         driver = GraphDatabase.driver(neo4j.boltURI());
 
-        ModelRegistry registry = new ModelRegistry();
+        registry = new ModelRegistry();
         dsl = new CausalDSL(new Neo4jQueryExecutor(driver, registry), registry);
 
         // DEFINE CAUSAL DAG writes the :Variable/:CAUSES graph and triggers
@@ -158,5 +160,54 @@ class DslPluginE2ETest {
         assertTrue(
                 r.adjustmentSets().stream().anyMatch(s -> s.containsAll(Set.of("Age", "PriorUsage"))),
                 "an adjustment set should contain the confounders; got: " + r.adjustmentSets());
+    }
+
+    // ─── Server-side worlds end to end (WP4) ────────────────────────────────────
+
+    private String baseCompiledAt() {
+        try (var session = driver.session()) {
+            return session.run("CALL causal.inspectSnapshot('base') YIELD compiledAt RETURN compiledAt")
+                    .single().get("compiledAt").asString();
+        }
+    }
+
+    @Test
+    void worldsEndToEndWithNoClientSideGraph() {
+        dsl.executeScript("""
+            DEFINE MODEL Funnel {
+              VARIABLE Ad
+              VARIABLE Visit
+              VARIABLE Buy
+              DAG { Ad -> Visit   Visit -> Buy   Ad -> Buy }
+            }
+            """);
+        String compiledAt = baseCompiledAt();
+        assertEquals(Set.of("Ad"), ((VariableSetResult) dsl.execute("CAUSES OF Visit")).variables());
+
+        InterventionResult r = (InterventionResult) dsl.execute("INTERVENE ON Visit=1 RETURN EFFECT ON Buy");
+        assertTrue(r.affectsTarget());
+        assertEquals(Set.of(), r.pathway(), "Visit -> Buy is direct");
+        assertEquals("neo4j_do_Visit_1", r.derivedModel());
+
+        // structural queries now answer on the derived world, through the procedures
+        assertEquals(Set.of(), ((VariableSetResult) dsl.execute("CAUSES OF Visit")).variables());
+        assertEquals(Set.of("Ad", "Visit"), ((VariableSetResult) dsl.execute("ANCESTORS OF Buy")).variables());
+        assertEquals(Set.of(), ((VariableSetResult) dsl.execute("CONFOUNDERS OF Visit AND Buy")).variables());
+
+        dsl.execute("RESET");
+        assertEquals(Set.of("Ad"), ((VariableSetResult) dsl.execute("CAUSES OF Visit")).variables());
+        assertEquals(Set.of("Ad"), ((VariableSetResult) dsl.execute("CONFOUNDERS OF Visit AND Buy")).variables());
+
+        dsl.execute("USE MODEL neo4j_do_Visit_1");
+        assertEquals(Set.of(), ((VariableSetResult) dsl.execute("CAUSES OF Visit")).variables());
+
+        ModelListResult models = (ModelListResult) dsl.execute("SHOW MODELS");
+        assertEquals(java.util.List.of("base", "neo4j_do_Visit_1"),
+                models.models().stream().map(ModelListResult.Entry::name).toList());
+        assertEquals("neo4j_do_Visit_1", models.activeModel());
+        assertTrue(models.models().get(1).derived());
+
+        assertEquals(compiledAt, baseCompiledAt(), "the base snapshot was never recompiled");
+        assertTrue(registry.allModels().isEmpty(), "no client-side graph: the DSL registry holds no model");
     }
 }

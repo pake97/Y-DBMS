@@ -40,7 +40,11 @@ public final class WorldRegistry {
 
     /** What intervene measured when it computed a derived snapshot. */
     public record Derivation(int removedEdges, int coneSize, int sharedRows, int totalRows,
-                             long millis, boolean fallback) {}
+                             long nanos, boolean fallback) {
+        public long millis() {
+            return nanos / 1_000_000;
+        }
+    }
 
     /** One row of {@link #list()}. {@code intervened} is the resolved set, down to {@value #BASE}. */
     public record Info(String name, String base, List<String> intervened, boolean active,
@@ -176,7 +180,7 @@ public final class WorldRegistry {
         if (c != null && c.base == base) return c;
         long start = System.nanoTime();
         SnapshotPatcher.Surgery s = SnapshotPatcher.cutIncomingEdges(base, intervened);
-        long millis = (System.nanoTime() - start) / 1_000_000;
+        long nanos = System.nanoTime() - start;
         int total = 0, shared = 0;
         CompiledCausalGraph g = s.graph();
         if (g.hasClosures() && base.hasClosures() && !s.fallback()) {
@@ -189,7 +193,7 @@ public final class WorldRegistry {
         } else {
             total = 2 * base.liveCount();
         }
-        c = new Cached(base, g, new Derivation(s.removedEdges(), total - shared, shared, total, millis, s.fallback()));
+        c = new Cached(base, g, new Derivation(s.removedEdges(), total - shared, shared, total, nanos, s.fallback()));
         w.cached = c;
         return c;
     }
