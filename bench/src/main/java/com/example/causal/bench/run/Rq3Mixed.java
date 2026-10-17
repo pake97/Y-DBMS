@@ -23,8 +23,8 @@ import java.util.*;
  * inside the edit's commit) and {@code recompile} ({@code -Dcausal.patch.enabled=false}: the
  * listener invalidates). Whenever an edit leaves no snapshot (always under {@code recompile}; under
  * {@code patch} when the patch declines, e.g. deletion cones over {@code causal.patch.threshold}),
- * the next query first runs {@code CALL causal.compile()}, charged to that query, and the run
- * counts it in {@code recompiles}. Query latency is client-side wall time; the edit transactions are
+ * the next query compiles it on demand inside its own procedure call (the plugin's lazy
+ * recompile), so that query pays the compile; the run counts these in {@code recompiles}. Query latency is client-side wall time; the edit transactions are
  * timed separately. Policy (iii), external re-export, is composed in results_to_tex from the
  * Phase 1 pgmpy round trip.
  *
@@ -82,8 +82,7 @@ public final class Rq3Mixed {
             Workloads.Pair p = pairs.get(rnd.nextInt(pairs.size()));
             String op = OPS[rnd.nextInt(OPS.length)];
             long s = System.nanoTime();
-            if (stale) {
-                neo.run("CALL causal.compile()", Map.of());
+            if (stale) {  // the procedure below compiles first
                 stale = false;
                 if (q >= 0) recompiles++;
             }
