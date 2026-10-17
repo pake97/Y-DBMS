@@ -104,11 +104,9 @@ class CausalDSLTest {
         IdentificationResult r = (IdentificationResult)
             dsl.execute("IDENTIFY EFFECT OF Treatment ON Retention30 RETURN ADJUSTMENT SETS");
         assertTrue(r.identifiable());
-        assertEquals("backdoor adjustment", r.method());
-        assertFalse(r.adjustmentSets().isEmpty());
-        Set<String> adjustSet = r.adjustmentSets().get(0);
-        assertTrue(adjustSet.containsAll(Set.of("Age", "PriorUsage")),
-            "Expected Age and PriorUsage in adjustment set, got: " + adjustSet);
+        assertEquals("identifiable by adjustment (generalized criterion)", r.method());
+        assertEquals(java.util.List.of(Set.of("Age", "PriorUsage")), r.adjustmentSets(),
+            "the one minimal set, as the Neo4j backend gives");
     }
 
     @Test
@@ -119,7 +117,8 @@ class CausalDSLTest {
         IdentificationResult r = (IdentificationResult)
             clean.execute("IDENTIFY EFFECT OF X ON Y");
         assertTrue(r.identifiable());
-        assertTrue(r.method().contains("no backdoor"));
+        assertEquals("identifiable by adjustment (generalized criterion)", r.method());
+        assertEquals(java.util.List.of(Set.of()), r.adjustmentSets(), "the empty set is the minimal set");
     }
 
     // ─── Block form definition ────────────────────────────────────────────────

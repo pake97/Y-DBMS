@@ -313,6 +313,40 @@ public class IncrementalListenerCypherTest {
     }
 
     @Test
+    void testReadAfterADeclinedPatchCompilesOnDemand() {
+        growToSeven();
+        System.setProperty("causal.patch.threshold", "0.1");  // B -> C: cone {C} u {A, B} = 3 > 0.1 * 7
+        try {
+            PatchStats before = SnapshotPatcher.stats();
+            run("MATCH (:Variable {id: 'B'})-[r:CAUSES]->(:Variable {id: 'C'}) DELETE r");
+            assertNull(runtime.currentSnapshot(), "the threshold fallback invalidates");
+            assertEquals(1, SnapshotPatcher.stats().fallbacksThreshold() - before.fallbacksThreshold());
+        } finally {
+            System.clearProperty("causal.patch.threshold");
+        }
+        // No causal.compile(): the read procedure compiles with its own transaction, then answers.
+        assertEquals(Set.of(), ancestorIds("C"));
+        assertNotNull(runtime.currentSnapshot());
+        assertEquals(Set.of("A"), ancestorIds("B"));
+    }
+
+    @Test
+    void testFunctionAfterInvalidateCompilesOnDemand() {
+        run("CALL causal.invalidate()");
+        try (Transaction tx = db.beginTx()) {
+            assertEquals(true, tx.execute("MATCH (a:Variable {id: 'A'}), (b:Variable {id: 'B'}) "
+                    + "RETURN causal.hasDirectedPath(a, b) AS r").next().get("r"));
+        }
+    }
+
+    private Set<String> ancestorIds(String id) {
+        try (Transaction tx = db.beginTx()) {
+            return Set.copyOf(tx.execute("MATCH (v:Variable {id: $id}) CALL causal.ancestorIds([v]) YIELD id "
+                    + "RETURN id", Map.of("id", id)).<String>columnAs("id").stream().toList());
+        }
+    }
+
+    @Test
     void testInspectSnapshotShowsThePatchCounters() {
         growToSeven();
         PatchStats before = SnapshotPatcher.stats();

@@ -91,7 +91,9 @@ canonical key used by `VariableRef`.
 - Procedure annotations (`@Procedure`, `@UserFunction`, `@Context`, `@Name`) come
   from the `org.neo4j:neo4j` provided dependency — no separate annotation JAR needed.
 - `@Context Transaction tx` is injected by Neo4j per-call; pass it to
-  `GraphCompileOptions` for `causal.compile()` only. Other procedures use the cached snapshot.
+  `GraphCompileOptions` for `causal.compile()`. Other procedures and functions use the cached
+  snapshot, and compile it with their own transaction when there is none (after an
+  invalidation, including the listener's fallback when a patch declines).
 
 ## Structural logging (Student A)
 

@@ -47,7 +47,7 @@ public class CausalProcedures {
     @Procedure(name = ProcedureNames.COMPILE, mode = Mode.READ)
     @Description(
         "Compile the causal graph from Neo4j (:Variable nodes, :CAUSES relationships) " +
-        "into an in-memory snapshot. Must be called before any structural query procedure. " +
+        "into an in-memory snapshot. Read procedures compile on demand when there is no snapshot. " +
         "Safe to call again after graph mutations — replaces the previous snapshot atomically."
     )
     public Stream<SnapshotRecord> compile() {
@@ -63,7 +63,7 @@ public class CausalProcedures {
     @Procedure(name = ProcedureNames.INVALIDATE, mode = Mode.READ)
     @Description(
         "Discard the current compiled snapshot. " +
-        "The next call to causal.compile() will re-read the graph from Neo4j."
+        "The next read procedure (or causal.compile()) re-reads the graph from Neo4j."
     )
     public Stream<SnapshotRecord> invalidate() {
         RuntimeRegistry.getInstance().invalidate();
@@ -375,7 +375,7 @@ public class CausalProcedures {
             @Name(value = "from", defaultValue = "") String from
     ) {
         WorldRegistry worlds = RuntimeRegistry.worlds();
-        CausalGraphRuntime source = worlds.runtime(from);
+        CausalGraphRuntime source = runtime(from);
         Set<VariableRef> vars = new LinkedHashSet<>();
         for (Node v : variables == null ? List.<Node>of() : variables) {
             vars.add(ProcedureVariables.requireResolved(source, v, "variable"));
@@ -498,8 +498,23 @@ public class CausalProcedures {
      * The runtime that answers on {@code model}: blank is the active world, {@code base} the
      * stored graph's runtime, any other name a derived world (unknown names fail).
      */
-    private static CausalGraphRuntime runtime(String model) {
+    private CausalGraphRuntime runtime(String model) {
+        ensureCompiled(tx);
         return RuntimeRegistry.worlds().runtime(model);
+    }
+
+    /**
+     * Compiles the base snapshot with the caller's transaction when there is none (after
+     * {@code causal.invalidate()}, or the listener's fallback when a patch declines), exactly as
+     * {@code causal.compile()} does. Every read procedure and function calls it before answering,
+     * so a reader never sees "No compiled snapshot"; derived worlds are rebuilt from the base.
+     */
+    static void ensureCompiled(Transaction tx) {
+        CausalGraphRuntime base = RuntimeRegistry.getInstance();
+        if (base.currentSnapshot() != null) return;
+        synchronized (base) {
+            if (base.currentSnapshot() == null) base.compile(new GraphCompileOptions(tx));
+        }
     }
 
     /** The runtime's compiled snapshot, for fetching result nodes by element id (null if none). */
