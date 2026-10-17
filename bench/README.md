@@ -95,7 +95,7 @@ Results are never overwritten; both directories are gitignored.
 | decide vs enumeration table `tables/rq1_enumeration.tex` (by k = size of the smallest backdoor set the enumeration finds: 0, 1, 2, ≥ 3, none / censored) | `TierBCBenchmarks.decideReference` setup: per-pair warmed medians of the enumeration and `decide` | `legacy_pairs.csv` |
 | `\speedupDsepMasked` | median over bnlearn + covid × {separated, connected} of unmasked / masked `dsep` median | `tier_bc/` |
 | `\speedupDecideVsEnumeration`, `\numPairsEnumerationCensored`, `\numPairsEmptySetSuffices` | over bnlearn + covid: median enumeration / `decide` ratio over the finished pairs with k ≥ 2; pairs censored at 60 s; pairs with k = 0 | `legacy_pairs.csv` |
-| RQ4 Fig. `figures/rq4_latency.pdf` (2×2: ancestors, reaches, masked d-separation on connected triples, decide) | `scripts/rq4.sh`: TierABenchmarks index=on and TierBCBenchmarks `dsep`/`decide` over the synthetic grid, + RQ1 baselines at seed 0 | `rq4/`, `rq4_bc/`, `tier_bc/` |
+| RQ4 Fig. `figures/rq4_latency.pdf` (2×2: ancestors, reaches, masked d-separation on connected triples, decide) | `scripts/rq4.sh`: TierABenchmarks index=on and TierBCBenchmarks `dsep`/`decide` over the synthetic grid, one seed per (model, \|V\|, d̄) (seed 0, 30 graphs), + RQ1 baselines | `rq4/`, `rq4_bc/`, `tier_bc/` |
 | RQ3 table `tables/rq3.tex`, Fig. `figures/rq3_incremental.pdf` | `scripts/rq3.sh`: MaintenanceBenchmarks `patch` vs `recompile` per edit type (insert, delete, `active` flip, `latent` flip, add / remove variable) and batch size {1, 10, 100, 1000} (a size runs where the DAG has ≥ 4× as many edges) on bnlearn, covid, policy, ER/BA n ∈ {10³, 10⁴}; `run.Rq3Mixed` (embedded Neo4j with the listener, one `active` flip every k ∈ {1, 10, 100} queries, policies patch / recompile); policy (iii) composed from the Phase 1 pgmpy round trip | `rq3/b<batch>/`, `rq3_edits.csv` (cones, fallbacks), `rq3_mixed.csv`, `roundtrip/` |
 | `\patchVsRecompileInsert`, `\patchVsRecompileDelete` | median over bnlearn + covid of patch / recompile at batch size 1, as a percentage | `rq3/b1/` |
 | `\fallbackThreshold` | smallest swept `causal.patch.threshold` (|V|/8, /4, /2, |V|) at which the median patch / recompile ratio on the delete stream (batch 10) reaches 1 | `rq3_threshold/` |
@@ -109,7 +109,7 @@ warning. Outside `--quick`, `results_to_tex` exits non-zero if any macro is stil
 `export_paper.sh` copies that directory into the paper checkout, then runs `latexmk` on
 `main.tex` (landscape version), `full_version.tex` and `technical.tex` and prints the three page counts.
 
-**Protocol.** Pure-Java benchmarks: `SampleTime`, 3 forks, 5 × 1 s warm-up, 10 × 1 s
+**Protocol.** Pure-Java benchmarks: `SampleTime`, 2 forks (3 in the Phase 1 run), 5 × 1 s warm-up, 10 × 1 s
 measurement. Embedded-DBMS baselines: 1 fork, 3 + 5 iterations. Forks get `-Xmx4g`.
 Medians and p99 come from the JMH sample histograms. Cypher and GDS queries run in a
 transaction with a 60 s timeout; a timed-out query goes to `timeouts.csv`, and after
@@ -124,9 +124,36 @@ The run was resumed once after the round-trip hung inside DoWhy (now cut by a pe
 timeout), so its `wall_time.txt` covers only the resumed part. Do not use the machine
 for other work during a run: timings are single-machine and noise-sensitive.
 
-**Phase 2 estimate** (same machine, not yet measured end to end): tiers (b)/(c) about 3.5 h,
-the July enumeration about 1 h, the balanced round trips 0.5 h, the RQ4 tier (b)/(c) sweep
-(150 graphs × 2 benchmarks × 3 forks) 4.5 h, RQ3 about 9 h (patch vs recompile 7 h, threshold
-sweep 2 h, mixed workload under 1 h). With Phase 1 (about 48 h) and RQ5 reused from
-`rq5-20261016T092241Z-2db519e` (6 h 46 min when computed; `--recompute-rq5` adds it), a full
-`run_all.sh` is about **70 h**. Replace this paragraph with the measured `wall_time.txt`.
+**Timed synthetic graphs.** Timing uses one seed per (model, |V|, d̄): seed 0, 30 of the 150
+synthetic DAGs (tier (a), tiers (b)/(c), RQ2, RQ4, RQ3). Correctness (RQ5) covers every synthetic
+DAG with a reference (n ≤ 1000, 90 graphs) and the WP2 parity tests cover the rest. Tables and the
+RQ4 figure state this in their captions.
+
+**Reused results.** Steps that run no plugin code are copied from earlier runs instead of being
+measured again (`scripts/reuse.sh`, provenance in `reused.txt` of the run):
+`REUSE_EXTERNAL=<run>` supplies Cypher, GDS and the external round trip (export, build and query
+for pgmpy, dagitty, causal-learn, DoWhy); datasets the source run lacks (policy) are measured.
+`REUSE_RQ5=<run>` supplies RQ5, which does not depend on timing; `--recompute-rq5` ignores it.
+
+**Estimated wall time of the reduced run** (2 forks; calibrated on Phase 1's RQ4, about 36 s per
+fork on the synthetic grid, and on the RQ3 smoke run, about 3 s per fork on the real DAGs; not
+yet measured end to end):
+
+| Group | Estimate |
+|---|---:|
+| tier (a) in-process, index and DFS | 3.6 h |
+| closure read | 0.7 h |
+| procedure benchmarks (1 fork) | 2.0 h |
+| RQ2 build, heap, pruned latency | 3.1 h |
+| tiers (b)/(c) | 3.3 h |
+| July enumeration (60 s cap) | 0.8 h |
+| balanced round trips | 0.5 h |
+| RQ4 grid, seed 0 | 4.2 h |
+| RQ3 patch vs recompile | 4.5 h |
+| RQ3 threshold sweep | 1.3 h |
+| RQ3 mixed workload | 0.9 h |
+| Cypher, GDS, round trip (reused; policy measured) | 0.1 h |
+| RQ5 (reused) | 0 |
+| **total** | **about 25 h** |
+
+With 3 forks the same run is about 36 h. Replace this table with the measured `wall_time.txt`.

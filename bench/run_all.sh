@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
 # Every Section VIII measurement (phases 5b-1 and 5b-2), then the LaTeX/figure export.
-#   usage: [BASE_RUN=<id>] [RUN_ID=<id>] bench/run_all.sh [--recompute-rq5]
-# RQ5 does not depend on timing: with BASE_RUN=<a run that has rq5/> it is reused, not recomputed
-# (results_to_tex merges the runs); --recompute-rq5 measures it again (the artifact run).
-# Resume an interrupted run with RUN_ID=<id>. Needs the dataset edge lists, which are gitignored:
-# run `causal4j-bench fetch` and `causal4j-bench synth` first (see bench/README.md).
+#   usage: [REUSE_EXTERNAL=<run-id>] [REUSE_RQ5=<run-id>] [RUN_ID=<id>] bench/run_all.sh [--recompute-rq5]
+# Steps that run no plugin code are copied from earlier runs instead of re-measured
+# (scripts/reuse.sh; provenance in reused.txt): REUSE_EXTERNAL supplies the Cypher, GDS and external
+# round-trip results (datasets it lacks are measured), REUSE_RQ5 the RQ5 correctness run, which
+# does not depend on timing. --recompute-rq5 ignores REUSE_RQ5 (the artifact run). Without either
+# variable everything is measured. Resume an interrupted run with RUN_ID=<id>. Needs the dataset
+# edge lists, which are gitignored: run `causal4j-bench fetch` and `causal4j-bench synth` first.
+RECOMPUTE_RQ5=
 case "${1:-}" in
-  --recompute-rq5) export FORCE_STEPS=${FORCE_STEPS:+$FORCE_STEPS,}rq5 ;;
+  --recompute-rq5) RECOMPUTE_RQ5=1 ;;
   "") ;;
   *) echo "usage: bench/run_all.sh [--recompute-rq5]" >&2; exit 2 ;;
 esac
 source "$(dirname "$0")/scripts/common.sh"
-for f in bench/datasets/bnlearn/munin/edges.csv bench/datasets/synthetic/ba-n10000-d8-s4/edges.csv; do
+for f in bench/datasets/bnlearn/munin/edges.csv bench/datasets/synthetic/ba-n10000-d8-s0/edges.csv; do
   [ -f "$f" ] || { echo "$f missing: run causal4j-bench fetch && causal4j-bench synth first" >&2; exit 1; }
 done
 start=$(date +%s)
+if [ -n "${REUSE_EXTERNAL:-}" ]; then bench/scripts/reuse.sh "$REUSE_EXTERNAL" cypher gds roundtrip; fi
+if [ -n "${REUSE_RQ5:-}" ] && [ -z "$RECOMPUTE_RQ5" ]; then bench/scripts/reuse.sh "$REUSE_RQ5" rq5; fi
 bench/scripts/rq1_tier_a.sh
 bench/scripts/rq1_tier_bc.sh
 bench/scripts/rq2.sh

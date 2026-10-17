@@ -42,7 +42,7 @@ import java.util.concurrent.TimeUnit;
  */
 @BenchmarkMode(Mode.SampleTime)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
-@Fork(value = 3, jvmArgsAppend = {"-Xmx4g"})
+@Fork(value = 2, jvmArgsAppend = {"-Xmx4g"})
 @Warmup(iterations = 5, time = 1)
 @Measurement(iterations = 10, time = 1)
 public class TierBCBenchmarks {
