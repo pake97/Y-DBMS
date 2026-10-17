@@ -34,7 +34,8 @@ import java.util.concurrent.TimeUnit;
  *       under the 60 s cap; a timed-out pair is censored ({@link Censor}: after 3 timeouts the rest
  *       of the dataset's pairs are skipped and recorded as censored) and only finished pairs are
  *       sampled. The setup then warms both for ~1 s and writes per-pair legacy and {@code decide} medians to
- *       {@code legacy_pairs.csv} next to {@code -Dbench.timeouts}, for
+ *       {@code legacy_pairs.csv} next to {@code -Dbench.timeouts}, with {@code k}, the size of the
+ *       smallest set the legacy found ({@code none}: no backdoor set), for the stratified table and
  *       {@code \speedupDecideVsEnumeration} (a median over pairs, which the rotating JMH
  *       histogram cannot give).</li>
  * </ul>
@@ -141,17 +142,20 @@ public class TierBCBenchmarks {
             Censor censor = new Censor("legacy", d.dataset);
             StringBuilder rows = new StringBuilder();
             List<Integer> done = new ArrayList<>();
+            Map<Integer, String> k = new HashMap<>();
             for (int i = 0; i < d.pairs.size(); i++) {  // pass 1: which pairs finish under the cap
                 Workloads.Pair p = d.pairs.get(i);
                 String args = p.t() + ";" + p.y();
                 boolean skipped = censor.censored("decide");
-                if (skipped || !finishes(p, System.nanoTime() + CAP_NANOS)) {
+                List<Set<String>> sets = skipped ? null : run(p, System.nanoTime() + CAP_NANOS);
+                if (sets == null) {
                     censor.record("decide", args, skipped ? 0 : QueryTimeout.TIMEOUT);
-                    rows.append(String.join(",", d.dataset, p.t(), p.y(), "", "", "true")).append('\n');
+                    rows.append(String.join(",", d.dataset, p.t(), p.y(), "", "", "", "true")).append('\n');
                     continue;
                 }
                 finished.add(p);
                 done.add(i);
+                k.put(i, sets.isEmpty() ? "none" : String.valueOf(sets.get(0).size()));
             }
             // pass 2: warm both for ~1 s each; pass 3: per-pair medians
             for (long end = System.nanoTime() + 1_000_000_000L; !done.isEmpty() && System.nanoTime() < end; ) {
@@ -168,17 +172,18 @@ public class TierBCBenchmarks {
                 int ti = d.t[i], yi = d.y[i];
                 double legacyUs = medianUs(() -> legacy.candidateAdjustmentSets(p.t(), p.y(), Long.MAX_VALUE));
                 double decideUs = medianUs(() -> Adjustment.decide(d.g, ti, yi));
-                rows.append(String.format(Locale.ROOT, "%s,%s,%s,%.4f,%.4f,false%n", d.dataset, p.t(), p.y(), legacyUs, decideUs));
+                rows.append(String.format(Locale.ROOT, "%s,%s,%s,%s,%.4f,%.4f,false%n", d.dataset, p.t(), p.y(), k.get(i),
+                        legacyUs, decideUs));
             }
             writePairs(rows.toString());
         }
 
-        private boolean finishes(Workloads.Pair p, long deadline) {
+        /** The legacy answer, or null if it hit the cap. */
+        private List<Set<String>> run(Workloads.Pair p, long deadline) {
             try {
-                legacy.candidateAdjustmentSets(p.t(), p.y(), deadline);
-                return true;
+                return legacy.candidateAdjustmentSets(p.t(), p.y(), deadline);
             } catch (LegacyEnumeration.Timeout | OutOfMemoryError e) {  // the July code materializes every combination
-                return false;
+                return null;
             }
         }
 
@@ -200,7 +205,7 @@ public class TierBCBenchmarks {
             if (timeouts == null || rows.isEmpty()) return;
             try {
                 Path p = Path.of(timeouts).resolveSibling("legacy_pairs.csv");
-                if (!Files.exists(p)) Files.writeString(p, "dataset,t,y,legacy_us,decide_us,censored\n");
+                if (!Files.exists(p)) Files.writeString(p, "dataset,t,y,k,legacy_us,decide_us,censored\n");
                 Files.writeString(p, rows, StandardOpenOption.APPEND);
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
