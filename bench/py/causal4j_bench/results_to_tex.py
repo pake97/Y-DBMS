@@ -895,18 +895,21 @@ def main(argv=None):
     defaults = paper_defaults(Path(args.paper_dir), args.quick)
     measured = {k: v for k, v in values.items() if not v.startswith("\\TODO")}
     unknown = sorted(set(values) - set(defaults)) if defaults else []
-    if unknown:
-        print(f"warning: computed macros the paper does not declare: {', '.join(unknown)}", file=sys.stderr)
-    final = {k: measured.get(k, d) for k, d in defaults.items()} if defaults else values
-    missing = [k for k in defaults if k not in final]
-    if missing:
-        raise SystemExit(f"numbers.tex would miss macros: {', '.join(missing)}")
+    if unknown:  # emitted anyway (\providecommand), so the paper can add them to numbers-defaults.tex
+        print(f"warning: macros the paper's numbers-defaults.tex does not declare yet: {', '.join(unknown)}",
+              file=sys.stderr)
+    final = {k: measured.get(k, d) for k, d in defaults.items()} if defaults else dict(values)
+    final.update({k: values[k] for k in unknown})
     values = final
     (out / "numbers.tex").write_text(numbers(values))
     print(f"wrote {out}")
     for k, v in values.items():
         if not v.startswith("\\TODO"):
             print(f"  \\{k} = {v}")
+    todo = [k for k, v in values.items() if v.startswith("\\TODO")]
+    if todo and not args.quick:
+        raise SystemExit(f"numbers.tex still has \\TODO for: {', '.join(todo)} (run the steps that measure them)")
+
 
 if __name__ == "__main__":
     main()

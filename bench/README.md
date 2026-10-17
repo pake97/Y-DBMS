@@ -67,9 +67,9 @@ build it if it is missing. Python steps need the conda env above plus
 `pip install -e 'bench/py[r,plots,external]'`.
 
 ```bash
-bench/run_all.sh                      # everything, then results_to_tex; prints the run id
+bench/run_all.sh [--recompute-rq5]   # everything, then results_to_tex; prints the run id
 RUN_ID=<id> bench/run_all.sh          # resume an interrupted run (finished steps are skipped)
-BASE_RUN=<id> bench/run_all.sh        # new run that reuses every output <id> already has; results_to_tex merges them
+BASE_RUN=<id> bench/run_all.sh        # new run that reuses every output <id> already has (e.g. rq5/); results_to_tex merges them
 bench/run_quick.sh                    # CI subset, < 5 min
 bench/export_paper.sh <run-id>        # copy tables/figures/numbers.tex into ../Causal4j-paper (never commits)
 ```
@@ -91,11 +91,21 @@ Results are never overwritten; both directories are gitignored.
 | `\buildMsMunin` | CompileBenchmarks median, munin, closures | `compile/` |
 | `\closureKbMunin` | analytic `2·n·⌈n/64⌉·8` B for munin | – |
 | `\crossoverNodes` (256 MB), `\crossoverNodesSixtyFourMB`, `\crossoverNodesOneGB`, `\crossoverLatencyRatio` | `rq2.csv`: closure heap extrapolated with the measured heap/closure ratio of the largest graph; pruned/closure `reaches` ratio at that graph | `rq2.csv` |
-| RQ3, RQ5, tiers (b)/(c) macros | phase 5b-2 | – |
+| RQ1 tiers (b)/(c) table `tables/rq1_tier_bc.tex` | `scripts/rq1_tier_bc.sh`: TierBCBenchmarks `dsep` (masked / unmasked, by verdict), `dsepReference` (July Bayes-Ball), `decide`, `findMinimal`, `listMinimal100` on the tier (a) datasets; `decideReference` (July enumeration, 60 s cap) on bnlearn, covid, policy; `roundtrip --balanced` (pgmpy, dagitty, DoWhy) | `tier_bc/`, `legacy/`, `roundtrip_bc/`, `timeouts.csv` |
+| decide vs enumeration table `tables/rq1_enumeration.tex` (by k = size of the smallest backdoor set the enumeration finds: 0, 1, 2, ≥ 3, none / censored) | `TierBCBenchmarks.decideReference` setup: per-pair warmed medians of the enumeration and `decide` | `legacy_pairs.csv` |
+| `\speedupDsepMasked` | median over bnlearn + covid × {separated, connected} of unmasked / masked `dsep` median | `tier_bc/` |
+| `\speedupDecideVsEnumeration`, `\numPairsEnumerationCensored`, `\numPairsEmptySetSuffices` | over bnlearn + covid: median enumeration / `decide` ratio over the finished pairs with k ≥ 2; pairs censored at 60 s; pairs with k = 0 | `legacy_pairs.csv` |
+| RQ4 Fig. `figures/rq4_latency.pdf` (2×2: ancestors, reaches, masked d-separation on connected triples, decide) | `scripts/rq4.sh`: TierABenchmarks index=on and TierBCBenchmarks `dsep`/`decide` over the synthetic grid, + RQ1 baselines at seed 0 | `rq4/`, `rq4_bc/`, `tier_bc/` |
+| RQ3 table `tables/rq3.tex`, Fig. `figures/rq3_incremental.pdf` | `scripts/rq3.sh`: MaintenanceBenchmarks `patch` vs `recompile` per edit type (insert, delete, `active` flip, `latent` flip, add / remove variable) and batch size {1, 10, 100, 1000} (a size runs where the DAG has ≥ 4× as many edges) on bnlearn, covid, policy, ER/BA n ∈ {10³, 10⁴}; `run.Rq3Mixed` (embedded Neo4j with the listener, one `active` flip every k ∈ {1, 10, 100} queries, policies patch / recompile); policy (iii) composed from the Phase 1 pgmpy round trip | `rq3/b<batch>/`, `rq3_edits.csv` (cones, fallbacks), `rq3_mixed.csv`, `roundtrip/` |
+| `\patchVsRecompileInsert`, `\patchVsRecompileDelete` | median over bnlearn + covid of patch / recompile at batch size 1, as a percentage | `rq3/b1/` |
+| `\fallbackThreshold` | smallest swept `causal.patch.threshold` (|V|/8, /4, /2, |V|) at which the median patch / recompile ratio on the delete stream (batch 10) reaches 1 | `rq3_threshold/` |
+| `\mixedWorkloadSpeedup` | median over datasets of query p99 under recompile / under patch, k = 10 | `rq3_mixed.csv` |
+| RQ5 table `tables/rq5.tex`; `\numDsepQueries`, `\numDsepAgree`, `\numPairs`, `\numCanonicalAgree`, `\numPairsNotIdentifiable`, `\numFamiliesCompared`, `\numFamiliesEqual`, `\numFamiliesChecked` | `scripts/rq5.sh`: `run.Rq5Runner` (in process, against `reference/`) then `causal4j-bench reference --validate` (dagitty `isAdjustmentSet` + removal-minimality for pairs whose reference family exceeded WP5a's limits); disagreements in `rq5_disagreements.csv` | `rq5/` |
 
 `numbers.tex` defines every macro listed in the paper's `numbers-defaults.tex` (read from
 `--paper-dir`, default `../Causal4j-paper`): the measured value, or that file's `\TODO`
-default. Nothing under `bench/` writes outside `bench/out/<run-id>/` (and `bench/results/`);
+default; macros the run computes that the paper does not declare yet are emitted too, with a
+warning. Outside `--quick`, `results_to_tex` exits non-zero if any macro is still `\TODO`. Nothing under `bench/` writes outside `bench/out/<run-id>/` (and `bench/results/`);
 `export_paper.sh` copies that directory into the paper checkout, then runs `latexmk` on
 `main.tex` (landscape version), `full_version.tex` and `technical.tex` and prints the three page counts.
 
@@ -113,3 +123,10 @@ forks at `-Xmx4g`): about **48 h** of measurement. RQ1 tier (a) + Cypher + GDS +
 The run was resumed once after the round-trip hung inside DoWhy (now cut by a per-query
 timeout), so its `wall_time.txt` covers only the resumed part. Do not use the machine
 for other work during a run: timings are single-machine and noise-sensitive.
+
+**Phase 2 estimate** (same machine, not yet measured end to end): tiers (b)/(c) about 3.5 h,
+the July enumeration about 1 h, the balanced round trips 0.5 h, the RQ4 tier (b)/(c) sweep
+(150 graphs × 2 benchmarks × 3 forks) 4.5 h, RQ3 about 9 h (patch vs recompile 7 h, threshold
+sweep 2 h, mixed workload under 1 h). With Phase 1 (about 48 h) and RQ5 reused from
+`rq5-20261016T092241Z-2db519e` (6 h 46 min when computed; `--recompute-rq5` adds it), a full
+`run_all.sh` is about **70 h**. Replace this paragraph with the measured `wall_time.txt`.
