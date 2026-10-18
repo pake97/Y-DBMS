@@ -9,7 +9,10 @@ for ds in ${DS//,/ }; do
   out="$RUN/roundtrip/$ds.csv"
   if have "roundtrip/$ds.csv"; then echo "skip roundtrip/$ds.csv (exists)"; continue; fi
   rm -f "$out.partial"
-  java -Xmx4g -cp "$JAR" com.example.causal.bench.run.ServeBolt "$ds" \
-    "$PYTHON" -m causal4j_bench.roundtrip "$ds" "$out.partial"
-  mv "$out.partial" "$out"
+  if java -Xmx4g -cp "$JAR" com.example.causal.bench.run.ServeBolt "$ds" \
+      "$PYTHON" -m causal4j_bench.roundtrip "$ds" "$out.partial"; then
+    mv "$out.partial" "$out"
+  else
+    fail "roundtrip/$ds: round trip failed"
+  fi
 done

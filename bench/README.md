@@ -96,10 +96,10 @@ Results are never overwritten; both directories are gitignored.
 | `\speedupDsepMasked` | median over bnlearn + covid × {separated, connected} of unmasked / masked `dsep` median | `tier_bc/` |
 | `\speedupDecideVsEnumeration`, `\numPairsEnumerationCensored`, `\numPairsEmptySetSuffices` | over bnlearn + covid: median enumeration / `decide` ratio over the finished pairs with k ≥ 2; pairs censored at 60 s; pairs with k = 0 | `legacy_pairs.csv` |
 | RQ4 Fig. `figures/rq4_latency.pdf` (2×2: ancestors, reaches, masked d-separation on connected triples, decide) | `scripts/rq4.sh`: TierABenchmarks index=on and TierBCBenchmarks `dsep`/`decide` over the synthetic grid, one seed per (model, \|V\|, d̄) (seed 0, 30 graphs), + RQ1 baselines | `rq4/`, `rq4_bc/`, `tier_bc/` |
-| RQ3 table `tables/rq3.tex`, Fig. `figures/rq3_incremental.pdf` | `scripts/rq3.sh`: MaintenanceBenchmarks `patch` vs `recompile` per edit type (insert, delete, `active` flip, `latent` flip, add / remove variable) and batch size {1, 10, 100, 1000} (a size runs where the DAG has ≥ 4× as many edges) on bnlearn, covid, policy, ER/BA n ∈ {10³, 10⁴}; `run.Rq3Mixed` (embedded Neo4j with the listener, one `active` flip every k ∈ {1, 10, 100} queries, policies patch / recompile); policy (iii) composed from the Phase 1 pgmpy round trip | `rq3/b<batch>/`, `rq3_edits.csv` (cones, fallbacks), `rq3_mixed.csv`, `roundtrip/` |
+| RQ3 table `tables/rq3.tex`, Fig. `figures/rq3_incremental.pdf` | `scripts/rq3.sh`: MaintenanceBenchmarks `patch` vs `recompile` per edit type (insert, delete, `active` flip, `latent` flip, add / remove variable) and batch size {1, 10, 100, 1000} (a size runs where the DAG has ≥ 4× as many edges) on bnlearn, covid, policy, ER/BA n ∈ {10³, 10⁴}; `run.Rq3Mixed` (embedded Neo4j with the listener, one `active` flip every k ∈ {1, 10, 100} queries, policies patch / recompile); policy (iii) composed from the Phase 1 pgmpy round trip | `rq3/b<batch>/`, `rq3_edits.csv` (cones, fallbacks), `rq3_mixed/<dataset>.csv`, `roundtrip/` |
 | `\patchVsRecompileInsert`, `\patchVsRecompileDelete` | median over bnlearn + covid of patch / recompile at batch size 1, as a percentage | `rq3/b1/` |
 | `\fallbackThreshold` | smallest swept `causal.patch.threshold` (|V|/8, /4, /2, |V|) at which the median patch / recompile ratio on the delete stream (batch 10) reaches 1 | `rq3_threshold/` |
-| `\mixedWorkloadSpeedup` | median over datasets of query p99 under recompile / under patch, k = 10 | `rq3_mixed.csv` |
+| `\mixedWorkloadSpeedup` | median over datasets of query p99 under recompile / under patch, k = 10 | `rq3_mixed/<dataset>.csv` |
 | RQ5 table `tables/rq5.tex`; `\numDsepQueries`, `\numDsepAgree`, `\numPairs`, `\numCanonicalAgree`, `\numPairsNotIdentifiable`, `\numFamiliesCompared`, `\numFamiliesEqual`, `\numFamiliesChecked` | `scripts/rq5.sh`: `run.Rq5Runner` (in process, against `reference/`) then `causal4j-bench reference --validate` (dagitty `isAdjustmentSet` + removal-minimality for pairs whose reference family exceeded WP5a's limits); disagreements in `rq5_disagreements.csv` | `rq5/` |
 
 `numbers.tex` defines every macro listed in the paper's `numbers-defaults.tex` (read from
@@ -123,6 +123,14 @@ forks at `-Xmx4g`): about **48 h** of measurement. RQ1 tier (a) + Cypher + GDS +
 The run was resumed once after the round-trip hung inside DoWhy (now cut by a per-query
 timeout), so its `wall_time.txt` covers only the resumed part. Do not use the machine
 for other work during a run: timings are single-machine and noise-sensitive.
+
+**Run order and failures.** `run_all.sh` runs one group at a time, in the order the paper needs
+them: tiers (b)/(c), the July enumeration, RQ3 patch vs recompile, RQ3 mixed workload, tier (a),
+procedures, RQ2, RQ4, the threshold sweep, closure read, the balanced round trips, then what reuse
+did not supply (Cypher, GDS, round trip, RQ5). Each group is its own process: a failure is logged
+to `failures.log` and the next group runs; inside a group a failing dataset is logged and the next
+dataset runs. Every dataset's result is written when it finishes, `groups.log` records each group's
+end, and after each group `results_to_tex --quick` refreshes `bench/out/<run-id>/`.
 
 **Timed synthetic graphs.** Timing uses one seed per (model, |V|, d̄): seed 0, 30 of the 150
 synthetic DAGs (tier (a), tiers (b)/(c), RQ2, RQ4, RQ3). Correctness (RQ5) covers every synthetic

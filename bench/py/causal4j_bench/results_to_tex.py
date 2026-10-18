@@ -601,13 +601,16 @@ def rq3_table(ratios, mixed, composed):
 
 
 def load_mixed(runs):
-    for run in runs:
-        p = run / "rq3_mixed.csv"
-        if p.exists():
-            with open(p, newline="") as f:
-                return [{**r, "k": int(r["k"]), "p99_us": float(r["p99_us"]), "median_us": float(r["median_us"])}
-                        for r in csv.DictReader(f)]
-    return []
+    """Rq3Mixed rows: rq3_mixed/<dataset>.csv (newest run per dataset), or a run's single rq3_mixed.csv."""
+    files = [f for f in merged_files(runs, "rq3_mixed") if f.suffix == ".csv"]
+    if not files:
+        files = [run / "rq3_mixed.csv" for run in runs if (run / "rq3_mixed.csv").exists()][:1]
+    rows = []
+    for p in files:
+        with open(p, newline="") as f:
+            rows += [{**r, "k": int(r["k"]), "p99_us": float(r["p99_us"]), "median_us": float(r["median_us"])}
+                     for r in csv.DictReader(f)]
+    return rows
 
 
 def compose_external(runs, datasets, queries=10_000):
