@@ -25,7 +25,7 @@ for step in "$@"; do
         name=$(basename "$f")
         case "$name" in *.partial|'*') continue ;; esac
         [ -e "$RUN/$step/$name" ] && continue
-        cp "$f" "$RUN/$step/$name" && echo "$step/$name $r" >> "$RUN/reused.txt"
+        cp -R "$f" "$RUN/$step/$name" && echo "$step/$name $r" >> "$RUN/reused.txt"
       done
     elif [ -f "$src" ] && [ ! -e "$RUN/$step" ]; then
       cp "$src" "$RUN/$step" && echo "$step $r" >> "$RUN/reused.txt"

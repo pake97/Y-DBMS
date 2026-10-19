@@ -132,6 +132,18 @@ to `failures.log` and the next group runs; inside a group a failing dataset is l
 dataset runs. Every dataset's result is written when it finishes, `groups.log` records each group's
 end, and after each group `results_to_tex --quick` refreshes `bench/out/<run-id>/`.
 
+**Three parts.** The full run also runs in three parts on separate days, each under 9 h, no group
+split across parts: `run_all.sh --part 1` (tiers (b)/(c), July enumeration, RQ3 patch vs recompile;
+about 8.6 h), `--part 2` (RQ3 mixed workload, tier (a), procedures, closure read, balanced round
+trips, Cypher / GDS / round trip for what `REUSE_EXTERNAL` lacks; about 7.8 h), `--part 3` (RQ2,
+RQ4 grid, RQ3 threshold sweep; about 8.6 h). Each part has its own run id (`…-p<N>`), rebuilds
+`bench.jar`, and writes the git commit, the dirty flag and the JVM to `part.txt`; parts 2 and 3
+refuse to start if these differ from part 1's. `run_all.sh --assemble <p1> <p2> <p3>` checks them
+again, copies the three parts (and `REUSE_RQ5`) into one run id with `reuse.sh`, concatenates the
+side CSVs several parts append to (`timeouts.csv`, `rq3_edits.csv`), sums the parts' wall times,
+and runs `results_to_tex`; `export_paper.sh` takes that run id. The measured build is tagged
+`bench-final`.
+
 **Timed synthetic graphs.** Timing uses one seed per (model, |V|, d̄): seed 0, 30 of the 150
 synthetic DAGs (tier (a), tiers (b)/(c), RQ2, RQ4, RQ3). Correctness (RQ5) covers every synthetic
 DAG with a reference (n ≤ 1000, 90 graphs) and the WP2 parity tests cover the rest. Tables and the
