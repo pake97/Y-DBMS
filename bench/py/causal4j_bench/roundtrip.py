@@ -5,7 +5,8 @@ usage: python -m causal4j_bench.roundtrip <dataset> <out.csv> [--libs pgmpy,dagi
 With --balanced (tiers b/c, WP5b-2) only dsep and adjustment run, dsep over triples_balanced.csv
 as two operators, dsep_sep and dsep_conn, by the triple's verdict.
 Reads BOLT_URI (set by the Java ServeBolt driver). Appends one CSV row per
-(library, operator): export_ms, build_ms, queries, query_ms_median, query_ms_p99, censored.
+(library, operator): export_ms, build_ms, queries, query_ms_median, query_ms_p99, censored,
+completed (queries finished; a query cut by the per-query cap is recorded at 60 s but not completed).
 A (library, operator) stops after BUDGET_S seconds of queries, or as soon as one query
 exceeds BUDGET_S (SIGALRM; DoWhy's identification can run for hours on andes), and is
 marked censored. A query inside R (dagitty) is only interrupted when it returns to Python.
@@ -36,7 +37,7 @@ def _alarm(signum, frame):
 
 
 HEADER = ["library", "dataset", "operator", "export_ms", "build_ms", "queries",
-          "query_ms_median", "query_ms_p99", "censored"]
+          "query_ms_median", "query_ms_p99", "censored", "completed"]
 
 
 def export(uri):
@@ -177,7 +178,7 @@ def main(argv=None):
                 elif not args.balanced or op == "adjustment":
                     runs.append((op, fn, pairs))
             for op, fn, items in runs:
-                times, spent, censored = [], 0.0, False
+                times, spent, censored, capped = [], 0.0, False, False
                 for item in items:
                     s = time.perf_counter()
                     signal.signal(signal.SIGALRM, _alarm)
@@ -185,7 +186,7 @@ def main(argv=None):
                     try:
                         fn(obj, item)
                     except QueryTimeout:
-                        censored = True
+                        censored = capped = True
                         times.append(BUDGET_S * 1e3)
                         break
                     finally:
@@ -199,7 +200,7 @@ def main(argv=None):
                 times.sort()
                 p99 = times[min(len(times) - 1, int(0.99 * len(times)))]
                 w.writerow([lib, args.dataset, op, f"{export_ms:.3f}", f"{build_ms:.3f}", len(times),
-                            f"{statistics.median(times):.4f}", f"{p99:.4f}", censored])
+                            f"{statistics.median(times):.4f}", f"{p99:.4f}", censored, len(times) - capped])
                 f.flush()
                 print(f"roundtrip {lib:<11} {args.dataset:<14} {op:<10} {len(times):>4} queries, "
                       f"median {statistics.median(times):.3f} ms{' (censored)' if censored else ''}", flush=True)
