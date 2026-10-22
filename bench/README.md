@@ -142,7 +142,10 @@ refuse to start if these differ from part 1's. `run_all.sh --assemble <p1> <p2> 
 again, copies the three parts (and `REUSE_RQ5`) into one run id with `reuse.sh`, concatenates the
 side CSVs several parts append to (`timeouts.csv`, `rq3_edits.csv`), sums the parts' wall times,
 and runs `results_to_tex`; `export_paper.sh` takes that run id. The measured build is tagged
-`bench-final`.
+`bench-final`. A rerun of the RQ3 mixed workload alone is `--part 4`; on a commit other than part 1's
+it starts only with `--allow-commit <sha> --reason "..."` (the JVM and the clean tree must still
+match, and `part.txt` records the reason). `--assemble <p1> <p2> <p3> <p4>` then takes the mixed
+workload from part 4 and everything else from parts 1-3 (`reused.txt` records each file's source).
 
 **Timed synthetic graphs.** Timing uses one seed per (model, |V|, d̄): seed 0, 30 of the 150
 synthetic DAGs (tier (a), tiers (b)/(c), RQ2, RQ4, RQ3). Correctness (RQ5) covers every synthetic
