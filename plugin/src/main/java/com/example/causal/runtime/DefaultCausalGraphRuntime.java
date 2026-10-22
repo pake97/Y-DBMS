@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Default implementation of {@link CausalGraphRuntime}.
@@ -43,6 +45,9 @@ import java.util.Set;
  * {@code CODE-PLAN.md} for the index work plan.
  */
 public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
+
+    /** The logger {@link CompiledCausalGraph#logStructure()} writes to. */
+    private static final Logger STRUCTURE_LOG = Logger.getLogger(CompiledCausalGraph.class.getName());
 
     private volatile CompiledCausalGraph snapshot;
 
@@ -84,7 +89,9 @@ public final class DefaultCausalGraphRuntime implements CausalGraphRuntime {
         requireWritable();
         CompiledCausalGraph g = GraphLoader.load(options);
         install(g);
-        g.logStructure();  // adjacency, topo order, layers, closures
+        // The structure dump (adjacency, topo order, layers, closures) is megabytes on large DAGs
+        // and was paid inside every timed recompile; it is built only when FINE is enabled.
+        if (STRUCTURE_LOG.isLoggable(Level.FINE)) g.logStructure();
         return g;
     }
 
