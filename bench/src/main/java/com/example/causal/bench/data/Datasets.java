@@ -41,12 +41,17 @@ public final class Datasets {
     public static Path workloadsDir() { return root().resolve("bench/workloads"); }
     public static Path referenceDir() { return root().resolve("bench/reference"); }
 
-    /** Every dataset with a meta.json, bnlearn and covid first, then synthetic, in a stable order. */
+    /** Hand-authored DAGs from dev/*.cypher, each its own family. */
+    public static final List<String> SEEDS = List.of("covid", "policy");
+
+    /** Every dataset with a meta.json, bnlearn, covid and policy first, then synthetic, in a stable order. */
     public static List<Dataset> all() {
         List<Dataset> out = new ArrayList<>();
         out.addAll(scan(datasetsDir().resolve("bnlearn"), "bnlearn"));
-        Path covid = datasetsDir().resolve("covid");
-        if (Files.exists(covid.resolve("meta.json"))) out.add(load(covid, "covid", "covid"));
+        for (String seed : SEEDS) {
+            Path dir = datasetsDir().resolve(seed);
+            if (Files.exists(dir.resolve("meta.json"))) out.add(load(dir, seed, seed));
+        }
         out.addAll(scan(datasetsDir().resolve("synthetic"), "synthetic"));
         return out;
     }
@@ -63,7 +68,7 @@ public final class Datasets {
             String cmd = switch (d.family()) {
                 case "bnlearn" -> "causal4j-bench fetch --only " + id;
                 case "synthetic" -> "causal4j-bench synth --only n=" + d.n();
-                default -> "causal4j-bench covid";
+                default -> "causal4j-bench " + d.family();
             };
             throw new IllegalStateException(d.dir().resolve("edges.csv") + " is missing; regenerate it with: " + cmd);
         }

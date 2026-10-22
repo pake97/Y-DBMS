@@ -79,6 +79,21 @@ def test_triples_respect_sizes_and_disjointness():
     assert workloads.z_sizes(8) == [0, 1, 3, 6]
 
 
+def test_balanced_triples_fill_both_verdicts_or_warn():
+    g = synthetic.generate(100, 4, "er", 0)
+    rows = workloads.balanced_triples(g)
+    dag = reference._dag(g.edges())
+    dag.add_nodes_from(g.nodes)
+    for size in workloads.z_sizes(100):
+        got = [s for x, y, z, s in rows if len(z) == size]
+        assert sorted(got) == [False] * 25 + [True] * 25
+    assert all(reference.separated(dag, x, y, z) == s for x, y, z, s in rows)
+    root = nx.DiGraph([("r", v) for v in "abcd"])  # every pair shares the root: never separated given {}
+    with pytest.warns(UserWarning, match="separated"):
+        rows = workloads.balanced_triples(root, k=2)
+    assert [s for _, _, z, s in rows if not z] == [False, False]
+
+
 # ── reference ───────────────────────────────────────────────────────────────
 
 CHAIN = [("a", "b"), ("b", "c")]
@@ -114,6 +129,18 @@ def test_dagitty_matches_on_toy_dags():
     assert adj[0]["canonical"] == ["z", "w"]
     assert adj[0]["minimal"] == [["z"]]  # {w} leaves t <- z -> y open
     assert adj[0]["identifiable"]
+
+
+def test_validate_codes_sets(tmp_path):
+    if reference.dagitty_version() is None:
+        pytest.skip("R + dagitty not available")
+    g = nx.DiGraph([("u", "t"), ("u", "y"), ("t", "y"), ("x", "u")])
+    write_edges(tmp_path / "edges.csv", g)
+    (tmp_path / "meta.json").write_text('{"n": 4, "m": 4, "nodes": ["u", "t", "y", "x"]}')
+    todo = {"toy": [{"t": "t", "y": "y", "identifiable": True, "sets": [["u"], [], ["u", "x"], ["x"]]}]}
+    codes = reference.validate(todo, {"toy": tmp_path}, workers=1)
+    assert codes == {"toy": [[reference.VALID_MINIMAL, reference.INVALID, reference.VALID_NOT_MINIMAL,
+                              reference.INVALID]]}
 
 
 def test_read_dataset_roundtrip(tmp_path):

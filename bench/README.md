@@ -19,8 +19,10 @@ Every step is idempotent: a second `causal4j-bench all` leaves `git status` clea
 |---|---|---|
 | `fetch` (runs `datasets/fetch.sh`) | `datasets/bnlearn/<name>/{<name>.bif.gz, edges.csv, meta.json}` for the 11 bnlearn networks; `datasets/checksums.txt` (SHA-256, recorded on first download, verified after) | Table III, RQ1–RQ5 |
 | `covid` | `datasets/covid/{edges.csv, meta.json}` from `dev/seed-dag.cypher` (25 nodes, 78 edges, latent ids in `meta.json`) | Table III, running example, RQ5 |
+| `policy` | `datasets/policy/{edges.csv, meta.json}` from `dev/seed-policy-dag.cypher` (22 nodes, 37 edges, 3 latent ids in `meta.json`); every Phase 1 and 2 benchmark runs on it as on covid | Table III, landscape running example, RQ1–RQ5 |
 | `synth [--only n=N]` | `datasets/synthetic/<model>-n<N>-d<D>-s<S>/{edges.csv, meta.json}`: ER and BA, n ∈ {100, 316, 1000, 3162, 10000}, average degree ∈ {2, 4, 8}, seeds 0–4 (150 DAGs) | Table III summary row, RQ1/RQ4 scaling |
 | `workloads [--only a,b]` | `workloads/<dataset>/{pairs.csv, triples.csv, meta.json}`: 200 `(t, y)` pairs with `y ∈ de(t)`; 50 `(x, y, z)` triples per \|z\| ∈ {0, 1, 3, 10} (capped at n − 2); seed 20261111 | RQ1–RQ4 query workloads, RQ5 |
+| `workloads --balanced [--only a,b]` | `workloads/<dataset>/triples_balanced.csv` (`x,y,z,separated`): 25 separated + 25 connected triples per \|z\|, drawn as in `triples.csv` (seed 20261111) and kept or rejected on the pgmpy verdict. In child and pathfinder no pair is separated given ∅ (one root is an ancestor of every node), so their \|z\| = 0 block has 25 connected triples only (175 rows) | tiers (b)/(c), RQ5 |
 | `stats` | `datasets/datasets.csv` (Table III; `results_to_tex` renders it as `out/<run>/tables/datasets.tex`) | Table III |
 | `reference [--only a,b] [--no-dagitty] [--force]` | `reference/<dataset>/{dsep.json, adjustment.json, meta.json}` (synthetic: `dsep.json.gz`, `adjustment.json.gz`); an existing result is kept while its workload is unchanged (`workload_sha256` in `meta.json`), because timeouts make a recompute machine-dependent | RQ5 oracle; WP2 fixture (`reference/alarm/adjustment.json`, `reference/sachs/adjustment.json`) |
 
@@ -47,7 +49,7 @@ exponential (one andes pair has 6404 sets) and R cannot interrupt dagitty's V8 e
 so dagitty runs in a worker process killed after 30 s per pair (`minimal` and
 `minimal_count` null); a family of more than 1000 sets is stored by size only
 (`minimal` null, `minimal_count` = size). Both cases are counted in `meta.json`.
-Latent nodes (covid only) are excluded from adjustment sets. Without R + dagitty,
+Latent nodes (covid and policy) are excluded from adjustment sets. Without R + dagitty,
 `dagitty`, `minimal` and `minimal_count` are null.
 
 **Caps.** Reference answers for synthetic graphs are computed only for n ≤ 1000
@@ -65,9 +67,9 @@ build it if it is missing. Python steps need the conda env above plus
 `pip install -e 'bench/py[r,plots,external]'`.
 
 ```bash
-bench/run_all.sh                      # everything, then results_to_tex; prints the run id
+bench/run_all.sh [--recompute-rq5]   # everything, then results_to_tex; prints the run id
 RUN_ID=<id> bench/run_all.sh          # resume an interrupted run (finished steps are skipped)
-BASE_RUN=<id> bench/run_all.sh        # new run that reuses every output <id> already has; results_to_tex merges them
+BASE_RUN=<id> bench/run_all.sh        # new run that reuses every output <id> already has (e.g. rq5/); results_to_tex merges them
 bench/run_quick.sh                    # CI subset, < 5 min
 bench/export_paper.sh <run-id>        # copy tables/figures/numbers.tex into ../Causal4j-paper (never commits)
 ```
@@ -89,15 +91,25 @@ Results are never overwritten; both directories are gitignored.
 | `\buildMsMunin` | CompileBenchmarks median, munin, closures | `compile/` |
 | `\closureKbMunin` | analytic `2·n·⌈n/64⌉·8` B for munin | – |
 | `\crossoverNodes` (256 MB), `\crossoverNodesSixtyFourMB`, `\crossoverNodesOneGB`, `\crossoverLatencyRatio` | `rq2.csv`: closure heap extrapolated with the measured heap/closure ratio of the largest graph; pruned/closure `reaches` ratio at that graph | `rq2.csv` |
-| RQ3, RQ5, tiers (b)/(c) macros | phase 5b-2 | – |
+| RQ1 tiers (b)/(c) table `tables/rq1_tier_bc.tex` | `scripts/rq1_tier_bc.sh`: TierBCBenchmarks `dsep` (masked / unmasked, by verdict), `dsepReference` (July Bayes-Ball), `decide`, `findMinimal`, `listMinimal100` on the tier (a) datasets; `decideReference` (July enumeration, 60 s cap) on bnlearn, covid, policy; `roundtrip --balanced` (pgmpy, dagitty, DoWhy) | `tier_bc/`, `legacy/`, `roundtrip_bc/`, `timeouts.csv` |
+| decide vs enumeration table `tables/rq1_enumeration.tex` (by k = size of the smallest backdoor set the enumeration finds: 0, 1, 2, ≥ 3, none / censored) | `TierBCBenchmarks.decideReference` setup: per-pair warmed medians of the enumeration and `decide` | `legacy_pairs.csv` |
+| `\speedupDsepMasked` | median over bnlearn + covid × {separated, connected} of unmasked / masked `dsep` median | `tier_bc/` |
+| `\speedupDecideVsEnumeration`, `\numPairsEnumerationCensored`, `\numPairsEmptySetSuffices` | over bnlearn + covid: median enumeration / `decide` ratio over the finished pairs with k ≥ 2; pairs censored at 60 s; pairs with k = 0 | `legacy_pairs.csv` |
+| RQ4 Fig. `figures/rq4_latency.pdf` (2×2: ancestors, reaches, masked d-separation on connected triples, decide) | `scripts/rq4.sh`: TierABenchmarks index=on and TierBCBenchmarks `dsep`/`decide` over the synthetic grid, one seed per (model, \|V\|, d̄) (seed 0, 30 graphs), + RQ1 baselines | `rq4/`, `rq4_bc/`, `tier_bc/` |
+| RQ3 table `tables/rq3.tex`, Fig. `figures/rq3_incremental.pdf` | `scripts/rq3.sh`: MaintenanceBenchmarks `patch` vs `recompile` per edit type (insert, delete, `active` flip, `latent` flip, add / remove variable) and batch size {1, 10, 100, 1000} (a size runs where the DAG has ≥ 4× as many edges) on bnlearn, covid, policy, ER/BA n ∈ {10³, 10⁴}; `run.Rq3Mixed` (embedded Neo4j with the listener, one `active` flip every k ∈ {1, 10, 100} queries, policies patch / recompile); policy (iii) composed from the Phase 1 pgmpy round trip | `rq3/b<batch>/`, `rq3_edits.csv` (cones, fallbacks), `rq3_mixed/<dataset>.csv`, `roundtrip/` |
+| `\patchVsRecompileInsert`, `\patchVsRecompileDelete` | median over bnlearn + covid of patch / recompile at batch size 1, as a percentage | `rq3/b1/` |
+| `\fallbackThreshold` | smallest swept `causal.patch.threshold` (|V|/8, /4, /2, |V|) at which the median patch / recompile ratio on the delete stream (batch 10) reaches 1 | `rq3_threshold/` |
+| `\mixedWorkloadSpeedup` | median over datasets of query p99 under recompile / under patch, k = 10 | `rq3_mixed/<dataset>.csv` |
+| RQ5 table `tables/rq5.tex`; `\numDsepQueries`, `\numDsepAgree`, `\numPairs`, `\numCanonicalAgree`, `\numPairsNotIdentifiable`, `\numFamiliesCompared`, `\numFamiliesEqual`, `\numFamiliesChecked` | `scripts/rq5.sh`: `run.Rq5Runner` (in process, against `reference/`) then `causal4j-bench reference --validate` (dagitty `isAdjustmentSet` + removal-minimality for pairs whose reference family exceeded WP5a's limits); disagreements in `rq5_disagreements.csv` | `rq5/` |
 
 `numbers.tex` defines every macro listed in the paper's `numbers-defaults.tex` (read from
 `--paper-dir`, default `../Causal4j-paper`): the measured value, or that file's `\TODO`
-default. Nothing under `bench/` writes outside `bench/out/<run-id>/` (and `bench/results/`);
+default; macros the run computes that the paper does not declare yet are emitted too, with a
+warning. Outside `--quick`, `results_to_tex` exits non-zero if any macro is still `\TODO`. Nothing under `bench/` writes outside `bench/out/<run-id>/` (and `bench/results/`);
 `export_paper.sh` copies that directory into the paper checkout, then runs `latexmk` on
 `main.tex` (landscape version), `full_version.tex` and `technical.tex` and prints the three page counts.
 
-**Protocol.** Pure-Java benchmarks: `SampleTime`, 3 forks, 5 × 1 s warm-up, 10 × 1 s
+**Protocol.** Pure-Java benchmarks: `SampleTime`, 2 forks (3 in the Phase 1 run), 5 × 1 s warm-up, 10 × 1 s
 measurement. Embedded-DBMS baselines: 1 fork, 3 + 5 iterations. Forks get `-Xmx4g`.
 Medians and p99 come from the JMH sample histograms. Cypher and GDS queries run in a
 transaction with a 60 s timeout; a timed-out query goes to `timeouts.csv`, and after
@@ -111,3 +123,57 @@ forks at `-Xmx4g`): about **48 h** of measurement. RQ1 tier (a) + Cypher + GDS +
 The run was resumed once after the round-trip hung inside DoWhy (now cut by a per-query
 timeout), so its `wall_time.txt` covers only the resumed part. Do not use the machine
 for other work during a run: timings are single-machine and noise-sensitive.
+
+**Run order and failures.** `run_all.sh` runs one group at a time, in the order the paper needs
+them: tiers (b)/(c), the July enumeration, RQ3 patch vs recompile, RQ3 mixed workload, tier (a),
+procedures, RQ2, RQ4, the threshold sweep, closure read, the balanced round trips, then what reuse
+did not supply (Cypher, GDS, round trip, RQ5). Each group is its own process: a failure is logged
+to `failures.log` and the next group runs; inside a group a failing dataset is logged and the next
+dataset runs. Every dataset's result is written when it finishes, `groups.log` records each group's
+end, and after each group `results_to_tex --quick` refreshes `bench/out/<run-id>/`.
+
+**Three parts.** The full run also runs in three parts on separate days, each under 9 h, no group
+split across parts: `run_all.sh --part 1` (tiers (b)/(c), July enumeration, RQ3 patch vs recompile;
+about 8.6 h), `--part 2` (RQ3 mixed workload, tier (a), procedures, closure read, balanced round
+trips, Cypher / GDS / round trip for what `REUSE_EXTERNAL` lacks; about 7.8 h), `--part 3` (RQ2,
+RQ4 grid, RQ3 threshold sweep; about 8.6 h). Each part has its own run id (`…-p<N>`), rebuilds
+`bench.jar`, and writes the git commit, the dirty flag and the JVM to `part.txt`; parts 2 and 3
+refuse to start if these differ from part 1's. `run_all.sh --assemble <p1> <p2> <p3>` checks them
+again, copies the three parts (and `REUSE_RQ5`) into one run id with `reuse.sh`, concatenates the
+side CSVs several parts append to (`timeouts.csv`, `rq3_edits.csv`), sums the parts' wall times,
+and runs `results_to_tex`; `export_paper.sh` takes that run id. The measured build is tagged
+`bench-final`.
+
+**Timed synthetic graphs.** Timing uses one seed per (model, |V|, d̄): seed 0, 30 of the 150
+synthetic DAGs (tier (a), tiers (b)/(c), RQ2, RQ4, RQ3). Correctness (RQ5) covers every synthetic
+DAG with a reference (n ≤ 1000, 90 graphs) and the WP2 parity tests cover the rest. Tables and the
+RQ4 figure state this in their captions.
+
+**Reused results.** Steps that run no plugin code are copied from earlier runs instead of being
+measured again (`scripts/reuse.sh`, provenance in `reused.txt` of the run):
+`REUSE_EXTERNAL=<run>` supplies Cypher, GDS and the external round trip (export, build and query
+for pgmpy, dagitty, causal-learn, DoWhy); datasets the source run lacks (policy) are measured.
+`REUSE_RQ5=<run>` supplies RQ5, which does not depend on timing; `--recompute-rq5` ignores it.
+
+**Estimated wall time of the reduced run** (2 forks; calibrated on Phase 1's RQ4, about 36 s per
+fork on the synthetic grid, and on the RQ3 smoke run, about 3 s per fork on the real DAGs; not
+yet measured end to end):
+
+| Group | Estimate |
+|---|---:|
+| tier (a) in-process, index and DFS | 3.6 h |
+| closure read | 0.7 h |
+| procedure benchmarks (1 fork) | 2.0 h |
+| RQ2 build, heap, pruned latency | 3.1 h |
+| tiers (b)/(c) | 3.3 h |
+| July enumeration (60 s cap) | 0.8 h |
+| balanced round trips | 0.5 h |
+| RQ4 grid, seed 0 | 4.2 h |
+| RQ3 patch vs recompile | 4.5 h |
+| RQ3 threshold sweep | 1.3 h |
+| RQ3 mixed workload | 0.9 h |
+| Cypher, GDS, round trip (reused; policy measured) | 0.1 h |
+| RQ5 (reused) | 0 |
+| **total** | **about 25 h** |
+
+With 3 forks the same run is about 36 h. Replace this table with the measured `wall_time.txt`.

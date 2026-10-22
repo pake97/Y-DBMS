@@ -1,9 +1,12 @@
 """External round-trip baseline (paper baseline d): export the DAG from Neo4j over Bolt,
 build each library's graph object, run the workload, and time the three phases.
 
-usage: python -m causal4j_bench.roundtrip <dataset> <out.csv> [--libs pgmpy,dagitty,causallearn,dowhy]
+usage: python -m causal4j_bench.roundtrip <dataset> <out.csv> [--libs pgmpy,dagitty,causallearn,dowhy] [--balanced]
+With --balanced (tiers b/c, WP5b-2) only dsep and adjustment run, dsep over triples_balanced.csv
+as two operators, dsep_sep and dsep_conn, by the triple's verdict.
 Reads BOLT_URI (set by the Java ServeBolt driver). Appends one CSV row per
-(library, operator): export_ms, build_ms, queries, query_ms_median, query_ms_p99, censored.
+(library, operator): export_ms, build_ms, queries, query_ms_median, query_ms_p99, censored,
+completed (queries finished; a query cut by the per-query cap is recorded at 60 s but not completed).
 A (library, operator) stops after BUDGET_S seconds of queries, or as soon as one query
 exceeds BUDGET_S (SIGALRM; DoWhy's identification can run for hours on andes), and is
 marked censored. A query inside R (dagitty) is only interrupted when it returns to Python.
@@ -34,7 +37,7 @@ def _alarm(signum, frame):
 
 
 HEADER = ["library", "dataset", "operator", "export_ms", "build_ms", "queries",
-          "query_ms_median", "query_ms_p99", "censored"]
+          "query_ms_median", "query_ms_p99", "censored", "completed"]
 
 
 def export(uri):
@@ -135,11 +138,16 @@ LIBS = {
 }
 
 
-def workload(dataset):
+def workload(dataset, balanced=False):
+    """pairs, and {dsep operator: triples}: triples.csv, or triples_balanced.csv split by verdict."""
     w = WORKLOADS / dataset
     pairs = [(r["t"], r["y"]) for r in read_csv(w / "pairs.csv")]
-    triples = [(r["x"], r["y"], [v for v in r["z"].split(";") if v]) for r in read_csv(w / "triples.csv")]
-    return pairs, triples
+    rows = read_csv(w / ("triples_balanced.csv" if balanced else "triples.csv"))
+    triple = lambda r: (r["x"], r["y"], [v for v in r["z"].split(";") if v])  # noqa: E731
+    if not balanced:
+        return pairs, {"dsep": [triple(r) for r in rows]}
+    return pairs, {f"dsep_{k}": [triple(r) for r in rows if (r["separated"] == "true") == (k == "sep")]
+                   for k in ("sep", "conn")}
 
 
 def main(argv=None):
@@ -147,9 +155,10 @@ def main(argv=None):
     a.add_argument("dataset")
     a.add_argument("out")
     a.add_argument("--libs", default=",".join(LIBS))
+    a.add_argument("--balanced", action="store_true", help="dsep (balanced, by verdict) and adjustment only")
     args = a.parse_args(argv)
     uri = os.environ["BOLT_URI"]
-    pairs, triples = workload(args.dataset)
+    pairs, triples = workload(args.dataset, args.balanced)
     out = Path(args.out)
     new = not out.exists()
     with open(out, "a", newline="") as f:
@@ -162,9 +171,14 @@ def main(argv=None):
             t0 = time.perf_counter()
             obj = build(nodes, edges, latent)
             build_ms = (time.perf_counter() - t0) * 1e3
+            runs = []
             for op, fn in ops().items():
-                items = triples if op == "dsep" else pairs
-                times, spent, censored = [], 0.0, False
+                if op == "dsep":
+                    runs += [(name, fn, items) for name, items in triples.items()]
+                elif not args.balanced or op == "adjustment":
+                    runs.append((op, fn, pairs))
+            for op, fn, items in runs:
+                times, spent, censored, capped = [], 0.0, False, False
                 for item in items:
                     s = time.perf_counter()
                     signal.signal(signal.SIGALRM, _alarm)
@@ -172,7 +186,7 @@ def main(argv=None):
                     try:
                         fn(obj, item)
                     except QueryTimeout:
-                        censored = True
+                        censored = capped = True
                         times.append(BUDGET_S * 1e3)
                         break
                     finally:
@@ -186,7 +200,7 @@ def main(argv=None):
                 times.sort()
                 p99 = times[min(len(times) - 1, int(0.99 * len(times)))]
                 w.writerow([lib, args.dataset, op, f"{export_ms:.3f}", f"{build_ms:.3f}", len(times),
-                            f"{statistics.median(times):.4f}", f"{p99:.4f}", censored])
+                            f"{statistics.median(times):.4f}", f"{p99:.4f}", censored, len(times) - capped])
                 f.flush()
                 print(f"roundtrip {lib:<11} {args.dataset:<14} {op:<10} {len(times):>4} queries, "
                       f"median {statistics.median(times):.3f} ms{' (censored)' if censored else ''}", flush=True)

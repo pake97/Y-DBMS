@@ -24,16 +24,30 @@ fi
 # JMH options for quick runs come from $JMH_OPTS.
 jmh() { java -Dbench.timeouts="$ROOT/$RUN/timeouts.csv" -jar "$JAR" "$@" ${JMH_OPTS:-}; }
 datasets() { java -cp "$JAR" com.example.causal.bench.run.ListDatasets "$@"; }
+# fail <message>: log a failure to $RUN/failures.log (and stderr); the caller continues.
+fail() { echo "$(date -u +%FT%TZ) $*" | tee -a "$ROOT/$RUN/failures.log" >&2; }
 # jmh_each <dir> <benchmark-regex> <datasets,comma,separated> [jmh args...]: one JMH run per
-# dataset into <dir>/<dataset>.json, so an interrupted run resumes per dataset.
+# dataset into <dir>/<dataset>.json, written as soon as that dataset finishes, so an interrupted
+# run resumes per dataset. JMH output goes to logs/; a dataset whose JMH run fails, or whose
+# output reports a benchmark <failure> (JMH then still exits 0 and writes the other results), is
+# logged with fail and the loop goes on to the next dataset.
 jmh_each() {
   local dir="$1" bench="$2" ds="$3"; shift 3
-  mkdir -p "$RUN/$dir"
+  mkdir -p "$RUN/$dir" "$RUN/logs"
   for d in ${ds//,/ }; do
-    step "$dir/$d.json" jmh "$bench" -p dataset="$d" "$@" -rf json -rff "$RUN/$dir/$d.json.partial"
-    if [ -f "$RUN/$dir/$d.json.partial" ]; then mv "$RUN/$dir/$d.json.partial" "$RUN/$dir/$d.json"; fi
+    if have "$dir/$d.json"; then echo "skip $dir/$d.json (exists)"; continue; fi
+    echo "== $RUN/$dir/$d.json"
+    local log="$RUN/logs/${dir//\//_}-$d.log"
+    if ! jmh "$bench" -p dataset="$d" "$@" -rf json -rff "$RUN/$dir/$d.json.partial" 2>&1 | tee "$log"; then
+      fail "$dir/$d: JMH exited non-zero (see ${log#"$RUN"/})"
+    elif grep -q '<failure>' "$log"; then
+      fail "$dir/$d: a benchmark failed, the others are kept (see ${log#"$RUN"/})"
+    fi
+    if [ -s "$RUN/$dir/$d.json.partial" ]; then mv "$RUN/$dir/$d.json.partial" "$RUN/$dir/$d.json"; fi
   done
 }
+# part <name>: true if the script was called with no part argument (run everything) or with <name>.
+part() { [ -z "${PART:-}" ] || [ "$PART" = "$1" ]; }
 # have <relative-path>: true if this run or one of its base runs already has the output.
 # FORCE_STEPS=<dir>[,<dir>...] re-measures those steps even when a base run has them
 # (e.g. after a plugin change); results_to_tex then prefers this run's files.

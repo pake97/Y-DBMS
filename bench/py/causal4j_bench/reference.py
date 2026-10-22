@@ -147,6 +147,71 @@ def dagitty_version():
 
 # ── per-dataset computation ─────────────────────────────────────────────────
 
+def dsep_rows(dag, dg, triples):
+    """{x, y, z, pgmpy, dagitty} per triple (dagitty None without a worker); the two must agree."""
+    rows = []
+    for x, y, z in triples:
+        p = separated(dag, x, y, z)
+        d = dg.separated(x, y, z) if dg else None
+        if d is not None and d != p:
+            raise AssertionError(f"d-separation disagreement on {x}, {y} | {z}: pgmpy {p}, dagitty {d}")
+        rows.append({"x": x, "y": y, "z": list(z), "pgmpy": p, "dagitty": d})
+    return rows
+
+
+def balanced_dsep(g: nx.DiGraph, triples, latent=frozenset(), use_dagitty=True):
+    """dsep_rows for triples_balanced.csv (RQ5, WP5b-2)."""
+    dag = _dag(g.edges())
+    dag.add_nodes_from(g.nodes)
+    dg = DagittyWorker(g, latent) if use_dagitty else None
+    try:
+        return dsep_rows(dag, dg, triples)
+    finally:
+        if dg:
+            dg.close()
+
+
+# ── RQ5: validation of sets Causal4j streamed for pairs without a reference family ──
+
+VALID_MINIMAL, VALID_NOT_MINIMAL, INVALID = 2, 1, 0
+_validators = {}
+
+
+def _validate_pair(task):
+    """(dataset, dataset dir, index, t, y, sets) -> (dataset, index, codes): per set INVALID unless
+    dagitty's isAdjustmentSet accepts it, VALID_NOT_MINIMAL if it also accepts a one-smaller subset."""
+    from .io import read_dataset, read_json
+    ds, d, i, t, y, sets = task
+    if ds not in _validators:
+        latent = frozenset(read_json(d / "meta.json").get("latent", []))
+        dg = Dagitty(read_dataset(d), latent)
+        dg.check = dg.ro.r("""
+        function(g, t, y, sets) vapply(sets, function(z) {
+          if (!dagitty::isAdjustmentSet(g, z, t, y)) return(0L)
+          for (v in z) if (dagitty::isAdjustmentSet(g, setdiff(z, v), t, y)) return(1L)
+          2L }, integer(1))""")
+        _validators.clear()  # one graph per worker at a time
+        _validators[ds] = dg
+    dg = _validators[ds]
+    ro = dg.ro
+    rsets = ro.ListVector([(str(k), ro.StrVector([dg.alias[v] for v in s])) for k, s in enumerate(sets)])
+    return ds, i, list(dg.check(dg.g, dg.alias[t], dg.alias[y], rsets))
+
+
+def validate(todo, dirs, workers):
+    """todo: {dataset: [{t, y, identifiable, sets}]}; dirs: dataset -> dataset dir.
+    Returns {dataset: [codes per pair, aligned with todo]}, run on `workers` processes."""
+    tasks = [(ds, dirs[ds], i, p["t"], p["y"], p["sets"]) for ds, ps in todo.items()
+             for i, p in enumerate(ps) if p["sets"]]
+    out = {ds: [[] for _ in ps] for ds, ps in todo.items()}
+    with mp.get_context("spawn").Pool(workers) as pool:
+        for k, (ds, i, codes) in enumerate(pool.imap_unordered(_validate_pair, tasks), 1):
+            out[ds][i] = codes
+            if k % 50 == 0 or k == len(tasks):
+                print(f"validate: {k}/{len(tasks)} pairs", flush=True)
+    return out
+
+
 def compute(g: nx.DiGraph, pairs, triples, latent=frozenset(), use_dagitty=True, with_minimal=True):
     """Returns (dsep_rows, adjustment_rows, counters); with_minimal=False skips minimal families."""
     order = {v: i for i, v in enumerate(g.nodes)}
@@ -156,13 +221,7 @@ def compute(g: nx.DiGraph, pairs, triples, latent=frozenset(), use_dagitty=True,
     dg = DagittyWorker(g, latent) if use_dagitty else None
     stats = {"minimal_timeouts": 0, "minimal_too_many": 0}
 
-    dsep = []
-    for x, y, z in triples:
-        p = separated(dag, x, y, z)
-        d = dg.separated(x, y, z) if dg else None
-        if d is not None and d != p:
-            raise AssertionError(f"d-separation disagreement on {x}, {y} | {z}: pgmpy {p}, dagitty {d}")
-        dsep.append({"x": x, "y": y, "z": list(z), "pgmpy": p, "dagitty": d})
+    dsep = dsep_rows(dag, dg, triples)
 
     adjustment = []
     for t, y in pairs:

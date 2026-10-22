@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class BaselineAgreementTest {
 
     @ParameterizedTest
-    @ValueSource(strings = {"asia", "alarm", "covid"})
+    @ValueSource(strings = {"asia", "alarm", "covid", "policy"})
     void cypherAndGdsAgreeWithTheIndex(String dataset) {
         // bnlearn edge lists are gitignored; the bench-quick CI job fetches asia and alarm.
         assumeTrue(java.nio.file.Files.exists(Datasets.edgesPath(dataset)),

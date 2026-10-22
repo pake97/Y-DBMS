@@ -17,17 +17,23 @@ remaining packages should cost with the same method.
 | WP | What | Owner | Status | Days left |
 |---|---|---|---|---|
 | 0 | Repository hygiene, branch, CI | A | **done** Sep 28 (`00871a3`, `17bbdf2`, tag `v0-dfs-baseline`) | 0 |
-| 1 | Dense layout + reachability closures | K + Claude Code | **done** Sep 28 on `feat/index-wp1-closures` (6 commits, 165 tests green). **Not yet merged into `feat/index`.** | 0 |
-| 1.5 | Reconcile with the August branch (see below) | A | **done** Oct 1 (merge `b729c7b`, PR #31) | 0 |
-| 2 | Query processing over the index | K + Claude Code | next | 4 |
-| 3 | Incremental maintenance | K | reduced: port + complete | 4 |
-| 4 | Server-side model registry and derived worlds | A | unchanged | 3 |
-| 5 | Benchmark harness, datasets, baselines, correctness | A | seeded by August ITs | 7 |
-| 6 | Artifact packaging | A | unchanged | 2 |
+| 1 | Dense layout + reachability closures | K + Claude Code | **done** Sep 28, merged through WP1.5 | 0 |
+| 1.5 | Reconcile with the August branch | A | **done** Oct 1 (PR #31) | 0 |
+| 2 | Query processing over the index | A + Claude Code (K to rebase his copy) | **done** Oct 15 (PR #35, 355 tests; Step 4 replaced by JAIR 2019 ListMinSep; backdoorVariables on the generalized barrier) | 0 |
+| 3 | Incremental maintenance | A + Claude Code | **in progress** Oct 16, `feat/index-wp3-maintenance`, brief `plans/WP3.md` | 3 |
+| 4 | Server-side model registry and derived worlds | A | after WP3 (needs WP3 Step 2); brief to come | 3 |
+| 5a | Datasets, workloads, reference answers | A | **done** Oct 15 (PR #32) | 0 |
+| 5b-1 | Harness Phase 1 (tier a, RQ2, RQ4, procedures) | A | **done** Oct 15 (PR #33) | 0 |
+| 5b-2 | Tiers b/c, RQ5 (Steps 1-2); RQ3 (Step 3, after WP3) | A + Claude Code | **in progress** Oct 16, `feat/bench-phase2`, brief `plans/WP5b-2.md` | 5 |
+| 6 | Artifact packaging | A | Nov 1-4 | 2 |
 
-Immediate actions (today): merge `feat/index-wp1-closures` into `feat/index` (squash
-or merge commit, either is fine), `git add plans/` and commit, then branch
-`feat/index-wp2-queries` from `feat/index`.
+Paper: the paper lives in janez87/Causal4j (Overleaf-linked); `paper/` leaves this
+repository with the `feat/index-remove-paper` PR, and `bench/export_paper.sh <run-id>`
+copies `bench/out/<run-id>/` into the paper checkout and builds `main.tex` (DEFT
+landscape version), `full_version.tex` (research track) and `technical.tex`.
+Datasets: `policy` (dev/seed-policy-dag.cypher, the landscape paper's running example)
+joins `covid` as the second DAG with latent variables (WP5b-2).
+Master receives `feat/index` as a whole at WP6; #34 was closed.
 
 ## What changed: the August branch
 

@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 /** Snapshot build from an edge list (RQ2): with closures, and with the closure budget forcing the layer-pruned branch. */
 @BenchmarkMode(Mode.SampleTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
-@Fork(value = 3, jvmArgsAppend = {"-Xmx4g"})
+@Fork(value = 2, jvmArgsAppend = {"-Xmx4g"})
 @Warmup(iterations = 5, time = 1)
 @Measurement(iterations = 10, time = 1)
 @State(Scope.Thread)

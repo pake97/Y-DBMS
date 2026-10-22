@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A monorepo containing two Maven modules:
 
 - **`plugin/`** — Neo4j procedures/functions plugin (JAR dropped into `plugins/`). Compiles a causal DAG stored in Neo4j into an in-memory representation and exposes structural queries (ancestors, descendants, d-separation, adjustment sets) as Cypher-callable procedures. Backend runtime for a future causal-analysis DSL.
-- **`dsl/`** — Future DSL/parser/planner. Depends only on `com.example.causal.api.*` from the plugin module.
+- **`dsl/`** — DSL/parser/planner with two backends: Neo4j (calls the plugin's procedures) and in-memory. See the DSL rules under *Key architectural rules*.
 
 The current work plan (work packages, owners, deadlines) is in `CODE-PLAN.md`.
 
@@ -64,7 +64,12 @@ dev/
 ## Key architectural rules
 
 - **Procedures are thin**: no graph logic in `CausalProcedures` or `CausalFunctions`.
-- **DSL layer sees only `com.example.causal.api.*`** — never runtime internals.
+- **DSL, Neo4j backend: sees only `com.example.causal.api.*`** — never runtime internals;
+  it reaches the runtime through the procedures.
+- **DSL, in-memory backend: uses the plugin's runtime algorithms** (`runtime.algorithms.Adjustment`,
+  on a snapshot built with `GraphBuilder`) for IDENTIFY, so both backends give the same
+  IDENTIFY answers (generalized adjustment criterion, latent variables excluded). Do not
+  reimplement identification in the DSL.
 - **`RuntimeRegistry`** is the process-scoped singleton holding `CausalGraphRuntime`.
   Neo4j instantiates procedure classes per-call, so the runtime must live outside them.
 - **DTOs** (`com.example.causal.dto`) must use plain classes with `public final` fields

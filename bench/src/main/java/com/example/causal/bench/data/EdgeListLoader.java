@@ -18,9 +18,9 @@ public final class EdgeListLoader {
     }
 
     /**
-     * Node order: meta.json "nodes" (bnlearn, covid), else v0..v{n-1} (synthetic).
+     * Node order: meta.json "nodes" (bnlearn, covid, policy), else v0..v{n-1} (synthetic).
      * Latent ids: meta.json "latent", which WP5a parses from dev/seed-dag.cypher's
-     * latent flags for covid; empty for every other dataset.
+     * latent flags for covid (and dev/seed-policy-dag.cypher's for policy); empty elsewhere.
      */
     public static EdgeList load(Datasets.Dataset d) {
         JsonNode meta = d.meta();
