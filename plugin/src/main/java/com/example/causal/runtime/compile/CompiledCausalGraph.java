@@ -38,7 +38,8 @@ import java.util.logging.Logger;
  * not compacted until the next full compile. {@link #size()} is the array length
  * (every loop over indices uses it); {@link #liveCount()} counts the variables.
  *
- * <p>{@link #logStructure()} dumps all of this; it runs on every compile.
+ * <p>{@link #logStructure()} dumps all of this at FINE; {@code compile()} calls it only when FINE
+ * is enabled for this class's logger.
  */
 public final class CompiledCausalGraph implements GraphSnapshot {
 
@@ -522,7 +523,7 @@ public final class CompiledCausalGraph implements GraphSnapshot {
         }
 
         sb.append("\n────────────────────────────────────────────────────────────\n");
-        LOG.info(sb.toString());
+        LOG.fine(sb.toString());
     }
 
     /** One row per node: the bit row (column j = node j) when n ≤ 64, else the row cardinality. */

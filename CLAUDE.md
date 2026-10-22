@@ -102,10 +102,15 @@ canonical key used by `VariableRef`.
 
 ## Structural logging (Student A)
 
-Every call to `CALL causal.compile()` automatically logs the full adjacency lists
-and topological order via `CompiledCausalGraph.logStructure()`. Read this output
-to verify your data structures are correct. In the embedded test harness it goes
-to stdout; on a real Neo4j server it goes to `logs/neo4j.log`.
+`CALL causal.compile()` (and the on-demand compile of read procedures) dumps the
+full adjacency lists, topological order, layers and closures via
+`CompiledCausalGraph.logStructure()` only when FINE is enabled for the
+`com.example.causal.runtime.compile.CompiledCausalGraph` logger; by default it
+writes nothing (the dump is megabytes on large DAGs and used to be paid inside
+every timed recompile). To read it, enable FINE for that logger, e.g. a
+`logging.properties` with `com.example.causal.runtime.compile.CompiledCausalGraph.level = FINE`
+and `java.util.logging.ConsoleHandler.level = FINE`. In the embedded test harness
+it then goes to stderr; on a real Neo4j server to `logs/neo4j.log`.
 
 When you add new structures (bitset cache, index maps, etc.), add a section
 to `logStructure()` so you can inspect them in the same place.
