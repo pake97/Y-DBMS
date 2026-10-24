@@ -6,11 +6,11 @@
 
     <parent>
         <groupId>com.example.causal</groupId>
-        <artifactId>causal4j</artifactId>
+        <artifactId>y-dbms</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>causal4j-dsl</artifactId>
+    <artifactId>ydbms-dsl</artifactId>
 
     <properties>
         <antlr4.version>4.13.2</antlr4.version>
@@ -24,7 +24,7 @@
     <dependencies>
         <dependency>
             <groupId>com.example.causal</groupId>
-            <artifactId>causal4j-plugin</artifactId>
+            <artifactId>ydbms-plugin</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -46,7 +46,7 @@
           Used by the DSL→plugin end-to-end tests AND by the REPL's `embedded`
           mode (EmbeddedNeo4jBackend). Kept at `compile` scope so it is on the
           `exec:java` runtime classpath (whose default scope excludes `provided`
-          and `runtime`). causal4j-dsl is a leaf module — nothing depends on it —
+          and `runtime`). ydbms-dsl is a leaf module — nothing depends on it —
           so this does not leak transitively anywhere.
         -->
         <dependency>

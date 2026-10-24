@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
  * Neo4j-backed executor: translates each DSL statement to Cypher and executes
  * it against a running Neo4j server via the Bolt {@link Driver}. Structural
  * queries delegate to the {@code causal.*} procedures provided by
- * {@code causal4j-plugin}, so the Neo4j graph is the single source of truth.
+ * {@code ydbms-plugin}, so the Neo4j graph is the single source of truth.
  *
  * <p>Worlds live on the server ({@code causal.intervene}, {@code causal.use},
  * {@code causal.models}): {@code INTERVENE} defines a derived world there, and every

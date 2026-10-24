@@ -4,7 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-A monorepo containing two Maven modules:
+Y-DBMS (formerly Causal4j): a monorepo with three Maven modules (`plugin`, `dsl`, `bench`;
+artifacts `ydbms-plugin`, `ydbms-dsl`, `ydbms-bench`) and `artifact/`, the paper's
+reproduction instructions. The Java packages are still `com.example.causal.*` and the bench
+Python package is still `causal4j_bench`.
 
 - **`plugin/`** — Neo4j procedures/functions plugin (JAR dropped into `plugins/`). Compiles a causal DAG stored in Neo4j into an in-memory representation and exposes structural queries (ancestors, descendants, d-separation, adjustment sets) as Cypher-callable procedures. Backend runtime for a future causal-analysis DSL.
 - **`dsl/`** — DSL/parser/planner with two backends: Neo4j (calls the plugin's procedures) and in-memory. See the DSL rules under *Key architectural rules*.
@@ -32,8 +35,8 @@ mvn package -pl plugin -P deploy -DskipTests
 ./dev/seed.sh                              # load the COVID-19 DAG after Neo4j starts
 ```
 
-**Module-scoped tests and `-am`**: `dsl` depends on `causal4j-plugin`. Running
-`mvn test -pl dsl` *without* `-am` resolves a possibly-stale `causal4j-plugin`
+**Module-scoped tests and `-am`**: `dsl` depends on `ydbms-plugin`. Running
+`mvn test -pl dsl` *without* `-am` resolves a possibly-stale `ydbms-plugin`
 from your local `~/.m2` instead of rebuilding it from source — which produces
 confusing failures (e.g. "no procedure `causal.mediators`" or "expected
 List<String> but was List<Node>") when source has moved ahead of the installed

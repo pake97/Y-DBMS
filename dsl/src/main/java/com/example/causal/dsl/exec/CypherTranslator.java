@@ -12,7 +12,7 @@ import java.util.Map;
 
 /**
  * Translates DSL AST statements into Cypher + parameter bindings for execution
- * against a Neo4j server that has the {@code causal4j-plugin} loaded.
+ * against a Neo4j server that has the {@code ydbms-plugin} loaded.
  *
  * <p>The Cypher we generate is either:
  * <ul>

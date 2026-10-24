@@ -6,7 +6,7 @@
 
     <parent>
         <groupId>com.example.causal</groupId>
-        <artifactId>causal4j</artifactId>
+        <artifactId>y-dbms</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
 
@@ -15,7 +15,7 @@
         datasets WP5a generates under bench/datasets, bench/workloads, bench/reference.
         Build: mvn -pl bench -am package -DskipTests  ->  bench/target/bench.jar
     -->
-    <artifactId>causal4j-bench</artifactId>
+    <artifactId>ydbms-bench</artifactId>
 
     <properties>
         <jmh.version>1.37</jmh.version>
@@ -26,7 +26,7 @@
     <dependencies>
         <dependency>
             <groupId>com.example.causal</groupId>
-            <artifactId>causal4j-plugin</artifactId>
+            <artifactId>ydbms-plugin</artifactId>
             <version>${project.version}</version>
         </dependency>
         <!-- Embedded Neo4j for the Cypher and GDS baselines; brings the neo4j runtime. -->

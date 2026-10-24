@@ -12,7 +12,7 @@ import org.neo4j.driver.Driver;
  * procedures are registered:
  * <ul>
  *   <li>{@link LiveNeo4jBackend} — Bolt connection to a running server whose
- *       {@code plugins/} directory contains the {@code causal4j-plugin} JAR.</li>
+ *       {@code plugins/} directory contains the {@code ydbms-plugin} JAR.</li>
  *   <li>{@link EmbeddedNeo4jBackend} — an in-process Neo4j with the procedures
  *       registered programmatically; no external server required.</li>
  * </ul>
