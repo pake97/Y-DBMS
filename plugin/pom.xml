@@ -6,11 +6,11 @@
 
     <parent>
         <groupId>com.example.causal</groupId>
-        <artifactId>causal4j</artifactId>
+        <artifactId>y-dbms</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>causal4j-plugin</artifactId>
+    <artifactId>ydbms-plugin</artifactId>
 
     <dependencies>
         <!--
@@ -71,7 +71,7 @@
             </plugin>
             <!--
                 Shade produces a fat JAR with all non-provided dependencies bundled.
-                Deploy target/causal4j-plugin-1.0-SNAPSHOT.jar to Neo4j plugins/.
+                Deploy target/ydbms-plugin-1.0-SNAPSHOT.jar to Neo4j plugins/.
             -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -128,6 +128,10 @@
                                         </exec>
                                         <sleep seconds="2"/>
 
+                                        <!-- the plugin's jar before the Y-DBMS rename: two jars would register causal.* twice -->
+                                        <delete failonerror="false">
+                                            <fileset dir="${neo4j.home}/plugins/" includes="causal4j-plugin-*.jar"/>
+                                        </delete>
                                         <echo message="Copying JAR to ${neo4j.home}/plugins/..."/>
                                         <copy file="${project.build.directory}/${project.build.finalName}.jar"
                                               todir="${neo4j.home}/plugins/"

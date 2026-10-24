@@ -1,11 +1,14 @@
-# Causal4j
+# Y-DBMS
 
-A Neo4j-backed toolkit for causal inference. Two Maven modules:
+A Neo4j-backed DBMS extension for causal inference (formerly Causal4j). Three Maven modules,
+plus the paper's reproduction instructions:
 
 | Module | What it is |
 |---|---|
 | [`plugin/`](plugin/) | Neo4j procedures/functions. Compiles a causal DAG stored in Neo4j into an in-memory representation and exposes structural queries (`causal.ancestors`, `causal.adjustmentCandidate`, …) as Cypher-callable procedures. |
 | [`dsl/`](dsl/) | A causal-inference DSL (`DEFINE CAUSAL DAG`, `IDENTIFY EFFECT OF`, `INTERVENE ON …`, `COUNTERFACTUAL …`) that either runs in-process against an in-memory model or translates to Cypher calls against the plugin. Full language reference: **[`dsl/README.md`](dsl/README.md)**. |
+| [`bench/`](bench/) | The evaluation: datasets, reference answers, JMH benchmarks and baselines (Cypher, GDS, pgmpy, dagitty, DoWhy, causal-learn), and the scripts that turn a run into the paper's tables and figures. See **[`bench/README.md`](bench/README.md)**. |
+| [`artifact/`](artifact/) | How to reproduce the paper's results from this repository: **[`artifact/README.md`](artifact/README.md)**. |
 
 The DSL depends only on the plugin's `com.example.causal.api.*` package. Everything under `runtime.*` / `procedures.*` is a plugin implementation detail.
 
@@ -56,6 +59,9 @@ dsl/
     CausalDSL.java    ← programmatic entry point
     CausalDSLRepl     ← interactive REPL (executes statements)
     CypherDryRunRepl  ← prints the Cypher a statement WOULD emit (no execution)
+
+bench/                ← evaluation (datasets, JMH harness, scripts, results_to_tex)
+artifact/             ← reproducing the paper (README)
 
 dev/
   seed-dag.cypher     ← COVID-19 DAG (25 vars, 78 edges)
@@ -278,7 +284,7 @@ CALL causal.backdoorVariables(t, y) YIELD variable RETURN variable;
 ### Deploy to a different Neo4j server
 
 ```bash
-cp plugin/target/causal4j-plugin-1.0-SNAPSHOT.jar $NEO4J_HOME/plugins/
+cp plugin/target/ydbms-plugin-1.0-SNAPSHOT.jar $NEO4J_HOME/plugins/
 # restart Neo4j, then verify:
 ```
 
