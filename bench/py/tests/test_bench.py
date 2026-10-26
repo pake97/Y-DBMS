@@ -1,8 +1,8 @@
 import networkx as nx
 import pytest
 
-from causal4j_bench import DATASETS, bif, reference, synthetic, workloads
-from causal4j_bench.io import read_dataset, write_edges
+from ydbms_bench import DATASETS, bif, reference, synthetic, workloads
+from ydbms_bench.io import read_dataset, write_edges
 
 MINI_BIF = """
 network unknown { }
@@ -153,7 +153,7 @@ def test_read_dataset_roundtrip(tmp_path):
 @pytest.mark.parametrize("suffix", [".json", ".json.gz"])
 def test_rows_json_roundtrips_and_is_byte_stable(tmp_path, suffix):
     import gzip, json
-    from causal4j_bench.io import write_rows_json
+    from ydbms_bench.io import write_rows_json
     rows = [{"t": "a", "y": "b", "minimal": [["c"]]}, {"t": "a", "y": "c", "minimal": None}]
     a, b = tmp_path / f"a{suffix}", tmp_path / f"b{suffix}"
     write_rows_json(a, {"dataset": "toy"}, "pairs", rows)

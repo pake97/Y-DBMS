@@ -3,9 +3,9 @@ emitter must be deterministic and grammar-safe."""
 
 import pytest
 
-from causal4j_pipeline.emit.dsl import emit_dsl, format_number
-from causal4j_pipeline.io.readers import read_causal
-from causal4j_pipeline.model import CausalModel, VariableSpec, sanitize_id
+from ydbms_pipeline.emit.dsl import emit_dsl, format_number
+from ydbms_pipeline.io.readers import read_causal
+from ydbms_pipeline.model import CausalModel, VariableSpec, sanitize_id
 
 
 def build_model() -> CausalModel:

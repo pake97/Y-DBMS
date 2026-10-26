@@ -3,9 +3,9 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "causal4j_bench"
+name = "ydbms_bench"
 version = "0.1.0"
-description = "Datasets, workloads and reference answers for the Causal4j evaluation"
+description = "Datasets, workloads and reference answers for the Y-DBMS evaluation"
 requires-python = ">=3.10"
 dependencies = ["networkx>=3.2", "numpy>=1.24", "pgmpy>=0.1.24"]
 
@@ -16,7 +16,7 @@ plots = ["matplotlib>=3.7"]                              # results_to_tex
 external = ["neo4j>=5.20", "causal-learn>=0.1.3", "dowhy>=0.11"]  # roundtrip (plus [r])
 
 [project.scripts]
-causal4j-bench = "causal4j_bench.cli:main"
+ydbms-bench = "ydbms_bench.cli:main"
 
 [tool.setuptools]
-packages = ["causal4j_bench"]
+packages = ["ydbms_bench"]

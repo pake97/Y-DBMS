@@ -1,6 +1,6 @@
 # Y-DBMS
 
-A Neo4j-backed DBMS extension for causal inference (formerly Causal4j). Three Maven modules,
+A Neo4j-backed DBMS extension for causal inference (formerly Y-DBMS). Three Maven modules,
 plus the paper's reproduction instructions:
 
 | Module | What it is |

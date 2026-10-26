@@ -19,7 +19,7 @@ for ds in $(echo "${DATASETS_EXT_BC:-$REAL}" | tr , ' '); do
   if have "roundtrip_bc/$ds.csv"; then echo "skip roundtrip_bc/$ds.csv (exists)"; continue; fi
   rm -f "$out.partial"
   if java -Xmx4g -cp "$JAR" com.example.causal.bench.run.ServeBolt "$ds" \
-      "$PYTHON" -m causal4j_bench.roundtrip "$ds" "$out.partial" --balanced --libs pgmpy,dagitty,dowhy; then
+      "$PYTHON" -m ydbms_bench.roundtrip "$ds" "$out.partial" --balanced --libs pgmpy,dagitty,dowhy; then
     mv "$out.partial" "$out"
   else
     fail "roundtrip_bc/$ds: round trip failed"

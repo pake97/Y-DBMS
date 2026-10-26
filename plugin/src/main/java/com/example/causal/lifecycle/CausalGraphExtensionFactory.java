@@ -28,7 +28,7 @@ public final class CausalGraphExtensionFactory
     }
 
     public CausalGraphExtensionFactory() {
-        super(ExtensionType.DATABASE, "causal4j-listener");
+        super(ExtensionType.DATABASE, "ydbms-listener");
     }
 
     @Override

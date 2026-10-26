@@ -9,4 +9,4 @@ source "$(dirname "$0")/scripts/common.sh"
 jmh_each tier_a 'TierABenchmarks.(ancestors|descendants|reaches|confounders|mediators)$' "$DATASETS_A"
 jmh_each cypher 'CypherBenchmarks.(ancestors|reaches)' "$DATASETS_A"
 jmh_each tier_bc 'TierBCBenchmarks.(dsep|decide)$' asia -p mask=true -p verdict=connected
-"$PYTHON" -m causal4j_bench.results_to_tex "$RUN_ID" --quick
+"$PYTHON" -m ydbms_bench.results_to_tex "$RUN_ID" --quick

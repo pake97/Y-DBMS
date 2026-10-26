@@ -171,7 +171,7 @@ def balanced_dsep(g: nx.DiGraph, triples, latent=frozenset(), use_dagitty=True):
             dg.close()
 
 
-# ── RQ5: validation of sets Causal4j streamed for pairs without a reference family ──
+# ── RQ5: validation of sets Y-DBMS streamed for pairs without a reference family ──
 
 VALID_MINIMAL, VALID_NOT_MINIMAL, INVALID = 2, 1, 0
 _validators = {}

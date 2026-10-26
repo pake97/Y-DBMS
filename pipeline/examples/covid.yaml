@@ -1,7 +1,7 @@
 # Mode B on the paper's running example: known COVID-19 DAG + observational
 # data + linear-Gaussian hypothesis -> fitted covid.causal ready for the DSL REPL.
 #
-#   causal4j-pipeline run examples/covid.yaml --dry-run
+#   ydbms-pipeline run examples/covid.yaml --dry-run
 #
 # Point data.path at your observational dataset (columns = variable ids used
 # in the DAG file).

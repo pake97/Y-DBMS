@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RQ4: Causal4j (index on) tier (a) latency over the synthetic grid, one seed per (model, |V|, d):
+# RQ4: Y-DBMS (index on) tier (a) latency over the synthetic grid, one seed per (model, |V|, d):
 # seed 0, 30 graphs (correctness, RQ5, covers all 150), and masked d-separation (connected triples)
 # and decide (tiers b/c) over the same 30 graphs.
 source "$(dirname "$0")/common.sh"

@@ -8,7 +8,7 @@
 # Environment: REUSE_EXTERNAL=<run-id> copies Cypher, GDS and the external round trip from an earlier
 # run (datasets it lacks are measured); REUSE_RQ5=<run-id> copies the timing-independent RQ5 run
 # (--recompute-rq5, or --assemble without it, measures RQ5). RUN_ID=<id> resumes an interrupted run
-# or part. Needs the gitignored edge lists: run `causal4j-bench fetch` and `causal4j-bench synth` first.
+# or part. Needs the gitignored edge lists: run `ydbms-bench fetch` and `ydbms-bench synth` first.
 #
 # Groups run in the order the paper needs them, each as its own process: a failing group is logged to
 # $RUN/failures.log and the run continues with the next (inside a group, a failing dataset is logged
@@ -109,7 +109,7 @@ fi
 
 source "$ROOT/bench/scripts/common.sh"
 for f in bench/datasets/bnlearn/munin/edges.csv bench/datasets/synthetic/ba-n10000-d8-s0/edges.csv; do
-  [ -f "$f" ] || { echo "$f missing: run causal4j-bench fetch && causal4j-bench synth first" >&2; exit 1; }
+  [ -f "$f" ] || { echo "$f missing: run ydbms-bench fetch && ydbms-bench synth first" >&2; exit 1; }
 done
 mkdir -p "$RUN/logs"
 if [ "$MODE" = part ]; then
@@ -133,7 +133,7 @@ group() {
     fail "group $name failed (exit $?) after $(( $(date +%s) - t0 )) s; continuing"
     echo "$(date -u +%FT%TZ) $name FAILED" >> "$RUN/groups.log"
   fi
-  "$PYTHON" -m causal4j_bench.results_to_tex "$RUN_ID" --quick > "$RUN/logs/results_to_tex.log" 2>&1 \
+  "$PYTHON" -m ydbms_bench.results_to_tex "$RUN_ID" --quick > "$RUN/logs/results_to_tex.log" 2>&1 \
     || fail "results_to_tex --quick failed after group $name (see logs/results_to_tex.log)"
 }
 in_part() {  # part 4 exists only as an explicit part, never in a full run
@@ -215,7 +215,7 @@ fi
 if [ "$MODE" = part ]; then
   echo "part $PART ($RUN_ID) done in $(cat "$RUN/wall_time.txt"); partial tables in bench/out/$RUN_ID"
 else
-  "$PYTHON" -m causal4j_bench.results_to_tex "$RUN_ID" || fail "final results_to_tex failed (see above)"
+  "$PYTHON" -m ydbms_bench.results_to_tex "$RUN_ID" || fail "final results_to_tex failed (see above)"
   echo "run $RUN_ID done; measured $(cat "$RUN/wall_time.txt"); outputs in bench/out/$RUN_ID"
 fi
 if [ -s "$RUN/failures.log" ]; then echo "failures:"; cat "$RUN/failures.log"; fi

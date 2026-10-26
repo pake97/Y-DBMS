@@ -10,8 +10,8 @@ from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
-from causal4j_pipeline.config import DataSection
-from causal4j_pipeline.model import CausalModel, sanitize_id
+from ydbms_pipeline.config import DataSection
+from ydbms_pipeline.model import CausalModel, sanitize_id
 
 
 def load_data(cfg: DataSection) -> Tuple[pd.DataFrame, Dict[str, str]]:

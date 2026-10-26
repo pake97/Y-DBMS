@@ -1,4 +1,4 @@
-"""Datasets, workloads and reference answers for the Causal4j evaluation."""
+"""Datasets, workloads and reference answers for the Y-DBMS evaluation."""
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]

@@ -27,7 +27,7 @@ def _versions() -> Dict[str, str]:
     from importlib.metadata import PackageNotFoundError, version
 
     out: Dict[str, str] = {"python": platform.python_version()}
-    for pkg in ("causal4j-pipeline", "numpy", "pandas", "networkx", "causal-learn", "dowhy", "neo4j"):
+    for pkg in ("ydbms-pipeline", "numpy", "pandas", "networkx", "causal-learn", "dowhy", "neo4j"):
         try:
             out[pkg] = version(pkg)
         except PackageNotFoundError:
@@ -46,7 +46,7 @@ def build_provenance(
 ) -> Dict[str, Any]:
     prov: Dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "tool": "causal4j-pipeline",
+        "tool": "ydbms-pipeline",
         "versions": _versions(),
         "config": config_raw,
     }

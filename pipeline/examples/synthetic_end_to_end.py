@@ -7,8 +7,8 @@ causal-learn is installed) or use the known DAG, fit, refute, emit.
 import numpy as np
 import pandas as pd
 
-from causal4j_pipeline import Pipeline
-from causal4j_pipeline.model import CausalModel
+from ydbms_pipeline import Pipeline
+from ydbms_pipeline.model import CausalModel
 
 
 def generate(n=20_000, seed=0) -> pd.DataFrame:

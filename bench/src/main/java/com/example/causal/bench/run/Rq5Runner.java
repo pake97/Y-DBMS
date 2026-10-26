@@ -18,7 +18,7 @@ import java.nio.file.Path;
 import java.util.*;
 
 /**
- * RQ5: Causal4j in process against the WP5a reference answers, for every dataset with a
+ * RQ5: Y-DBMS in process against the WP5a reference answers, for every dataset with a
  * bench/reference/&lt;ds&gt; directory (or the comma-separated ids in args[1]).
  *
  * <ul>
@@ -29,7 +29,7 @@ import java.util.*;
  *   <li>non-null reference families against {@code listMinimal} with no limit, as sets of sets;
  *       null families from WP5a's per-pair limits (timeout, more than 1000 sets) get
  *       {@code listMinimal(limit = 100)} written to rq5_to_validate.json for
- *       {@code causal4j-bench reference --validate}. Pairs whose families WP5a skipped by design
+ *       {@code ydbms-bench reference --validate}. Pairs whose families WP5a skipped by design
  *       (synthetic n &gt; 316, {@code minimal_skipped} in meta.json) get decide only.</li>
  * </ul>
  * Writes rq5.csv (the validation columns are filled by --validate), rq5_disagreements.csv
@@ -49,7 +49,7 @@ public final class Rq5Runner {
              PrintWriter dis = new PrintWriter(Files.newBufferedWriter(out.resolve("rq5_disagreements.csv")))) {
             csv.println("dataset,triples,triples_agree,pairs,canonical_agree,identifiable,not_identifiable,"
                     + "families_compared,families_equal,families_validated,sets_validated,sets_failing");
-            dis.println("dataset,kind,item,causal4j,reference");
+            dis.println("dataset,kind,item,ydbms,reference");
             for (String ds : ids) {
                 Rq5Runner r = new Rq5Runner(ds, dis);
                 r.dsep(Workloads.dsepReference(ds));

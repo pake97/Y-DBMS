@@ -10,7 +10,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RUN_ID=${1:?usage: export_paper.sh <run-id> [paper-dir]}
 PAPER=${2:-$ROOT/../Causal4j-paper}
 OUT=$ROOT/bench/out/$RUN_ID
-[ -f "$OUT/numbers.tex" ] || { echo "$OUT/numbers.tex missing: run python -m causal4j_bench.results_to_tex $RUN_ID" >&2; exit 1; }
+[ -f "$OUT/numbers.tex" ] || { echo "$OUT/numbers.tex missing: run python -m ydbms_bench.results_to_tex $RUN_ID" >&2; exit 1; }
 [ -d "$PAPER/.git" ] || { echo "$PAPER is not a git checkout" >&2; exit 1; }
 git -C "$PAPER" pull --rebase --autostash  # keeps local edits (e.g. a new numbers-defaults line)
 mkdir -p "$PAPER/tables" "$PAPER/figures"

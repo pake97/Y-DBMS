@@ -14,8 +14,8 @@ from typing import Any, Dict
 import numpy as np
 import pandas as pd
 
-from causal4j_pipeline.model import CausalModel
-from causal4j_pipeline.registry import HYPOTHESES
+from ydbms_pipeline.model import CausalModel
+from ydbms_pipeline.registry import HYPOTHESES
 
 
 def fit_sem(model: CausalModel, df: pd.DataFrame, hypothesis: str = "linear-gaussian", **params) -> Dict[str, Any]:

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from causal4j_pipeline.model import CausalModel, VariableSpec
+from ydbms_pipeline.model import CausalModel, VariableSpec
 
 _NODES_QUERY = """
 MATCH (v:Variable)
@@ -39,7 +39,7 @@ def read_dag_from_neo4j(
         from neo4j import GraphDatabase
     except ImportError as e:  # pragma: no cover
         raise ImportError(
-            "The Neo4j source adapter requires the 'neo4j' driver: pip install causal4j-pipeline[neo4j]"
+            "The Neo4j source adapter requires the 'neo4j' driver: pip install ydbms-pipeline[neo4j]"
         ) from e
 
     model = CausalModel(name=model_name)

@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * In-process Neo4j (neo4j-harness) with the Causal4j and GDS procedures, loaded
+ * In-process Neo4j (neo4j-harness) with the Y-DBMS and GDS procedures, loaded
  * with one WP5a dataset and compiled. Same registration as CausalProceduresTest.
  */
 public final class EmbeddedNeo4j implements AutoCloseable {
@@ -41,7 +41,7 @@ public final class EmbeddedNeo4j implements AutoCloseable {
     /** Start a fresh database, load {@code el} and run causal.compile(). */
     public static EmbeddedNeo4j start(EdgeList el) {
         try {
-            Path dir = Files.createTempDirectory("causal4j-bench-");
+            Path dir = Files.createTempDirectory("ydbms-bench-");
             Neo4j neo4j = Neo4jBuilders.newInProcessBuilder(dir)
                     .withProcedure(CausalProcedures.class)
                     .withFunction(CausalFunctions.class)
