@@ -1,6 +1,6 @@
-# causal4j-pipeline
+# ydbms-pipeline
 
-Ingestion pipeline for [Causal4j](../README.md): everything statistical or
+Ingestion pipeline for [Y-DBMS](../README.md): everything statistical or
 ML-based that the database cannot do happens here, upstream, in Python —
 causal structure discovery, hypothesis-driven SEM fitting, refutation. The
 output is a grammar-valid `.causal` DSL file (plus a provenance sidecar);
@@ -22,13 +22,13 @@ pip install -e ".[neo4j]"           # + read-only DB source adapter
 **Mode B — you have the DAG, fit the model:**
 
 ```bash
-causal4j-pipeline run examples/covid.yaml
+ydbms-pipeline run examples/covid.yaml
 ```
 
 **Mode A — discover the DAG from data:**
 
 ```bash
-causal4j-pipeline run examples/discovery.yaml
+ydbms-pipeline run examples/discovery.yaml
 ```
 
 Either way the result is `out/<name>.causal` + `out/<name>.provenance.json`.
@@ -38,18 +38,18 @@ writes to the database.
 ## CLI
 
 ```
-causal4j-pipeline run <config.yaml> [--dry-run]    # full chain
-causal4j-pipeline discover <config.yaml>           # Mode A, structure only
-causal4j-pipeline fit <config.yaml>                # Mode B
-causal4j-pipeline emit <dag-file> [--out X]        # convert gml/dot/csv -> .causal
-causal4j-pipeline validate <file.causal>           # structural round-trip check
-causal4j-pipeline registry                         # list available algorithms
+ydbms-pipeline run <config.yaml> [--dry-run]    # full chain
+ydbms-pipeline discover <config.yaml>           # Mode A, structure only
+ydbms-pipeline fit <config.yaml>                # Mode B
+ydbms-pipeline emit <dag-file> [--out X]        # convert gml/dot/csv -> .causal
+ydbms-pipeline validate <file.causal>           # structural round-trip check
+ydbms-pipeline registry                         # list available algorithms
 ```
 
 ## Python API
 
 ```python
-from causal4j_pipeline import Pipeline
+from ydbms_pipeline import Pipeline
 
 result = (Pipeline(seed=42)
           .with_data("data.csv", roles={"T": "treatment", "Y": "outcome"})
@@ -67,7 +67,7 @@ Register a new discovery algorithm, hypothesis, resolution policy, refuter, or
 reader by name — config selects it, no core changes:
 
 ```python
-from causal4j_pipeline.registry import HYPOTHESES
+from ydbms_pipeline.registry import HYPOTHESES
 
 @HYPOTHESES.register("my-hypothesis")
 def fit_mine(model, df, **params):
@@ -75,7 +75,7 @@ def fit_mine(model, df, **params):
     return {"hypothesis": "my-hypothesis"}
 ```
 
-External packages can do the same through the `causal4j_pipeline` entry-point
+External packages can do the same through the `ydbms_pipeline` entry-point
 group.
 
 ## Guarantees
@@ -103,9 +103,9 @@ activates once `[discovery]` (causal-learn) is installed.
 
 ### Manual walk-through
 
-Run these from the `pipeline/` directory. If the `causal4j-pipeline` script is
+Run these from the `pipeline/` directory. If the `ydbms-pipeline` script is
 not on your PATH (it installs to `~/.local/bin`), substitute
-`python -m causal4j_pipeline.cli` for `causal4j-pipeline`.
+`python -m ydbms_pipeline.cli` for `ydbms-pipeline`.
 
 **1. Recover a known SEM end-to-end.** Generates data from a SEM with true
 coefficients (0.9, 0.7, −0.5, 1.2, 0.2), fits, and prints the emitted `.causal`:
@@ -121,10 +121,10 @@ causal-learn installed this runs Mode A (discovery); otherwise Mode B (known DAG
 **2. Exercise the CLI.**
 
 ```bash
-causal4j-pipeline registry                        # list algorithms/hypotheses/policies
-causal4j-pipeline emit out/synthetic.causal        # DAG file -> .causal (round-trip)
-causal4j-pipeline validate out/synthetic.causal    # structural check (acyclic, declared, edges)
-causal4j-pipeline run examples/covid.yaml --dry-run  # full chain, prints DSL, writes nothing
+ydbms-pipeline registry                        # list algorithms/hypotheses/policies
+ydbms-pipeline emit out/synthetic.causal        # DAG file -> .causal (round-trip)
+ydbms-pipeline validate out/synthetic.causal    # structural check (acyclic, declared, edges)
+ydbms-pipeline run examples/covid.yaml --dry-run  # full chain, prints DSL, writes nothing
 ```
 
 **3. Verify the real DSL gate.** The pipeline's own `.causal` reader is used for
@@ -144,7 +144,7 @@ If it parses clean, the output contract is fully verified.
 `dag.path` at a GML/DOT/edge-list file, then:
 
 ```bash
-causal4j-pipeline run yourconfig.yaml
+ydbms-pipeline run yourconfig.yaml
 ```
 
 Output lands in `out/<name>.causal` + `out/<name>.provenance.json`. Load the

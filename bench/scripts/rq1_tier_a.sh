@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# RQ1 tier (a): Causal4j in-process index vs DFS (TierABenchmarks), the closure read alone,
-# Causal4j through its procedures, Cypher and GDS on bnlearn, covid, policy,
+# RQ1 tier (a): Y-DBMS in-process index vs DFS (TierABenchmarks), the closure read alone,
+# Y-DBMS through its procedures, Cypher and GDS on bnlearn, covid, policy,
 # synthetic d=4 seed 0 (every n, ER and BA) and ER n=1000 at d=2 and d=8.
 PART=${1:-}  # tier_a | closure_read | procedure | cypher | gds; none: all
 source "$(dirname "$0")/common.sh"

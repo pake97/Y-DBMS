@@ -1,7 +1,7 @@
 """DAG readers: edge-list CSV, GML, DOT (minimal), and ``.causal`` round-trip.
 
-All readers produce a :class:`~causal4j_pipeline.model.CausalModel`. Registered
-in :data:`causal4j_pipeline.registry.READERS` by format name.
+All readers produce a :class:`~ydbms_pipeline.model.CausalModel`. Registered
+in :data:`ydbms_pipeline.registry.READERS` by format name.
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ from pathlib import Path
 
 import networkx as nx
 
-from causal4j_pipeline.model import CausalModel, VariableSpec
-from causal4j_pipeline.registry import READERS
+from ydbms_pipeline.model import CausalModel, VariableSpec
+from ydbms_pipeline.registry import READERS
 
 _EXT_TO_FORMAT = {
     ".csv": "edgelist",

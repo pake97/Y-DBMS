@@ -20,7 +20,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-/** Every baseline answers the same question as Causal4j before anything is timed. */
+/** Every baseline answers the same question as Y-DBMS before anything is timed. */
 class BaselineAgreementTest {
 
     @ParameterizedTest
@@ -28,7 +28,7 @@ class BaselineAgreementTest {
     void cypherAndGdsAgreeWithTheIndex(String dataset) {
         // bnlearn edge lists are gitignored; the bench-quick CI job fetches asia and alarm.
         assumeTrue(java.nio.file.Files.exists(Datasets.edgesPath(dataset)),
-                () -> dataset + " edges.csv missing: causal4j-bench fetch --only " + dataset);
+                () -> dataset + " edges.csv missing: ydbms-bench fetch --only " + dataset);
         EdgeList el = EdgeListLoader.load(dataset);
         CompiledCausalGraph g = SnapshotFactory.fromEdgeList(el);
         ReachabilityIndex idx = new ReachabilityIndex(g);

@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from causal4j_pipeline.model import CausalModel, VariableSpec
+from ydbms_pipeline.model import CausalModel, VariableSpec
 
 
 def format_number(x: float, precision: int = 6) -> str:

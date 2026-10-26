@@ -1,7 +1,7 @@
 """External round-trip baseline (paper baseline d): export the DAG from Neo4j over Bolt,
 build each library's graph object, run the workload, and time the three phases.
 
-usage: python -m causal4j_bench.roundtrip <dataset> <out.csv> [--libs pgmpy,dagitty,causallearn,dowhy] [--balanced]
+usage: python -m ydbms_bench.roundtrip <dataset> <out.csv> [--libs pgmpy,dagitty,causallearn,dowhy] [--balanced]
 With --balanced (tiers b/c, WP5b-2) only dsep and adjustment run, dsep over triples_balanced.csv
 as two operators, dsep_sep and dsep_conn, by the triple's verdict.
 Reads BOLT_URI (set by the Java ServeBolt driver). Appends one CSV row per

@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "causal4j-pipeline"
+name = "ydbms-pipeline"
 version = "0.1.0"
-description = "Ingestion pipeline for Causal4j: causal discovery + SEM fitting upstream of the DB, emitting .causal DSL files"
+description = "Ingestion pipeline for Y-DBMS: causal discovery + SEM fitting upstream of the DB, emitting .causal DSL files"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -23,7 +23,7 @@ neo4j = ["neo4j>=5.0"]
 dev = ["pytest>=7.0"]
 
 [project.scripts]
-causal4j-pipeline = "causal4j_pipeline.cli:main"
+ydbms-pipeline = "ydbms_pipeline.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["causal4j_pipeline*"]
+include = ["ydbms_pipeline*"]

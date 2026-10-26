@@ -36,7 +36,7 @@ public final class Workloads {
     public static List<Labeled> balancedTriples(String dataset) {
         Path p = Datasets.workloadsDir().resolve(dataset).resolve("triples_balanced.csv");
         if (!Files.exists(p)) {
-            throw new IllegalStateException(p + " is missing; regenerate it with: causal4j-bench workloads --balanced --only " + dataset);
+            throw new IllegalStateException(p + " is missing; regenerate it with: ydbms-bench workloads --balanced --only " + dataset);
         }
         List<Labeled> out = new ArrayList<>();
         for (String[] r : csv(p, 4)) out.add(new Labeled(triple(r), Boolean.parseBoolean(r[3])));
@@ -45,7 +45,7 @@ public final class Workloads {
 
     /** dsep.json or dsep.json.gz. */
     public static JsonNode dsepReference(String dataset)       { return reference(dataset, "dsep"); }
-    /** dsep_balanced.json(.gz): verdicts for triples_balanced.csv (causal4j-bench reference). */
+    /** dsep_balanced.json(.gz): verdicts for triples_balanced.csv (ydbms-bench reference). */
     public static JsonNode dsepBalancedReference(String dataset) { return reference(dataset, "dsep_balanced"); }
     /** adjustment.json or adjustment.json.gz. */
     public static JsonNode adjustmentReference(String dataset) { return reference(dataset, "adjustment"); }
@@ -63,7 +63,7 @@ public final class Workloads {
     private static Path file(String dataset, String name) {
         Path p = Datasets.workloadsDir().resolve(dataset).resolve(name);
         if (!Files.exists(p)) {
-            throw new IllegalStateException(p + " is missing; regenerate it with: causal4j-bench workloads --only " + dataset);
+            throw new IllegalStateException(p + " is missing; regenerate it with: ydbms-bench workloads --only " + dataset);
         }
         return p;
     }
@@ -74,7 +74,7 @@ public final class Workloads {
             if (Files.exists(dir.resolve(base + ".json"))) return Datasets.JSON.readTree(dir.resolve(base + ".json").toFile());
             Path gz = dir.resolve(base + ".json.gz");
             if (!Files.exists(gz)) {
-                throw new IllegalStateException(dir + " has no " + base + " reference; regenerate it with: causal4j-bench reference --only " + dataset);
+                throw new IllegalStateException(dir + " has no " + base + " reference; regenerate it with: ydbms-bench reference --only " + dataset);
             }
             try (InputStream in = new GZIPInputStream(Files.newInputStream(gz))) {
                 return Datasets.JSON.readTree(in);

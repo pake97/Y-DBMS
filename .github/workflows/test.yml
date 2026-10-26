@@ -28,12 +28,12 @@ jobs:
           cache: pip
           cache-dependency-path: bench/py/pyproject.toml
       - run: pip install -e 'bench/py[test]'
-      - run: causal4j-bench fetch --only asia     # downloads asia only and checks its SHA-256
-      - run: causal4j-bench covid
-      - run: causal4j-bench policy
-      - run: causal4j-bench synth --only n=100
-      - run: causal4j-bench workloads --only asia,covid,policy
-      - run: causal4j-bench workloads --balanced --only asia,covid,policy
+      - run: ydbms-bench fetch --only asia     # downloads asia only and checks its SHA-256
+      - run: ydbms-bench covid
+      - run: ydbms-bench policy
+      - run: ydbms-bench synth --only n=100
+      - run: ydbms-bench workloads --only asia,covid,policy
+      - run: ydbms-bench workloads --balanced --only asia,covid,policy
       - run: pytest -q bench/py
       - name: Regenerated files match the committed ones
         run: git diff --exit-code -- bench
@@ -53,8 +53,8 @@ jobs:
           cache: pip
           cache-dependency-path: bench/py/pyproject.toml
       - run: pip install -e 'bench/py[plots]'
-      - run: causal4j-bench fetch --only asia,alarm
-      - run: causal4j-bench synth --only n=100
+      - run: ydbms-bench fetch --only asia,alarm
+      - run: ydbms-bench synth --only n=100
       - run: mvn -B -q package -pl bench -am -DskipTests
       - run: mvn -B test -pl bench -am -Dtest=BaselineAgreementTest -Dsurefire.failIfNoSpecifiedTests=false  # Cypher/GDS == index
       - run: RUN_ID=ci bench/run_quick.sh

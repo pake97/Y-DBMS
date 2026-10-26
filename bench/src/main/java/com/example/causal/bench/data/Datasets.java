@@ -26,15 +26,15 @@ public final class Datasets {
 
     private Datasets() {}
 
-    /** Repository root: -Dcausal4j.root, else the nearest ancestor of the cwd holding bench/datasets. */
+    /** Repository root: -Dydbms.root, else the nearest ancestor of the cwd holding bench/datasets. */
     public static Path root() {
-        String p = System.getProperty("causal4j.root");
+        String p = System.getProperty("ydbms.root");
         if (p != null) return Path.of(p).toAbsolutePath();
         for (Path d = Path.of("").toAbsolutePath(); d != null; d = d.getParent()) {
             if (Files.isDirectory(d.resolve("bench/datasets"))) return d;
         }
         throw new IllegalStateException("cannot find bench/datasets above " + Path.of("").toAbsolutePath()
-                + "; run from the repository or pass -Dcausal4j.root=<repo>");
+                + "; run from the repository or pass -Dydbms.root=<repo>");
     }
 
     public static Path datasetsDir()  { return root().resolve("bench/datasets"); }
@@ -66,9 +66,9 @@ public final class Datasets {
                 new IllegalArgumentException("unknown dataset " + id + " under " + datasetsDir()));
         if (!Files.exists(d.dir().resolve("edges.csv"))) {
             String cmd = switch (d.family()) {
-                case "bnlearn" -> "causal4j-bench fetch --only " + id;
-                case "synthetic" -> "causal4j-bench synth --only n=" + d.n();
-                default -> "causal4j-bench " + d.family();
+                case "bnlearn" -> "ydbms-bench fetch --only " + id;
+                case "synthetic" -> "ydbms-bench synth --only n=" + d.n();
+                default -> "ydbms-bench " + d.family();
             };
             throw new IllegalStateException(d.dir().resolve("edges.csv") + " is missing; regenerate it with: " + cmd);
         }

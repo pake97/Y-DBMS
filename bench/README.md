@@ -5,15 +5,15 @@ from fixed seeds. Python only; the Java harness (JMH, baselines) is WP5b.
 
 ```bash
 # R + dagitty are needed for the reference answers; one way to get everything:
-mamba create -n causal4j-bench -c conda-forge python=3.11 r-base r-dagitty rpy2 pgmpy networkx numpy pytest
-mamba activate causal4j-bench
+mamba create -n ydbms-bench -c conda-forge python=3.11 r-base r-dagitty rpy2 pgmpy networkx numpy pytest
+mamba activate ydbms-bench
 pip install -e 'bench/py[r,test]'
 
-causal4j-bench all        # fetch -> covid -> synth -> workloads -> stats -> reference
+ydbms-bench all        # fetch -> covid -> synth -> workloads -> stats -> reference
 pytest bench/py
 ```
 
-Every step is idempotent: a second `causal4j-bench all` leaves `git status` clean.
+Every step is idempotent: a second `ydbms-bench all` leaves `git status` clean.
 
 | Command | Produces | Used by |
 |---|---|---|
@@ -80,12 +80,12 @@ Results are never overwritten; both directories are gitignored.
 
 | Paper element | Produced by | Input in the run directory |
 |---|---|---|
-| Table III (datasets) | `results_to_tex` from `datasets/datasets.csv` (WP5a `causal4j-bench stats`) | – |
+| Table III (datasets) | `results_to_tex` from `datasets/datasets.csv` (WP5a `ydbms-bench stats`) | – |
 | RQ1 tier (a) table `tables/rq1_tier_a.tex` (Table V; descendants only in `rq1_tier_a.csv`) | `scripts/rq1_tier_a.sh`: TierABenchmarks index on/off (in-process, DFS), `ancestorsBits/Count` (closure read, AverageTime ns), ProcedureBenchmarks (CALL causal.* in embedded Neo4j), CypherBenchmarks, GdsBenchmarks | `tier_a/`, `closure_read/`, `procedure/`, `cypher/`, `gds/` (one JSON per dataset), `timeouts.csv` |
-| RQ1 external round-trip | `scripts/rq1_external.sh` (ServeBolt + `causal4j_bench.roundtrip`: pgmpy, dagitty, causal-learn, DoWhy) | `roundtrip.csv` |
+| RQ1 external round-trip | `scripts/rq1_external.sh` (ServeBolt + `ydbms_bench.roundtrip`: pgmpy, dagitty, causal-learn, DoWhy) | `roundtrip.csv` |
 | RQ2 table `tables/rq2.tex`, Fig. `figures/rq2_crossover.pdf` | `scripts/rq2.sh`: CompileBenchmarks both branches; `run.Rq2` heap; latency from TierABenchmarks (closures: the RQ1/RQ4 runs; pruned: `budget=0`) | `compile/`, `rq2.csv`, `rq2_pruned/`, `tier_a/`, `rq4/` |
 | RQ4 Fig. `figures/rq4_latency.pdf` | `scripts/rq4.sh` (TierABenchmarks index=on over the synthetic grid) + RQ1 baselines | `rq4/` |
-| `\speedupTierAvsDfs`, `\speedupTierAvsCypher`, `\speedupProcedureVsCypher` | geometric mean over bnlearn + covid × 5 operators of baseline / Causal4j median latency (in-process, resp. procedure; censored pairs excluded) | `tier_a/`, `procedure/`, `cypher/` |
+| `\speedupTierAvsDfs`, `\speedupTierAvsCypher`, `\speedupProcedureVsCypher` | geometric mean over bnlearn + covid × 5 operators of baseline / Y-DBMS median latency (in-process, resp. procedure; censored pairs excluded) | `tier_a/`, `procedure/`, `cypher/` |
 | `\procedureOverheadUs` | median over the 5 operators on munin of procedure − in-process median latency | `procedure/`, `tier_a/` |
 | `\closureReadUsMunin` | `ancestorsCount` on munin (popcount of one closure row, AverageTime) | `closure_read/` |
 | `\buildMsMunin` | CompileBenchmarks median, munin, closures | `compile/` |
@@ -100,7 +100,7 @@ Results are never overwritten; both directories are gitignored.
 | `\patchVsRecompileInsert`, `\patchVsRecompileDelete` | median over bnlearn + covid of patch / recompile at batch size 1, as a percentage | `rq3/b1/` |
 | `\fallbackThreshold` | smallest swept `causal.patch.threshold` (|V|/8, /4, /2, |V|) at which the median patch / recompile ratio on the delete stream (batch 10) reaches 1 | `rq3_threshold/` |
 | `\mixedWorkloadSpeedup` | median over datasets of query p99 under recompile / under patch, k = 10 | `rq3_mixed/<dataset>.csv` |
-| RQ5 table `tables/rq5.tex`; `\numDsepQueries`, `\numDsepAgree`, `\numPairs`, `\numCanonicalAgree`, `\numPairsNotIdentifiable`, `\numFamiliesCompared`, `\numFamiliesEqual`, `\numFamiliesChecked` | `scripts/rq5.sh`: `run.Rq5Runner` (in process, against `reference/`) then `causal4j-bench reference --validate` (dagitty `isAdjustmentSet` + removal-minimality for pairs whose reference family exceeded WP5a's limits); disagreements in `rq5_disagreements.csv` | `rq5/` |
+| RQ5 table `tables/rq5.tex`; `\numDsepQueries`, `\numDsepAgree`, `\numPairs`, `\numCanonicalAgree`, `\numPairsNotIdentifiable`, `\numFamiliesCompared`, `\numFamiliesEqual`, `\numFamiliesChecked` | `scripts/rq5.sh`: `run.Rq5Runner` (in process, against `reference/`) then `ydbms-bench reference --validate` (dagitty `isAdjustmentSet` + removal-minimality for pairs whose reference family exceeded WP5a's limits); disagreements in `rq5_disagreements.csv` | `rq5/` |
 
 `numbers.tex` defines every macro listed in the paper's `numbers-defaults.tex` (read from
 `--paper-dir`, default `../Causal4j-paper`): the measured value, or that file's `\TODO`

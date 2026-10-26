@@ -4,10 +4,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from causal4j_pipeline.config import KnowledgeSection
-from causal4j_pipeline.model import CausalModel
-from causal4j_pipeline.stages.refute import run_refutation
-from causal4j_pipeline.stages.resolve import resolve_model
+from ydbms_pipeline.config import KnowledgeSection
+from ydbms_pipeline.model import CausalModel
+from ydbms_pipeline.stages.refute import run_refutation
+from ydbms_pipeline.stages.resolve import resolve_model
 
 
 def cpdag_model() -> CausalModel:

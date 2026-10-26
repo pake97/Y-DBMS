@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from causal4j_pipeline.model import VARIABLE_ROLES, VARIABLE_TYPES
+from ydbms_pipeline.model import VARIABLE_ROLES, VARIABLE_TYPES
 
 
 class ConfigError(ValueError):

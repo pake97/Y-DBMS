@@ -19,9 +19,9 @@ from typing import Any, Dict, List, Optional
 
 import networkx as nx
 
-from causal4j_pipeline.config import KnowledgeSection
-from causal4j_pipeline.model import CausalModel
-from causal4j_pipeline.registry import RESOLVERS
+from ydbms_pipeline.config import KnowledgeSection
+from ydbms_pipeline.model import CausalModel
+from ydbms_pipeline.registry import RESOLVERS
 
 
 def resolve_model(

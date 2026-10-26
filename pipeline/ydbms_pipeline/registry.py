@@ -4,10 +4,10 @@ Discovery algorithms, model hypotheses, resolution policies, refuters, and
 graph readers each live in a registry keyed by name. Config selects by name;
 adding a new implementation means registering one callable, no core changes.
 
-External packages can contribute via the ``causal4j_pipeline`` entry-point
+External packages can contribute via the ``ydbms_pipeline`` entry-point
 group::
 
-    [project.entry-points."causal4j_pipeline"]
+    [project.entry-points."ydbms_pipeline"]
     my_algo = "my_pkg.module:register"
 
 where ``register`` is a callable receiving this module.
@@ -68,7 +68,7 @@ def load_plugins() -> None:
     try:
         from importlib.metadata import entry_points
 
-        for ep in entry_points(group="causal4j_pipeline"):
+        for ep in entry_points(group="ydbms_pipeline"):
             ep.load()(globals())
     except Exception:  # pragma: no cover - plugin loading must never break core
         pass

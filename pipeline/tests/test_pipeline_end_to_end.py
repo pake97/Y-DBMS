@@ -8,8 +8,8 @@ import pandas as pd
 import pytest
 import yaml
 
-from causal4j_pipeline.io.readers import read_causal
-from causal4j_pipeline.pipeline import Pipeline, run
+from ydbms_pipeline.io.readers import read_causal
+from ydbms_pipeline.pipeline import Pipeline, run
 
 
 @pytest.fixture()

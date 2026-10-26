@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-Y-DBMS (formerly Causal4j): a monorepo with three Maven modules (`plugin`, `dsl`, `bench`;
+Y-DBMS (formerly Y-DBMS): a monorepo with three Maven modules (`plugin`, `dsl`, `bench`;
 artifacts `ydbms-plugin`, `ydbms-dsl`, `ydbms-bench`) and `artifact/`, the paper's
 reproduction instructions. The Java packages are still `com.example.causal.*` and the bench
-Python package is still `causal4j_bench`.
+Python package is still `ydbms_bench`.
 
 - **`plugin/`** — Neo4j procedures/functions plugin (JAR dropped into `plugins/`). Compiles a causal DAG stored in Neo4j into an in-memory representation and exposes structural queries (ancestors, descendants, d-separation, adjustment sets) as Cypher-callable procedures. Backend runtime for a future causal-analysis DSL.
 - **`dsl/`** — DSL/parser/planner with two backends: Neo4j (calls the plugin's procedures) and in-memory. See the DSL rules under *Key architectural rules*.

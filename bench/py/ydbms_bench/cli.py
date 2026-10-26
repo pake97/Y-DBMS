@@ -1,4 +1,4 @@
-"""causal4j-bench fetch|covid|policy|synth|workloads|stats|reference|all"""
+"""ydbms-bench fetch|covid|policy|synth|workloads|stats|reference|all"""
 import argparse
 import csv
 import gzip
@@ -254,7 +254,7 @@ def cmd_validate(path, workers):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="causal4j-bench", description=__doc__)
+    p = argparse.ArgumentParser(prog="ydbms-bench", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
     for c in ("fetch", "workloads", "reference"):
         s = sub.add_parser(c)

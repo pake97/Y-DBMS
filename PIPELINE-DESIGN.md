@@ -1,4 +1,4 @@
-# Causal4j Ingestion Pipeline — Design Document
+# Y-DBMS Ingestion Pipeline — Design Document
 
 Status: DRAFT for review. Nothing here is implemented yet.
 
@@ -142,7 +142,7 @@ This is the "usable and customizable tool" requirement, concretely:
   class/function, no core changes. A plain Python entry-point hook lets users
   register their own from outside the package.
 - **Three usage levels:**
-  1. **CLI** — `causal4j-pipeline discover|fit|emit|run` (`run` = full chain),
+  1. **CLI** — `ydbms-pipeline discover|fit|emit|run` (`run` = full chain),
      everything driven by the YAML config; `--dry-run` prints the DSL to stdout.
   2. **Python API** — `Pipeline.from_config(...)` / builder-style
      `Pipeline().discover(PC(alpha=.05)).resolve(...).fit(LinearGaussian()).emit(...)`
@@ -187,9 +187,9 @@ emit:
 
 ```
 pipeline/
-  pyproject.toml            # package: causal4j-pipeline; pinned pywhy deps
+  pyproject.toml            # package: ydbms-pipeline; pinned pywhy deps
   README.md                 # usage, examples
-  causal4j_pipeline/
+  ydbms_pipeline/
     cli.py                  # subcommands
     config.py               # YAML schema + validation
     pipeline.py             # runner / builder API

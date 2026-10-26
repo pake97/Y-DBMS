@@ -22,8 +22,8 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 
-from causal4j_pipeline.model import CausalModel
-from causal4j_pipeline.registry import REFUTERS
+from ydbms_pipeline.model import CausalModel
+from ydbms_pipeline.registry import REFUTERS
 
 
 def run_refutation(
@@ -158,7 +158,7 @@ def _dowhy_refuter(method_name: str):
         try:
             from dowhy import CausalModel as DowhyModel
         except ImportError:
-            return {"passed": True, "skipped": "dowhy not installed (pip install causal4j-pipeline[refute])"}
+            return {"passed": True, "skipped": "dowhy not installed (pip install ydbms-pipeline[refute])"}
 
         treatment = next((n for n, v in model.variables.items() if v.role == "treatment"), None)
         outcome = next((n for n, v in model.variables.items() if v.role == "outcome"), None)

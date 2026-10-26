@@ -3,7 +3,7 @@
 The paper's sources live in their own repository (`janez87/Causal4j`, built as `main.tex`, the
 landscape version, `full_version.tex` and `technical.tex`). Every number, table and figure in its
 evaluation comes from **one benchmark run of this repository**, turned into LaTeX by
-`bench/py/causal4j_bench/results_to_tex.py`. This folder says how to rerun it. The code itself is
+`bench/py/ydbms_bench/results_to_tex.py`. This folder says how to rerun it. The code itself is
 the rest of this repository: `plugin/` (the DBMS extension), `dsl/` and `bench/` (datasets,
 harness, scripts). [`bench/README.md`](../bench/README.md) maps every table, figure and `\macro`
 of the paper to the script and the run files that produce it.
@@ -48,13 +48,13 @@ are not in this repository; `results_to_tex` needs only the assembled run (397 M
 git checkout bench-final
 
 # 1. Python environment (bench/README.md)
-mamba create -n causal4j-bench -c conda-forge python=3.11 r-base r-dagitty rpy2 pgmpy networkx numpy pytest
-mamba activate causal4j-bench
+mamba create -n ydbms-bench -c conda-forge python=3.11 r-base r-dagitty rpy2 pgmpy networkx numpy pytest
+mamba activate ydbms-bench
 pip install -e 'bench/py[r,test,plots,external]'
 
 # 2. Inputs: the gitignored edge lists (workloads and reference answers are committed)
-causal4j-bench fetch
-causal4j-bench synth
+ydbms-bench fetch
+ydbms-bench synth
 
 # 3. Checks: every test (about 40 min), then the benchmark pipeline end to end (< 5 min)
 mvn test
@@ -81,5 +81,5 @@ contains.
 To regenerate the tables from the measured run without rerunning anything:
 
 ```bash
-python -m causal4j_bench.results_to_tex 20261022T211009Z-5c77f7c-final --paper-dir <paper checkout>
+python -m ydbms_bench.results_to_tex 20261022T211009Z-5c77f7c-final --paper-dir <paper checkout>
 ```

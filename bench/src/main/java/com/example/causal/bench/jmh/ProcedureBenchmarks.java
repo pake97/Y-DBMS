@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Tier (a) operators through the Causal4j procedures (CALL causal.* / causal.hasDirectedPath)
+ * Tier (a) operators through the Y-DBMS procedures (CALL causal.* / causal.hasDirectedPath)
  * on the same embedded instance and workload as CypherBenchmarks: each query pays parsing,
  * planning, a transaction and result materialization, like the Cypher and GDS baselines.
  * Results are exhausted. Same 60 s transaction timeout as the baselines.

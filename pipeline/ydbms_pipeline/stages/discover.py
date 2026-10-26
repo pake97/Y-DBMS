@@ -9,7 +9,7 @@ Adapters over causal-learn, registered in the DISCOVERY registry:
 
 All adapters return a :class:`CausalModel` whose ``undirected`` set holds the
 edges the algorithm could not orient — the resolve stage deals with those.
-causal-learn is an optional dependency (``pip install causal4j-pipeline[discovery]``);
+causal-learn is an optional dependency (``pip install ydbms-pipeline[discovery]``);
 imports are lazy so the rest of the tool works without it.
 """
 
@@ -20,9 +20,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from causal4j_pipeline.config import KnowledgeSection
-from causal4j_pipeline.model import CausalModel
-from causal4j_pipeline.registry import DISCOVERY
+from ydbms_pipeline.config import KnowledgeSection
+from ydbms_pipeline.model import CausalModel
+from ydbms_pipeline.registry import DISCOVERY
 
 
 class DiscoveryUnavailable(ImportError):
@@ -34,7 +34,7 @@ def _require_causallearn():
         import causallearn  # noqa: F401
     except ImportError as e:
         raise DiscoveryUnavailable(
-            "Discovery requires causal-learn: pip install causal4j-pipeline[discovery]"
+            "Discovery requires causal-learn: pip install ydbms-pipeline[discovery]"
         ) from e
 
 

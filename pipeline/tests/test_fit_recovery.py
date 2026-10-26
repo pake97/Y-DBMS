@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from causal4j_pipeline.model import CausalModel
-from causal4j_pipeline.stages.fit import fit_sem
+from ydbms_pipeline.model import CausalModel
+from ydbms_pipeline.stages.fit import fit_sem
 
 N = 50_000
 SEED = 7

@@ -1,7 +1,7 @@
 # Mode A: no DAG — discover the structure from data with PC, orient what the
 # algorithm can't with background knowledge, fit, refute, emit.
 #
-#   causal4j-pipeline run examples/discovery.yaml --dry-run
+#   ydbms-pipeline run examples/discovery.yaml --dry-run
 run:
   name: discovery_demo
   seed: 42
@@ -11,7 +11,7 @@ data:
     treatment_col: treatment
     outcome_col: outcome
 discovery:
-  algorithm: pc                    # pc | ges | lingam (causal4j-pipeline registry)
+  algorithm: pc                    # pc | ges | lingam (ydbms-pipeline registry)
   params:
     alpha: 0.05
     indep_test: fisherz
