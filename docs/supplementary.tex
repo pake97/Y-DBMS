@@ -1,0 +1,91 @@
+%% Supplementary material for the DEFT paper
+%% "Causal Models as Database Objects: The Case for a Causal DBMS".
+%% Compile from this folder with XeLaTeX or LuaLaTeX:
+%%   cd docs && latexmk -xelatex supplementary.tex
+%% Listings are read from the repository root (inputpath=..).
+\documentclass[a4paper,11pt]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{fontspec}
+\IfFontExistsTF{Menlo}{\setmonofont{Menlo}[Scale=0.85]}{\setmonofont{DejaVu Sans Mono}[Scale=0.85]}
+\usepackage{listings,xcolor}
+\usepackage{booktabs,array}
+\usepackage[hidelinks]{hyperref}
+
+\lstdefinelanguage{causal}{
+  morekeywords={DEFINE,CAUSAL,VARIABLE,DAG,MODEL,FOR,UNIT,OBSERVED,AS,TYPE,ROLE,MEAN,NOISE,WEIGHT,
+    CAUSES,EFFECTS,OF,ANCESTORS,DESCENDANTS,MEDIATORS,COLLIDERS,CONFOUNDERS,BETWEEN,AND,BACKDOOR,PATHS,
+    IDENTIFY,EFFECT,ON,RETURN,ADJUSTMENT,SETS,ESTIMATE,USING,INTERVENE,COMPARE,TO,FROM,DISTRIBUTION,
+    EXPECTATION,COUNTERFACTUAL,USE,RESET,SHOW,MODELS,DESCRIBE},
+  sensitive=true, morecomment=[l]{//}, morecomment=[s]{/*}{*/}, morestring=[b]"}
+\lstset{basicstyle=\ttfamily, keywordstyle=\color{blue!60!black}\bfseries,
+  commentstyle=\color{gray}, stringstyle=\color{red!50!black},
+  breaklines=true, frame=single, columns=fullflexible,
+  literate={→}{{$\rightarrow$}}1 {≠}{{$\neq$}}1 {⊥}{{$\perp$}}1,
+  inputpath=..}
+
+\title{Supplementary Material for ``Causal Models as Database Objects:\\
+The Case for a Causal DBMS''}
+\author{Amedeo Pachera, Kirollos Nayrouz, Angela Bonifati, Andrea Mauri\\[2pt]
+\normalsize CNRS LIRIS, Universit\'e Claude Bernard Lyon 1, Lyon, France}
+\date{}
+
+\begin{document}
+\maketitle
+
+\noindent This document complements the paper ``Causal Models as Database
+Objects: The Case for a Causal DBMS''. It presents the declarative causal
+query language that we propose for a Y-DBMS, whose statements compile to the
+procedures of Section~IV of the paper. Section~\ref{sec:grammar} gives the
+grammar of the language, Section~\ref{sec:example} shows it on the running
+example of the paper, and Section~\ref{sec:dag} lists the variables and the
+edges of that example. The code of the prototype, of the language, and of the
+experiments is available at \url{https://github.com/pake97/Y-DBMS}.
+
+\section{Grammar}\label{sec:grammar}
+\lstinputlisting{dsl/src/main/antlr4/com/example/causal/dsl/parser/CausalDSL.g4}
+
+\section{Example}\label{sec:example}
+\lstinputlisting[language=causal]{dev/example.causal}
+
+\section{The running example}\label{sec:dag}
+
+Table~\ref{tab:dag} lists the $22$ variables of the policy-making DAG of
+Fig.~2 of the paper, the organization that holds each of them, and their
+parents, which give the $37$ edges of the DAG. Latent variables are held by
+no organization. The treatment of the policy question is
+\textit{energy\_subsidy} and the outcome is \textit{loan\_defaults}.
+
+\begin{table}[h]\centering\small
+\caption{Variables of the policy-making DAG, with their holder and their parents.}
+\label{tab:dag}
+\begin{tabular}{@{}l >{\raggedright\arraybackslash}p{0.2\linewidth} >{\raggedright\arraybackslash}p{0.42\linewidth}@{}}
+\toprule
+Variable & Holder & Parents \\
+\midrule
+\textit{regional\_unemployment} & statistics office & -- \\
+\textit{household\_size} & statistics office & -- \\
+\textit{urbanicity} & statistics office & -- \\
+\textit{job\_loss} & employment and social services & \textit{regional\_unemployment}, \textit{local\_economic\_shock}, \textit{health\_shock} \\
+\textit{employment\_status} & employment and social services & \textit{job\_loss} \\
+\textit{benefit\_uptake} & employment and social services & \textit{household\_size}, \textit{financial\_literacy} \\
+\textit{household\_income} & tax office & \textit{employment\_status} \\
+\textit{eligibility\_rule} & policy authority & -- \\
+\textit{energy\_subsidy} ($T$) & policy authority & \textit{eligibility\_rule}, \textit{energy\_price}, \textit{household\_income}, \textit{benefit\_uptake} \\
+\textit{energy\_price} & energy providers & -- \\
+\textit{energy\_consumption} & energy providers & \textit{household\_size}, \textit{urbanicity}, \textit{energy\_price} \\
+\textit{energy\_arrears} & energy providers & \textit{energy\_consumption}, \textit{energy\_price}, \textit{energy\_subsidy} \\
+\textit{credit\_access} & banks & \textit{urbanicity}, \textit{energy\_arrears} \\
+\textit{consumer\_credit} & banks & \textit{credit\_access}, \textit{household\_income}, \textit{energy\_subsidy}, \textit{informal\_income} \\
+\textit{savings\_buffer} & banks & \textit{household\_income}, \textit{financial\_literacy} \\
+\textit{loan\_defaults} ($Y$) & banks & \textit{consumer\_credit}, \textit{savings\_buffer}, \textit{energy\_arrears}, \textit{household\_income}, \textit{regional\_unemployment}, \textit{insurance\_coverage}, \textit{health\_shock}, \textit{local\_economic\_shock}, \textit{informal\_income} \\
+\textit{insurance\_coverage} & insurers & \textit{financial\_literacy} \\
+\textit{insurance\_claims} & insurers & \textit{health\_shock}, \textit{insurance\_coverage} \\
+\textit{health\_shock} & health service & -- \\
+\textit{local\_economic\_shock} & latent & -- \\
+\textit{financial\_literacy} & latent & -- \\
+\textit{informal\_income} & latent & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}
