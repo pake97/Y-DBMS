@@ -66,7 +66,7 @@ final class StructuralEvaluator {
      * {@code causal.adjustmentSets} calls: both backends give the same sets, method text and
      * explanation.
      *
-     * <p>This reaches past {@code com.example.causal.api} into the plugin's runtime (CLAUDE.md
+     * <p>This reaches past {@code com.example.causal.api} into the plugin's runtime (the project rule
      * keeps the DSL on the api); it is the in-memory backend only, and sharing the algorithm is
      * what keeps the two backends from disagreeing.
      *

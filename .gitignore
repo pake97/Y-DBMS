@@ -27,3 +27,6 @@ _incoming/
 _to_delete/
 # the paper lives in its own repository (janez87/Causal4j)
 paper/
+CLAUDE.md
+CODE-PLAN.md
+plans/
