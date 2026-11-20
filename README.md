@@ -424,3 +424,9 @@ results back through this DSL. Parameters are supplied via `WEIGHT` / `MEAN` / `
 - Districts / c-components (ADMG / latent projection), spouse sets,
   path-pattern signature caches. Only needed if d-separation is implemented
   via the moral graph or the DSL grows an ADMG layer.
+
+## License
+
+Y-DBMS is released under the [GNU Affero General Public License v3.0](LICENSE)
+(`AGPL-3.0-only`). A commercial license is available for uses that cannot comply
+with the AGPL; see [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md).

@@ -30,3 +30,11 @@ paper/
 CLAUDE.md
 CODE-PLAN.md
 plans/
+
+# LaTeX build files of the supplementary material (keep .tex and .pdf)
+docs/*.aux
+docs/*.fdb_latexmk
+docs/*.fls
+docs/*.log
+docs/*.out
+docs/*.xdv
